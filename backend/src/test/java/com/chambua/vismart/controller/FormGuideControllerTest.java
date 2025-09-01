@@ -57,6 +57,17 @@ class FormGuideControllerTest {
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].teamName").exists())
-                .andExpect(jsonPath("$[0].bttsPct").isNumber());
+                .andExpect(jsonPath("$[0].bttsPct").isNumber())
+                .andExpect(jsonPath("$[0].over35Pct").isNumber());
+    }
+
+    @Test
+    void endpointAcceptsLimitAll() throws Exception {
+        mockMvc.perform(get("/api/form-guide/" + leagueId)
+                        .param("limit", "all")
+                        .param("scope", "overall")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].teamName").exists());
     }
 }

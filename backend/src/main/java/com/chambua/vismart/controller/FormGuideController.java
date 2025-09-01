@@ -19,13 +19,23 @@ public class FormGuideController {
 
     @GetMapping("/{leagueId}")
     public List<FormGuideRowDTO> getFormGuide(@PathVariable Long leagueId,
-                                              @RequestParam(name = "limit", defaultValue = "6") int limit,
+                                              @RequestParam(name = "limit", defaultValue = "6") String limitParam,
                                               @RequestParam(name = "scope", defaultValue = "overall") String scope) {
         FormGuideService.Scope s = switch (scope.toLowerCase()) {
             case "home" -> FormGuideService.Scope.HOME;
             case "away" -> FormGuideService.Scope.AWAY;
             default -> FormGuideService.Scope.OVERALL;
         };
+        int limit;
+        if ("all".equalsIgnoreCase(limitParam)) {
+            limit = Integer.MAX_VALUE; // effectively include all matches
+        } else {
+            try {
+                limit = Integer.parseInt(limitParam);
+            } catch (NumberFormatException ex) {
+                limit = 6;
+            }
+        }
         return formGuideService.compute(leagueId, limit, s);
     }
 }

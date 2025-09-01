@@ -66,7 +66,7 @@ public class FormGuideService {
             List<Row> lastN = list.stream().limit(limit).collect(Collectors.toList());
             if (lastN.isEmpty()) continue;
 
-            int w=0,d=0,l=0,gf=0,ga=0,pts=0,btts=0,ov15=0,ov25=0;
+            int w=0,d=0,l=0,gf=0,ga=0,pts=0,btts=0,ov15=0,ov25=0,ov35=0;
             List<String> seq = new ArrayList<>();
             for (Row row : lastN) {
                 gf += row.gf; ga += row.ga;
@@ -77,14 +77,16 @@ public class FormGuideService {
                 if (row.gf > 0 && row.ga > 0) btts++;
                 if (total >= 2) ov15++;
                 if (total >= 3) ov25++;
+                if (total >= 4) ov35++;
             }
             double ppg = pts / (double) lastN.size();
             int bttsPct = (int) Math.round((btts * 100.0) / lastN.size());
             int over15Pct = (int) Math.round((ov15 * 100.0) / lastN.size());
             int over25Pct = (int) Math.round((ov25 * 100.0) / lastN.size());
+            int over35Pct = (int) Math.round((ov35 * 100.0) / lastN.size());
 
             Row first = lastN.get(0);
-            result.add(new FormGuideRowDTO(first.teamId, first.teamName, w, d, l, gf, ga, pts, round2(ppg), seq, bttsPct, over15Pct, over25Pct));
+            result.add(new FormGuideRowDTO(first.teamId, first.teamName, w, d, l, gf, ga, pts, round2(ppg), seq, bttsPct, over15Pct, over25Pct, over35Pct));
         }
 
         // sort by points desc, gd desc, gf desc, then name

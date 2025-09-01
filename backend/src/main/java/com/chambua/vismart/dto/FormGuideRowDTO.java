@@ -17,11 +17,12 @@ public class FormGuideRowDTO {
     private int bttsPct; // 0-100
     private int over15Pct; // 0-100
     private int over25Pct; // 0-100
+    private int over35Pct; // 0-100
 
     public FormGuideRowDTO() {}
 
     public FormGuideRowDTO(Long teamId, String teamName, int w, int d, int l, int gf, int ga, int pts,
-                           double ppg, List<String> lastResults, int bttsPct, int over15Pct, int over25Pct) {
+                           double ppg, List<String> lastResults, int bttsPct, int over15Pct, int over25Pct, int over35Pct) {
         this.teamId = teamId;
         this.teamName = teamName;
         this.w = w;
@@ -36,6 +37,7 @@ public class FormGuideRowDTO {
         this.bttsPct = bttsPct;
         this.over15Pct = over15Pct;
         this.over25Pct = over25Pct;
+        this.over35Pct = over35Pct;
     }
 
     public Long getTeamId() { return teamId; }
@@ -52,6 +54,7 @@ public class FormGuideRowDTO {
     public int getBttsPct() { return bttsPct; }
     public int getOver15Pct() { return over15Pct; }
     public int getOver25Pct() { return over25Pct; }
+    public int getOver35Pct() { return over35Pct; }
 
     public void setTeamId(Long teamId) { this.teamId = teamId; }
     public void setTeamName(String teamName) { this.teamName = teamName; }
@@ -66,4 +69,5 @@ public class FormGuideRowDTO {
     public void setBttsPct(int bttsPct) { this.bttsPct = bttsPct; }
     public void setOver15Pct(int over15Pct) { this.over15Pct = over15Pct; }
     public void setOver25Pct(int over25Pct) { this.over25Pct = over25Pct; }
+    public void setOver35Pct(int over35Pct) { this.over35Pct = over35Pct; }
 }
