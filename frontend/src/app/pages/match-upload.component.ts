@@ -2,6 +2,8 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatchUploadService } from '../services/match-upload.service';
+import { LeagueService, LeagueDto } from '../services/league.service';
+import { HttpClient } from '@angular/common/http';
 
 @Component({
   selector: 'app-match-upload',
@@ -14,6 +16,7 @@ import { MatchUploadService } from '../services/match-upload.service';
       <div class="tabs mb-4">
         <button (click)="activeTab='csv'" [class.active]="activeTab==='csv'">CSV Upload</button>
         <button (click)="activeTab='text'" [class.active]="activeTab==='text'">Raw Text Upload</button>
+        <button (click)="activeTab='fixtures'" [class.active]="activeTab==='fixtures'">Fixtures Upload</button>
       </div>
 
       <div class="card">
@@ -62,6 +65,49 @@ Nublense
         <button (click)="uploadText()" [disabled]="!text.trim()">Upload Text</button>
       </div>
 
+      <!-- Fixtures Upload Tab -->
+      <div *ngIf="activeTab==='fixtures'" class="card">
+        <h2>Fixtures Upload</h2>
+        <div class="grid">
+          <label>
+            League
+            <select [(ngModel)]="fixturesLeagueId" (ngModelChange)="onFixturesLeagueChange()">
+              <option [ngValue]="null">Select a league...</option>
+              <option *ngFor="let l of fixturesLeagues" [ngValue]="l.id">{{l.name}} ({{l.season}})</option>
+            </select>
+          </label>
+          <label>
+            Season
+            <input [(ngModel)]="fixturesSeason" placeholder="e.g., 2024/2025"/>
+          </label>
+          <label style="grid-column: 1 / -1;">
+            <input type="checkbox" [(ngModel)]="fullReplace"/> Full replace existing fixtures
+          </label>
+        </div>
+
+        <p class="hint" style="margin-top:8px;">Paste raw fixtures in blocks. Example:</p>
+        <pre class="hint" style="white-space: pre-wrap; background:#f8fafc; padding:8px; border-radius:6px; border:1px solid #e5e7eb;">
+Round 29
+01.09. 20:00
+Agropecuario
+Agropecuario
+Almirante Brown
+Almirante Brown
+-
+-
+
+01.09. 23:10
+Nueva Chicago
+Nueva Chicago
+Gimnasia Mendoza
+Gimnasia Mendoza
+-
+-
+        </pre>
+        <textarea [(ngModel)]="fixturesRawText" rows="12" placeholder="Paste raw fixtures text here..."></textarea>
+        <button (click)="uploadFixtures()" [disabled]="!fixturesLeagueId || !fixturesSeason.trim() || !fixturesRawText.trim()">Upload Fixtures</button>
+      </div>
+
       <div *ngIf="message" class="alert" [class.success]="success" [class.error]="!success">
         {{message}}
       </div>
@@ -88,11 +134,17 @@ Nublense
   `]
 })
 export class MatchUploadComponent {
-  activeTab: 'csv' | 'text' = 'csv';
+  activeTab: 'csv' | 'text' | 'fixtures' = 'csv';
   leagueName = '';
   country = '';
   season = '';
   fullReplace = true;
+
+  // Fixtures upload state
+  fixturesLeagueId: number | null = null;
+  fixturesSeason: string = '';
+  fixturesRawText: string = '';
+  fixturesLeagues: { id: number; name: string; season: string; }[] = [];
 
   file?: File;
   text = '';
@@ -101,13 +153,23 @@ export class MatchUploadComponent {
   success = false;
   errors: string[] = [];
 
-  constructor(private api: MatchUploadService) {}
+  constructor(private api: MatchUploadService, private leagueApi: LeagueService, private http: HttpClient) {
+    // load leagues for fixtures tab
+    this.leagueApi.getLeagues().subscribe(ls => {
+      this.fixturesLeagues = ls.map(l => ({ id: l.id, name: `${l.name} (${l.country})`, season: l.season }));
+    });
+  }
 
   onFile(ev: Event){
     const input = ev.target as HTMLInputElement;
     if (input.files && input.files.length){
       this.file = input.files[0];
     }
+  }
+
+  onFixturesLeagueChange(){
+    const l = this.fixturesLeagues.find(x => x.id === this.fixturesLeagueId);
+    if (l) this.fixturesSeason = l.season;
   }
 
   uploadCsv(){
@@ -125,6 +187,31 @@ export class MatchUploadComponent {
     if (!this.validateMeta()) return;
     this.api.uploadText(this.leagueName, this.country, this.season, this.text, this.fullReplace).subscribe({
       next: res => this.handleResult(res),
+      error: err => this.handleHttpError(err)
+    });
+  }
+
+  uploadFixtures(){
+    this.resetFeedback();
+    if (!this.fixturesLeagueId || !this.fixturesSeason.trim() || !this.fixturesRawText.trim()){
+      this.success = false; this.message = 'Please select a league, provide season and paste fixtures text.'; return;
+    }
+    const payload = {
+      leagueId: this.fixturesLeagueId,
+      season: this.fixturesSeason,
+      fullReplace: this.fullReplace,
+      rawText: this.fixturesRawText
+    };
+    this.http.post<any>('/api/fixtures/upload', payload).subscribe({
+      next: res => {
+        this.handleResult(res);
+        if (res?.success){
+          // Clear textarea on success
+          this.fixturesRawText = '';
+          // Show specific success message as toast-equivalent
+          this.message = res.message || `Fixtures uploaded successfully.`;
+        }
+      },
       error: err => this.handleHttpError(err)
     });
   }

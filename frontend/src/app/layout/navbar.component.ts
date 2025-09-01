@@ -35,6 +35,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
           <a routerLink="/advice" routerLinkActive="active">Advice</a>
           <a routerLink="/wekelea-baskets" routerLinkActive="active">Wekelea Baskets</a>
           <a routerLink="/team-search" routerLinkActive="active">Team Search</a>
+          <a routerLink="/fixtures" routerLinkActive="active">Fixtures</a>
           <a routerLink="/form-guide" routerLinkActive="active">Form Guide</a>
         </div>
       </div>
