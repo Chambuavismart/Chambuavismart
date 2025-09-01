@@ -15,3 +15,9 @@ backend/mvnw*
 # OS
 .DS_Store
 Thumbs.db
+
+# Angular cache
+frontend/.angular/
+frontend/.angular/cache/
+# Sometimes Angular leaves pack files
+*.pack.old
