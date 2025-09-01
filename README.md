@@ -11,15 +11,17 @@ Backend
 - Flyway migration: V1__init.sql creates base tables
 
 Run backend
-Option A: Using Docker (recommended for quick start)
-- docker compose up -d
-- Wait until the mysql container is healthy (about ~30s). Schemas will be auto-created: chambua_dev, chambua_test, chambua_prod
+Option A: Using Docker Compose (recommended for quick start)
+- docker compose up -d --build
+- Services: mysql (3306), backend (8082), frontend (http://localhost:8080)
+- Wait until mysql is healthy (about ~30s). Schemas will be auto-created: chambua_dev, chambua_test, chambua_prod. Backend will run Flyway migrations automatically and seed minimal dev data.
 
 Option B: Local MySQL
 1) Create MySQL schemas locally: chambua_dev, chambua_test, chambua_prod
-2) Set env vars or edit backend/src/main/resources/application.yml
-   - DB_USERNAME (default root)
-   - DB_PASSWORD (default password)
+2) Edit backend/src/main/resources/application.yml or set env vars:
+   - SPRING_DATASOURCE_URL (default jdbc:mysql://localhost:3306/chambua_dev?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC)
+   - SPRING_DATASOURCE_USERNAME (default root)
+   - SPRING_DATASOURCE_PASSWORD (default password)
 3) Build and run:
    - mvn -f backend/pom.xml clean package
    - java -jar backend/target/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev
@@ -28,7 +30,8 @@ Health check: http://localhost:8082/api/health
 
 Frontend
 - Dev server runs at http://localhost:4200
-- Proxy: /api -> http://localhost:8082
+- Proxy (dev): /api -> http://localhost:8082 (see frontend/proxy.conf.json)
+- Docker (prod-like): Served via Nginx at http://localhost:8080 and proxies /api to backend container
 
 Run frontend
 1) cd frontend

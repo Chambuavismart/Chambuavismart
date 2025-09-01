@@ -1,0 +1,117 @@
+<!-- HERO SECTION -->
+<section class="hero">
+  <div class="hero-backdrop"></div>
+  <div class="hero-content">
+    <div class="hero-logo">
+      <!-- If the asset is missing, this inline SVG serves as a visual fallback. -->
+      <svg width="140" height="40" viewBox="0 0 140 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="2" y="8" width="32" height="24" rx="4" fill="#113a2b" stroke="#19b562"/>
+        <circle cx="18" cy="20" r="7" fill="#19b562"/>
+        <circle cx="18" cy="20" r="4" fill="#0b1220"/>
+        <text x="42" y="25" fill="#e6eef8" font-size="16" font-weight="700">ChambuaViSmart</text>
+      </svg>
+    </div>
+    <h1>Smart Football Analysis Powered by Data</h1>
+    <div class="hero-actions">
+      <a routerLink="/match-analysis" class="btn primary">Analyze a Match</a>
+      <a routerLink="/history" class="btn secondary">View Match Analysis History</a>
+    </div>
+  </div>
+</section>
+
+<!-- TODAY'S FIXTURES -->
+<section class="today">
+  <div class="panel">
+    <h2>Today's Fixtures — {{ formattedDate }}</h2>
+    <p class="muted">No fixtures available for today. Please load fixtures to continue.</p>
+  </div>
+</section>
+
+<!-- WHY CHOOSE -->
+<section class="why">
+  <h3 class="why-title">Why Choose ChambuaViSmart?</h3>
+  <div class="why-grid">
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-stats"></span></div>
+      <h4>Match Analysis</h4>
+      <p>Dive into detailed insights with team metrics and contextual factors.</p>
+      <a routerLink="/match-analysis" class="learn">Learn More →</a>
+    </div>
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-clock"></span></div>
+      <h4>Match Analysis History</h4>
+      <p>Review past match analyses and analyze trends.</p>
+      <a routerLink="/history" class="learn">Learn More →</a>
+    </div>
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-database"></span></div>
+      <h4>Data Management</h4>
+      <p>Easily upload fixtures and league data.</p>
+      <a routerLink="/data-management" class="learn">Learn More →</a>
+    </div>
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-bulb"></span></div>
+      <h4>Advice</h4>
+      <p>Get tailored betting recommendations based on analysis.</p>
+      <a routerLink="/advice" class="learn">Learn More →</a>
+    </div>
+  </div>
+</section>
+
+<!-- TRACK RECORD STRIP -->
+<section class="track">
+  <div class="track-inner">
+    <div class="metric">
+      <div class="value">{{ stats.matchesAnalyzed }}</div>
+      <div class="label">Matches Analyzed</div>
+    </div>
+    <div class="metric">
+      <div class="value">{{ stats.avgConfidence }}%</div>
+      <div class="label">Average
+        Confidence</div>
+    </div>
+    <div class="metric">
+      <div class="value">{{ stats.fixturesUploaded }}</div>
+      <div class="label">Fixtures Uploaded</div>
+    </div>
+  </div>
+</section>
+
+<!-- DEEP LINKS FOOTER-STYLE -->
+<section class="sitelinks">
+  <div class="links-grid">
+    <a routerLink="/">Home</a>
+    <a routerLink="/match-analysis">Match Analysis</a>
+    <a routerLink="/xg">Inter-League xG Comparison</a>
+    <a routerLink="/history">Match Analysis History</a>
+    <a routerLink="/fixture-predictions">Fixture Predictions</a>
+    <a routerLink="/analyzed-fixtures">Analyzed Fixtures</a>
+    <a routerLink="/btts-over25">BTTS Analysis</a>
+    <a routerLink="/btts-over25">Over 2.5 Goals Analysis</a>
+    <a routerLink="/advice">ML Match Outcome Predictor</a>
+    <a routerLink="/data-management">Data Management</a>
+    <a routerLink="/league">League Match Upload</a>
+    <a routerLink="/admin">Incremental Match Upload</a>
+    <a routerLink="/league">League Management</a>
+    <a routerLink="/admin">Upload Fixture</a>
+    <a routerLink="/advice">Advice</a>
+    <a routerLink="/wekelea-baskets">Wekelea Baskets</a>
+    <a routerLink="/league">League Table</a>
+    <a routerLink="/league">Form Table</a>
+    <a routerLink="/xg">xG Analysis History</a>
+    <a routerLink="/xg">xG Stats Summary</a>
+  </div>
+  <div class="brandline">
+    <div class="brand-mini">
+      <span class="dot"></span>
+      <span>ChambuaViSmart</span>
+    </div>
+    <div class="legal">
+      <a href="#">About</a>
+      <a href="#">Contact</a>
+      <a href="#">Privacy Policy</a>
+      <a href="#">Terms of Service</a>
+    </div>
+    <div class="copy">© {{ today.getFullYear() }} ChambuaViSmart</div>
+  </div>
+</section>
