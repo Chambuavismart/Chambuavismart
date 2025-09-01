@@ -48,6 +48,7 @@ public class MatchUploadService {
             deleted = matchRepository.deleteByLeague(league);
         }
         int inserted = 0;
+        Set<String> seenKeys = new HashSet<>();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
             String header = reader.readLine();
             if (header == null) {
@@ -92,8 +93,11 @@ public class MatchUploadService {
                     Team away = findOrCreateTeam(league, awayName);
 
                     Match m = new Match(league, home, away, date, round, homeGoals, awayGoals);
-                    matchRepository.save(m);
-                    inserted++;
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + date.toString();
+                    if (seenKeys.add(key)) {
+                        matchRepository.save(m);
+                        inserted++;
+                    }
                 } catch (Exception ex) {
                     errors.add("Row error: " + ex.getMessage() + " | line=\"" + line + "\"");
                 }
@@ -119,6 +123,7 @@ public class MatchUploadService {
             deleted = matchRepository.deleteByLeague(league);
         }
         int inserted = 0;
+        Set<String> seenKeys = new HashSet<>();
 
         int currentRound = -1;
         String[] lines = text.split("\r?\n");
@@ -167,8 +172,11 @@ public class MatchUploadService {
                     Team home = findOrCreateTeam(league, homeName);
                     Team away = findOrCreateTeam(league, awayName);
                     Match m = new Match(league, home, away, date, currentRound, homeGoals, awayGoals);
-                    matchRepository.save(m);
-                    inserted++;
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + date.toString();
+                    if (seenKeys.add(key)) {
+                        matchRepository.save(m);
+                        inserted++;
+                    }
                     continue;
                 } catch (Exception ex) {
                     // fall through to try vertical parsing and also record the error later if fails
@@ -254,8 +262,11 @@ public class MatchUploadService {
                     Team home = findOrCreateTeam(league, homeName);
                     Team away = findOrCreateTeam(league, awayName);
                     Match m = new Match(league, home, away, date, currentRound, homeGoals, awayGoals);
-                    matchRepository.save(m);
-                    inserted++;
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + date.toString();
+                    if (seenKeys.add(key)) {
+                        matchRepository.save(m);
+                        inserted++;
+                    }
                     i = j - 1; // advance index to last consumed
                     continue;
                 } catch (Exception ex) {

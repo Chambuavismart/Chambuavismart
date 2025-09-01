@@ -1,23 +1,46 @@
-# Node
-frontend/node_modules/
-frontend/dist/
-
-# Java/Maven
-backend/target/
-backend/.mvn/
-backend/mvnw*
-
-# IDEs
-*.iml
-.idea/
-.vscode/
-
-# OS
+# General
 .DS_Store
 Thumbs.db
 
-# Angular cache
-frontend/.angular/
-frontend/.angular/cache/
-# Sometimes Angular leaves pack files
-*.pack.old
+# IntelliJ IDEA / JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+.run/
+
+# VSCode
+.vscode/
+
+# Maven/Gradle
+.mvn/wrapper/maven-wrapper.jar
+.mvn/wrapper/maven-wrapper.properties
+.mvn/
+.target/
+**/target/
+**/build/
+.gradle/
+
+# Logs
+*.log
+**/logs/
+
+# Node/Angular
+node_modules/
+**/node_modules/
+.npm/
+dist/
+**/dist/
+.angular/
+
+# OS
+ehthumbs.db
+Icon?
+
+# Env
+.env
+.env.*
+
+# IDE other
+*.swp
+*.swo

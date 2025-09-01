@@ -26,6 +26,7 @@ export const routes: Routes = [
   { path: 'teams', canActivate: [authGuard], component: TeamsComponent, title: 'Teams' },
   { path: 'matchup', canActivate: [authGuard], component: MatchupAnalyzerComponent, title: 'Matchup Analyzer' },
   { path: 'league', canActivate: [authGuard], component: LeagueTableComponent, title: 'League Table' },
+  { path: 'league/:leagueId', canActivate: [authGuard], component: LeagueTableComponent, title: 'League Table' },
   { path: 'xg', canActivate: [authGuard], component: XgHistoryComponent, title: 'xG History' },
   { path: 'advice', canActivate: [authGuard], component: AdviceComponent, title: 'Advice' },
   { path: 'history', canActivate: [authGuard], component: MatchHistoryComponent, title: 'Match History' },

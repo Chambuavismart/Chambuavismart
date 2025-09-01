@@ -26,6 +26,11 @@ Option B: Local MySQL
    - mvn -f backend/pom.xml clean package
    - java -jar backend/target/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev
 
+Option C: Run without IDE plugins (Maven directly)
+- Windows: double-click backend/run-backend.bat (or run it in a terminal)
+- Equivalent command: mvn -f backend/pom.xml spring-boot:run
+- This avoids relying on any IDE Spring Boot plugin; only Maven is required on PATH
+
 Health check: http://localhost:8082/api/health
 
 Frontend
