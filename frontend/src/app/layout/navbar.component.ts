@@ -52,4 +52,6 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
     }
   `]
 })
-export class NavbarComponent { open = false; }
+export class NavbarComponent { 
+  open = false;
+}
