@@ -18,6 +18,7 @@ export const routes: Routes = [
   { path: 'fixture-predictions', canActivate: [authGuard], loadComponent: () => import('./pages/fixture-predictions.component').then(m => m.FixturePredictionsComponent), title: 'Fixture Predictions' },
   { path: 'analyzed-fixtures', canActivate: [authGuard], loadComponent: () => import('./pages/analyzed-fixtures.component').then(m => m.AnalyzedFixturesComponent), title: 'Analyzed Fixtures' },
   { path: 'data-management', canActivate: [authGuard], loadComponent: () => import('./pages/data-management.component').then(m => m.DataManagementComponent), title: 'Data Management' },
+  { path: 'data-management/match-upload', canActivate: [authGuard], loadComponent: () => import('./pages/match-upload.component').then(m => m.MatchUploadComponent), title: 'Match Upload' },
   { path: 'btts-over25', canActivate: [authGuard], loadComponent: () => import('./pages/btts-over25.component').then(m => m.BttsOver25Component), title: 'BTTS & Over 2.5' },
   { path: 'wekelea-baskets', canActivate: [authGuard], loadComponent: () => import('./pages/wekelea-baskets.component').then(m => m.WekeleaBasketsComponent), title: 'Wekelea Baskets' },
   { path: 'team-search', canActivate: [authGuard], loadComponent: () => import('./pages/team-search.component').then(m => m.TeamSearchComponent), title: 'Team Search' },

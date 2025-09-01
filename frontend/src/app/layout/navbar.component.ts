@@ -9,7 +9,16 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
     <nav class="topnav">
       <div class="nav-inner">
         <a class="brand" routerLink="/">
-          <img src="assets/design/logo.png" alt="ChambuaViSmart" class="logo" />
+          <svg class="logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+                <stop offset="0%" stop-color="#19b562"/>
+                <stop offset="100%" stop-color="#0ea5e9"/>
+              </linearGradient>
+            </defs>
+            <circle cx="16" cy="16" r="14" fill="url(#g)"/>
+            <path d="M10 17l4 4 8-8" fill="none" stroke="#04110a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
           <span class="brand-text">ChambuaViSmart</span>
         </a>
         <button class="burger" (click)="open = !open" aria-label="Toggle navigation">

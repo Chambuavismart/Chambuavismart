@@ -19,7 +19,9 @@ spring:
         format_sql: true
     show-sql: false
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration/match_upload
+    baseline-on-migrate: true
 
 # Profiles
 ---
@@ -37,8 +39,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
   flyway:
-    enabled: false
-    locations: classpath:db/migration
+    enabled: true
+    locations: classpath:db/migration/match_upload
     baseline-on-migrate: true
 
 ---
@@ -56,8 +58,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
   flyway:
-    enabled: false
-    locations: classpath:db/migration
+    enabled: true
+    locations: classpath:db/migration/match_upload
     baseline-on-migrate: true
 
 ---
@@ -75,6 +77,6 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
   flyway:
-    enabled: false
-    locations: classpath:db/migration
+    enabled: true
+    locations: classpath:db/migration/match_upload
     baseline-on-migrate: true
