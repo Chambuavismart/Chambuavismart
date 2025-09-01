@@ -9,54 +9,63 @@ import { LeagueService, LeagueTableEntryDTO, League } from '../services/league.s
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="p-4">
-      <h1 class="text-2xl font-bold mb-4">League Table</h1>
+    <div class="theme-container">
+      <h1 class="page-title">League Table</h1>
 
-      <div class="mb-4 flex items-center gap-2">
-        <label for="leagueSelect" class="font-medium">Select League:</label>
-        <select id="leagueSelect" class="border rounded px-2 py-1" [ngModel]="selectedLeagueId" (ngModelChange)="onLeagueChange($event)">
+      <div class="panel" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+        <label for="leagueSelect" class="label">Select League:</label>
+        <select id="leagueSelect" class="select" [ngModel]="selectedLeagueId" (ngModelChange)="onLeagueChange($event)">
           <option [ngValue]="null">-- Choose a league --</option>
           <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.name }} ({{ lg.country }} {{ lg.season }})</option>
         </select>
+        <span class="muted" *ngIf="!selectedLeagueId">Choose a league to view standings.</span>
       </div>
 
-      <div *ngIf="loading" class="text-gray-500">Loading...</div>
-      <div *ngIf="error" class="text-red-600">{{ error }}</div>
-      <div *ngIf="!loading && table?.length === 0 && selectedLeagueId" class="text-gray-500">No data.</div>
-      <div class="overflow-x-auto" *ngIf="!loading && table?.length">
-        <table class="min-w-full border border-gray-200 shadow-sm">
-          <thead class="bg-gray-100">
-            <tr>
-              <th class="px-3 py-2 text-left">Pos</th>
-              <th class="px-3 py-2 text-left">Team</th>
-              <th class="px-3 py-2">MP</th>
-              <th class="px-3 py-2">W</th>
-              <th class="px-3 py-2">D</th>
-              <th class="px-3 py-2">L</th>
-              <th class="px-3 py-2">GF</th>
-              <th class="px-3 py-2">GA</th>
-              <th class="px-3 py-2">GD</th>
-              <th class="px-3 py-2">Pts</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let row of table" class="border-t">
-              <td class="px-3 py-2">{{ row.position }}</td>
-              <td class="px-3 py-2 font-medium">{{ row.teamName }}</td>
-              <td class="px-3 py-2 text-center">{{ row.mp }}</td>
-              <td class="px-3 py-2 text-center">{{ row.w }}</td>
-              <td class="px-3 py-2 text-center">{{ row.d }}</td>
-              <td class="px-3 py-2 text-center">{{ row.l }}</td>
-              <td class="px-3 py-2 text-center">{{ row.gf }}</td>
-              <td class="px-3 py-2 text-center">{{ row.ga }}</td>
-              <td class="px-3 py-2 text-center">{{ row.gd }}</td>
-              <td class="px-3 py-2 text-center font-semibold">{{ row.pts }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div *ngIf="loading" class="muted theme-container" style="padding-left:0">Loading...</div>
+      <div *ngIf="error" class="banner" style="max-width:1100px">{{ error }}</div>
+      <div *ngIf="!loading && table?.length === 0 && selectedLeagueId" class="muted">No data.</div>
+
+      <div class="panel" *ngIf="!loading && table?.length">
+        <div style="overflow-x:auto;">
+          <table class="table league-table">
+            <thead>
+              <tr>
+                <th style="width:48px;" class="center">Pos</th>
+                <th>Team</th>
+                <th class="center" style="width:56px;">MP</th>
+                <th class="center" style="width:44px;">W</th>
+                <th class="center" style="width:44px;">D</th>
+                <th class="center" style="width:44px;">L</th>
+                <th class="center" style="width:44px;">GF</th>
+                <th class="center" style="width:44px;">GA</th>
+                <th class="center" style="width:44px;">GD</th>
+                <th class="center" style="width:56px;">Pts</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of table">
+                <td class="center">{{ row.position }}</td>
+                <td><a href="javascript:void(0)">{{ row.teamName }}</a></td>
+                <td class="center">{{ row.mp }}</td>
+                <td class="center">{{ row.w }}</td>
+                <td class="center">{{ row.d }}</td>
+                <td class="center">{{ row.l }}</td>
+                <td class="center">{{ row.gf }}</td>
+                <td class="center">{{ row.ga }}</td>
+                <td class="center">{{ row.gd }}</td>
+                <td class="center" style="font-weight:700;">{{ row.pts }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
-  `
+  `,
+  styles: [
+    `:host { display:block; }
+     .league-table tbody tr:hover { background: #fafafa; }
+    `
+  ]
 })
 export class LeagueTableComponent {
   private route = inject(ActivatedRoute);
