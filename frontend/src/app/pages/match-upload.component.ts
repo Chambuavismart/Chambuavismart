@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { MatchUploadService } from '../services/match-upload.service';
 import { LeagueService, LeagueDto } from '../services/league.service';
 import { HttpClient } from '@angular/common/http';
+import { COUNTRIES } from '../shared/countries.constant';
 
 @Component({
   selector: 'app-match-upload',
@@ -45,7 +46,15 @@ import { HttpClient } from '@angular/common/http';
             </label>
           </ng-template>
 
-          <label>Country <input [(ngModel)]="country" placeholder="e.g., England" [readonly]="updateMode==='incremental'"/></label>
+          <label>Country
+            <div class="country-select">
+              <input type="text" class="country-filter" [(ngModel)]="countryFilter" placeholder="Search country..." [disabled]="updateMode==='incremental'"/>
+              <select [(ngModel)]="country" [disabled]="updateMode==='incremental'">
+                <option value="">Select country...</option>
+                <option *ngFor="let c of filteredCountries" [value]="c">{{c}}</option>
+              </select>
+            </div>
+          </label>
           <label>Season <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="updateMode==='incremental'"/></label>
         </div>
       </div>
@@ -174,7 +183,9 @@ Gimnasia Mendoza
     .tabs button.active{background:#2563eb;color:#fff;border-color:#2563eb}
     .card{border:1px solid #e5e7eb;padding:12px;border-radius:8px;margin-bottom:12px}
     .grid{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
-    input, textarea{width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px}
+    input, textarea, select{width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px}
+    .country-select { display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .country-filter { }
     button{padding:8px 16px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer}
     .hint{color:#6b7280;font-size:12px}
     .alert{padding:10px;border-radius:6px;margin-top:12px}
@@ -189,6 +200,15 @@ export class MatchUploadComponent {
   leagueName = '';
   country = '';
   season = '';
+
+  // Country dropdown support
+  countryFilter: string = '';
+  countries: readonly string[] = COUNTRIES;
+  get filteredCountries(): readonly string[] {
+    const q = this.countryFilter?.toLowerCase().trim();
+    if (!q) return this.countries;
+    return this.countries.filter(c => c.toLowerCase().includes(q));
+  }
 
   // Derived flags maintained at call time based on updateMode
   fullReplace = true;
