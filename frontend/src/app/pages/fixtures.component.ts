@@ -74,7 +74,7 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
 
         <div *ngIf="fixtures?.length === 0" class="muted">No fixtures.</div>
         <div class="grid">
-          <div class="card" *ngFor="let f of fixtures">
+          <div class="card" *ngFor="let f of fixtures" (click)="openAnalysis(f)" style="cursor:pointer;">
             <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
             <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
             <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
@@ -86,6 +86,14 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
   `
 })
 export class FixturesComponent implements OnInit {
+  openAnalysis(f: FixtureDTO) {
+    const params = new URLSearchParams({
+      leagueId: String(this.selectedLeagueId ?? ''),
+      homeTeamName: f.homeTeam,
+      awayTeamName: f.awayTeam
+    });
+    window.location.href = `/match-analysis?${params.toString()}`;
+  }
   private api = inject(FixturesService);
 
   leagues: LeagueWithUpcomingDTO[] = [];

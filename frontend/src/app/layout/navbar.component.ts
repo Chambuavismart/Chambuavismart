@@ -26,7 +26,9 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
         </button>
         <div class="links" [class.open]="open">
           <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
+          <a routerLink="/fixtures" routerLinkActive="active">Fixtures</a>
           <a routerLink="/match-analysis" routerLinkActive="active">Match Analysis</a>
+          <a routerLink="/form-guide" routerLinkActive="active">Form Guide</a>
           <a routerLink="/history" routerLinkActive="active">History</a>
           <a routerLink="/fixture-predictions" routerLinkActive="active">Fixture Predictions</a>
           <a routerLink="/analyzed-fixtures" routerLinkActive="active">Analyzed Fixtures</a>
@@ -35,8 +37,6 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
           <a routerLink="/advice" routerLinkActive="active">Advice</a>
           <a routerLink="/wekelea-baskets" routerLinkActive="active">Wekelea Baskets</a>
           <a routerLink="/team-search" routerLinkActive="active">Team Search</a>
-          <a routerLink="/fixtures" routerLinkActive="active">Fixtures</a>
-          <a routerLink="/form-guide" routerLinkActive="active">Form Guide</a>
         </div>
       </div>
     </nav>
