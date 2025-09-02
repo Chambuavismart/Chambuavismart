@@ -50,7 +50,7 @@
               <div style="color:#64748b; margin: 4px 0 6px;">
                 {{ f?.homeScore != null && f?.awayScore != null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}
               </div>
-              <span [ngClass]="'status ' + (f.status || '')" style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#eef2f7; color:#0b3a4a;">{{ statusLabel(f) }}</span>
+              <span [ngClass]="'status ' + computeStatus(f)" style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#eef2f7; color:#0b3a4a;">{{ statusLabel(f) }}</span>
             </div>
           </div>
         </div>
@@ -101,7 +101,7 @@
               <div style="color:#64748b; margin: 4px 0 6px;">
                 {{ f?.homeScore != null && f?.awayScore != null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}
               </div>
-              <span [ngClass]="'status ' + (f.status || '')" style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#eef2f7; color:#0b3a4a;">{{ statusLabel(f) }}</span>
+              <span [ngClass]="'status ' + computeStatus(f)" style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#eef2f7; color:#0b3a4a;">{{ statusLabel(f) }}</span>
             </div>
           </div>
         </div>

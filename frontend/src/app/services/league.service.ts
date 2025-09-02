@@ -51,9 +51,19 @@ export interface FormGuideRowDTO {
 export class LeagueService {
   private http = inject(HttpClient);
 
-  // Use /api/league which returns all leagues
+  // Existing endpoint used elsewhere
   getLeagues(): Observable<LeagueDto[]> {
     return this.http.get<LeagueDto[]>(`/api/league`);
+  }
+
+  // New lightweight list for incremental dropdown
+  getAllLeagues(): Observable<Pick<LeagueDto, 'id' | 'name'>[]> {
+    return this.http.get<LeagueDto[]>(`/api/leagues/list`);
+  }
+
+  // Details for autofill in incremental mode
+  getLeagueDetails(leagueId: string | number): Observable<LeagueDto> {
+    return this.http.get<LeagueDto>(`/api/leagues/${leagueId}`);
   }
 
   // Fetch league table for a given league (optional season param)

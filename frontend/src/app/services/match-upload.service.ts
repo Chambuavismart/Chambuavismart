@@ -8,18 +8,19 @@ export class MatchUploadService {
 
   constructor(private http: HttpClient) {}
 
-  uploadCsv(leagueName: string, country: string, season: string, file: File, fullReplace = true): Observable<any> {
+  uploadCsv(leagueName: string, country: string, season: string, file: File, fullReplace = true, incrementalUpdate = false): Observable<any> {
     const form = new FormData();
     form.append('leagueName', leagueName);
     form.append('country', country);
     form.append('season', season);
     form.append('fullReplace', String(fullReplace));
+    form.append('incrementalUpdate', String(incrementalUpdate));
     form.append('file', file);
     return this.http.post(`${this.baseUrl}/csv`, form);
   }
 
-  uploadText(leagueName: string, country: string, season: string, text: string, fullReplace = true): Observable<any> {
-    const body = { leagueName, country, season, text, fullReplace };
+  uploadText(leagueName: string, country: string, season: string, text: string, fullReplace = true, incrementalUpdate = false): Observable<any> {
+    const body = { leagueName, country, season, text, fullReplace, incrementalUpdate };
     return this.http.post(`${this.baseUrl}/text`, body);
   }
 }

@@ -9,4 +9,8 @@ import java.util.List;
 public interface MatchRepository extends JpaRepository<Match, Long> {
     long deleteByLeague(League league);
     List<Match> findByLeagueId(Long leagueId);
+
+    java.util.Optional<Match> findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(Long leagueId, Integer round, Long homeTeamId, Long awayTeamId);
+
+    List<Match> findByLeagueIdAndHomeTeamIdAndAwayTeamId(Long leagueId, Long homeTeamId, Long awayTeamId);
 }

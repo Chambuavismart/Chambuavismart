@@ -20,11 +20,33 @@ import { HttpClient } from '@angular/common/http';
       </div>
 
       <div class="card">
+        <div class="mb-2">
+          <label class="mr-4">
+            <input type="radio" [(ngModel)]="updateMode" value="full" (change)="onUpdateModeChange()" />
+            Full replace existing matches
+          </label>
+          <label>
+            <input type="radio" [(ngModel)]="updateMode" value="incremental" (change)="onUpdateModeChange()" />
+            Incremental update (fill in results, keep fixtures intact)
+          </label>
+        </div>
         <div class="grid">
-          <label>League Name <input [(ngModel)]="leagueName" placeholder="e.g., Premier League"/></label>
-          <label>Country <input [(ngModel)]="country" placeholder="e.g., England"/></label>
-          <label>Season <input [(ngModel)]="season" placeholder="e.g., 2024/2025"/></label>
-          <label><input type="checkbox" [(ngModel)]="fullReplace"/> Full replace existing matches</label>
+          <!-- League field switches by updateMode -->
+          <ng-container *ngIf="updateMode === 'full'; else incrementalBlock">
+            <label>League Name <input [(ngModel)]="leagueName" placeholder="e.g., Premier League"/></label>
+          </ng-container>
+          <ng-template #incrementalBlock>
+            <label>
+              League
+              <select [(ngModel)]="selectedLeague" (change)="onLeagueSelected()">
+                <option value="">Select league...</option>
+                <option *ngFor="let league of leagues" [value]="league.id">{{ league.name }}</option>
+              </select>
+            </label>
+          </ng-template>
+
+          <label>Country <input [(ngModel)]="country" placeholder="e.g., England" [readonly]="updateMode==='incremental'"/></label>
+          <label>Season <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="updateMode==='incremental'"/></label>
         </div>
       </div>
 
@@ -112,6 +134,33 @@ Gimnasia Mendoza
         {{message}}
       </div>
 
+      <!-- Upload feedback grouped -->
+      <div *ngIf="results.updated?.length" class="card" style="border-color:#10b981">
+        <h3 style="color:#065f46">Updated</h3>
+        <table style="width:100%">
+          <tr><th>Fixture ID</th><th>Home</th><th>Away</th><th>Result</th><th>Status</th></tr>
+          <tr *ngFor="let u of results.updated">
+            <td>{{u.fixtureId}}</td>
+            <td>{{u.homeTeam}}</td>
+            <td>{{u.awayTeam}}</td>
+            <td>{{u.result}}</td>
+            <td>{{u.status}}</td>
+          </tr>
+        </table>
+      </div>
+      <div *ngIf="results.warnings?.length" class="card" style="border-color:#fb923c">
+        <h3 style="color:#b45309">Warnings</h3>
+        <ul>
+          <li *ngFor="let w of results.warnings">{{w.homeTeam}} vs {{w.awayTeam}} — {{w.reason}}</li>
+        </ul>
+      </div>
+      <div *ngIf="results.skipped?.length" class="card" style="border-color:#ef4444">
+        <h3 style="color:#991b1b">Skipped</h3>
+        <ul>
+          <li *ngFor="let s of results.skipped">{{s.homeTeam}} vs {{s.awayTeam}} — {{s.reason}}</li>
+        </ul>
+      </div>
+
       <div *ngIf="errors.length" class="alert error">
         <div>Errors:</div>
         <ul>
@@ -135,10 +184,19 @@ Gimnasia Mendoza
 })
 export class MatchUploadComponent {
   activeTab: 'csv' | 'text' | 'fixtures' = 'csv';
+  updateMode: 'full' | 'incremental' = 'full';
+
   leagueName = '';
   country = '';
   season = '';
+
+  // Derived flags maintained at call time based on updateMode
   fullReplace = true;
+  incrementalUpdate = false;
+
+  // Incremental mode state
+  leagues: { id: number; name: string; }[] = [];
+  selectedLeague: string = '';
 
   // Fixtures upload state
   fixturesLeagueId: number | null = null;
@@ -152,6 +210,7 @@ export class MatchUploadComponent {
   message = '';
   success = false;
   errors: string[] = [];
+  results: { updated?: any[]; skipped?: any[]; warnings?: any[] } = {};
 
   constructor(private api: MatchUploadService, private leagueApi: LeagueService, private http: HttpClient) {
     // load leagues for fixtures tab
@@ -172,11 +231,46 @@ export class MatchUploadComponent {
     if (l) this.fixturesSeason = l.season;
   }
 
+  onUpdateModeChange(){
+    // Sync flags
+    this.fullReplace = this.updateMode === 'full';
+    this.incrementalUpdate = this.updateMode === 'incremental';
+
+    if (this.updateMode === 'incremental') {
+      // Load leagues for dropdown
+      this.leagueApi.getAllLeagues().subscribe(data => {
+        this.leagues = (data || []).map(d => ({ id: d.id, name: d.name }));
+      });
+    } else {
+      // Reset incremental-related fields
+      this.selectedLeague = '';
+      this.leagues = [];
+      this.country = '';
+      this.season = '';
+    }
+  }
+
+  onLeagueSelected(){
+    if (this.selectedLeague) {
+      this.leagueApi.getLeagueDetails(this.selectedLeague).subscribe(details => {
+        this.country = details.country;
+        this.season = details.season;
+        this.leagueName = details.name; // keep API contract
+      });
+    } else {
+      this.country = '';
+      this.season = '';
+    }
+  }
+
   uploadCsv(){
     this.resetFeedback();
     if (!this.validateMeta()) return;
     if (!this.file) return;
-    this.api.uploadCsv(this.leagueName, this.country, this.season, this.file, this.fullReplace).subscribe({
+    // Ensure flags reflect mode
+    const fullReplace = this.updateMode === 'full';
+    const incrementalUpdate = this.updateMode === 'incremental';
+    this.api.uploadCsv(this.leagueName, this.country, this.season, this.file, fullReplace, incrementalUpdate).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -185,7 +279,9 @@ export class MatchUploadComponent {
   uploadText(){
     this.resetFeedback();
     if (!this.validateMeta()) return;
-    this.api.uploadText(this.leagueName, this.country, this.season, this.text, this.fullReplace).subscribe({
+    const fullReplace = this.updateMode === 'full';
+    const incrementalUpdate = this.updateMode === 'incremental';
+    this.api.uploadText(this.leagueName, this.country, this.season, this.text, fullReplace, incrementalUpdate).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -219,7 +315,19 @@ export class MatchUploadComponent {
   private handleResult(res: any){
     this.success = !!res?.success;
     this.errors = res?.errors || [];
-    this.message = this.success ? `Upload successful. Inserted ${res.inserted}, deleted ${res.deleted}.` : (res?.message || 'Upload failed.');
+    // Capture grouped results
+    this.results = { updated: res?.updated || [], skipped: res?.skipped || [], warnings: res?.warnings || [] };
+    const anyUpdated = (this.results.updated?.length || 0) > 0;
+    this.message = this.success
+      ? (anyUpdated ? 'Results updated successfully.' : `Processed. Inserted ${res.inserted}, deleted ${res.deleted}.`)
+      : (res?.message || 'Upload failed.');
+
+    // Emit a fixtures refresh event if incremental updates occurred
+    if (this.updateMode === 'incremental' && anyUpdated) {
+      const ev = new CustomEvent('fixtures:refresh', { detail: { leagueName: this.leagueName, season: this.season } });
+      window.dispatchEvent(ev);
+    }
+
     // Clear raw text textarea on successful upload as requested
     if (this.success && this.activeTab === 'text') {
       this.text = '';
@@ -232,6 +340,20 @@ export class MatchUploadComponent {
   }
   private resetFeedback(){ this.message=''; this.success=false; this.errors=[]; }
   private validateMeta(){
+    if (this.updateMode === 'incremental') {
+      if (!this.selectedLeague) {
+        this.success = false; this.message = 'Please select a league for incremental update.'; return false;
+      }
+      if (!this.country.trim() || !this.season.trim()){
+        this.success = false; this.message = 'League details missing. Please re-select the league.'; return false;
+      }
+      // leagueName is set from details; ensure it's present
+      if (!this.leagueName.trim()) {
+        this.success = false; this.message = 'Internal error: league name not set from selection.'; return false;
+      }
+      return true;
+    }
+    // full replace requires manual fields
     if (!this.leagueName.trim() || !this.country.trim() || !this.season.trim()){
       this.success = false; this.message = 'Please provide league name, country and season.'; return false;
     }

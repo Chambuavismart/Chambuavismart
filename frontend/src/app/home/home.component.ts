@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { NgFor, NgIf, DatePipe } from '@angular/common';
 import { FixturesService, LeagueFixturesResponse } from '../services/fixtures.service';
@@ -10,7 +10,7 @@ import { FixturesService, LeagueFixturesResponse } from '../services/fixtures.se
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.css']
 })
-export class HomeComponent implements OnInit {
+export class HomeComponent implements OnInit, OnDestroy {
   private fixturesApi = inject(FixturesService);
 
   today = new Date();
@@ -28,9 +28,23 @@ export class HomeComponent implements OnInit {
   todayFixtures: LeagueFixturesResponse[] = [];
   todayLoading = false;
 
+  private onFixturesRefresh = (_e?: any) => {
+    // refresh today's fixtures and selected date view (if any)
+    this.loadToday();
+    if (this.selectedDate) {
+      // Re-fetch for the currently selected date
+      this.selectDate(this.selectedDate);
+    }
+  }
+
   ngOnInit(): void {
     this.todayIso = this.toIsoLocal(this.today);
     this.loadToday();
+    window.addEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
+  }
+
+  ngOnDestroy(): void {
+    window.removeEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
   }
 
   private loadToday(): void {
@@ -183,14 +197,25 @@ export class HomeComponent implements OnInit {
     this.showCalendar = false;
   }
 
-  // Derive display status using UTC comparison
+  // Derive display status using current time with 24h overdue rule
   statusLabel(f: { dateTime: string; homeScore: number | null; awayScore: number | null; status?: any }): string {
-    // Completed if scores present regardless of time
-    if (this.hasResults(f)) return 'Completed';
+    const s = this.computeStatus(f);
+    switch (s) {
+      case 'FINISHED': return 'Finished';
+      case 'RESULTS_MISSING': return 'Results Missing';
+      case 'AWAITING': return 'Awaiting Results';
+      default: return 'Upcoming';
+    }
+  }
+
+  computeStatus(f: { dateTime: string; homeScore: number | null; awayScore: number | null }): 'UPCOMING' | 'AWAITING' | 'RESULTS_MISSING' | 'FINISHED' {
+    if (this.hasResults(f)) return 'FINISHED';
     const fixtureMs = this.toUtcMillis(f?.dateTime);
-    const nowMs = Date.now(); // UTC epoch ms
-    if (!isNaN(fixtureMs) && fixtureMs < nowMs) return 'Awaiting Results';
-    return 'Upcoming';
+    if (isNaN(fixtureMs)) return 'UPCOMING';
+    const nowMs = Date.now();
+    if (fixtureMs > nowMs) return 'UPCOMING';
+    const overdueMs = 24 * 60 * 60 * 1000;
+    return (fixtureMs < (nowMs - overdueMs)) ? 'RESULTS_MISSING' : 'AWAITING';
   }
 
   private hasResults(f: { homeScore: number | null; awayScore: number | null }): boolean {

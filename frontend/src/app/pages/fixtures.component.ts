@@ -1,6 +1,7 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { NgFor, NgIf, AsyncPipe, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router, NavigationEnd } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO } from '../services/fixtures.service';
 
 @Component({
@@ -23,7 +24,8 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
     .teams { font-weight:700; }
     .status { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
     .status.UPCOMING { background:#0ea5e9; color:#04110a; }
-    .status.LIVE { background:#ef4444; color:#04110a; }
+    .status.AWAITING { background:#f59e0b; color:#04110a; }
+    .status.RESULTS_MISSING { background:#ef4444; color:#04110a; }
     .status.FINISHED { background:#9ca3af; color:#04110a; }
     .toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
     .select { background:#0b1220; border:1px solid #1f2937; color:#e6eef8; padding:6px 8px; border-radius:8px; }
@@ -72,20 +74,23 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
           <input type="checkbox" [(ngModel)]="upcomingOnly" (change)="loadFixtures()"/>
         </div>
 
-        <div *ngIf="fixtures?.length === 0" class="muted">No fixtures.</div>
-        <div class="grid">
-          <div class="card" *ngFor="let f of fixtures" (click)="openAnalysis(f)" style="cursor:pointer;">
-            <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
-            <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
-            <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
-            <span class="status {{ f.status }}">{{ statusLabel(f) }}</span>
+        <div *ngIf="isLoading" class="muted">Refreshing fixtures...</div>
+        <ng-container *ngIf="!isLoading">
+          <div *ngIf="fixtures?.length === 0" class="muted">No fixtures.</div>
+          <div class="grid">
+            <div class="card" *ngFor="let f of fixtures" (click)="openAnalysis(f)" style="cursor:pointer;">
+              <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
+              <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
+              <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
+              <span class="status {{ computeStatus(f) }}">{{ statusLabel(f) }}</span>
+            </div>
           </div>
-        </div>
+        </ng-container>
       </section>
     </div>
   `
 })
-export class FixturesComponent implements OnInit {
+export class FixturesComponent implements OnInit, OnDestroy {
   openAnalysis(f: FixtureDTO) {
     const params = new URLSearchParams({
       leagueId: String(this.selectedLeagueId ?? ''),
@@ -95,6 +100,7 @@ export class FixturesComponent implements OnInit {
     window.location.href = `/match-analysis?${params.toString()}`;
   }
   private api = inject(FixturesService);
+  private router = inject(Router);
 
   leagues: LeagueWithUpcomingDTO[] = [];
   selectedLeagueId: number | null = null;
@@ -102,15 +108,42 @@ export class FixturesComponent implements OnInit {
   fixtures: FixtureDTO[] = [];
   expandedLeagueId: number | null = null;
   upcomingOnly = false;
+  isLoading = false;
+
+  private refreshIntervalId: any = null;
+  private routerEventsSub: any = null;
+  private onFixturesRefresh = (_e?: any) => {
+    // reload fixtures for the current league selection
+    this.loadFixtures();
+  }
+  private onFixturesOpen = (_e?: any) => {
+    // tab explicitly opened: refresh before showing
+    this.loadFixtures();
+  }
 
   ngOnInit(): void {
+    this.isLoading = true;
     this.api.getLeagues().subscribe(ls => {
       this.leagues = ls;
       if (ls.length && this.selectedLeagueId == null) {
         this.selectedLeagueId = ls[0].leagueId;
-        this.loadFixtures();
+      }
+      // Always load fixtures after league resolution
+      this.loadFixtures();
+    });
+
+    // When navigating (even to the same route), refresh if URL contains /fixtures
+    this.routerEventsSub = this.router.events.subscribe(ev => {
+      if (ev instanceof NavigationEnd) {
+        const url = ev.urlAfterRedirects || ev.url;
+        if (typeof url === 'string' && url.includes('/fixtures')) {
+          this.loadFixtures();
+        }
       }
     });
+
+    // Background silent refresh every 60 seconds while component is active
+    this.refreshIntervalId = setInterval(() => this.loadFixtures(), 60_000);
   }
 
   toggleLeague(id: number) {
@@ -124,19 +157,50 @@ export class FixturesComponent implements OnInit {
 
   loadFixtures() {
     if (this.selectedLeagueId == null) return;
+    this.isLoading = true;
     this.api.getLeagueFixtures(this.selectedLeagueId, this.upcomingOnly).subscribe((res: LeagueFixturesResponse) => {
       this.currentLeagueName = res.leagueName;
-      this.fixtures = res.fixtures;
+      // Replace fixtures array to prevent duplicates
+      this.fixtures = (res.fixtures || []).slice();
+      this.isLoading = false;
+    }, _err => {
+      // On error, stop loading but keep previous fixtures
+      this.isLoading = false;
     });
   }
 
-  // Derive display status using UTC comparison (for View All Fixtures page)
+  ngOnDestroy(): void {
+    window.removeEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
+    window.removeEventListener('fixtures:open', this.onFixturesOpen as EventListener);
+    if (this.routerEventsSub) {
+      this.routerEventsSub.unsubscribe?.();
+      this.routerEventsSub = null;
+    }
+    if (this.refreshIntervalId) {
+      clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
+  }
+
+  // Derive display status using current time with 24h overdue rule
   statusLabel(f: FixtureDTO): string {
-    if (this.hasResults(f)) return 'Completed';
+    const s = this.computeStatus(f);
+    switch (s) {
+      case 'FINISHED': return 'Finished';
+      case 'RESULTS_MISSING': return 'Results Missing';
+      case 'AWAITING': return 'Awaiting Results';
+      default: return 'Upcoming';
+    }
+  }
+
+  computeStatus(f: { dateTime: string; homeScore: number | null; awayScore: number | null }): 'UPCOMING' | 'AWAITING' | 'RESULTS_MISSING' | 'FINISHED' {
+    if (this.hasResults(f)) return 'FINISHED';
     const fixtureMs = this.toUtcMillis(f?.dateTime);
+    if (isNaN(fixtureMs)) return 'UPCOMING';
     const nowMs = Date.now();
-    if (!isNaN(fixtureMs) && fixtureMs < nowMs) return 'Awaiting Results';
-    return 'Upcoming';
+    if (fixtureMs > nowMs) return 'UPCOMING';
+    const overdueMs = 24 * 60 * 60 * 1000;
+    return (fixtureMs < (nowMs - overdueMs)) ? 'RESULTS_MISSING' : 'AWAITING';
   }
 
   private hasResults(f: { homeScore: number | null; awayScore: number | null }): boolean {

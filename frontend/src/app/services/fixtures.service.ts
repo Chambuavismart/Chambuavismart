@@ -33,12 +33,16 @@ export class FixturesService {
   private baseUrl = '/api/fixtures';
 
   getLeagues(): Observable<LeagueWithUpcomingDTO[]> {
-    return this.http.get<LeagueWithUpcomingDTO[]>(`${this.baseUrl}/leagues`);
+    const url = `${this.baseUrl}/leagues?_ts=${Date.now()}`;
+    return this.http.get<LeagueWithUpcomingDTO[]>(url);
   }
 
   getLeagueFixtures(leagueId: number, upcomingOnly = false): Observable<LeagueFixturesResponse> {
-    const params = upcomingOnly ? '?upcomingOnly=true' : '';
-    return this.http.get<LeagueFixturesResponse>(`${this.baseUrl}/${leagueId}${params}`);
+    const qp: string[] = [];
+    if (upcomingOnly) qp.push('upcomingOnly=true');
+    qp.push(`_ts=${Date.now()}`); // cache buster to ensure fresh data
+    const qs = qp.length ? `?${qp.join('&')}` : '';
+    return this.http.get<LeagueFixturesResponse>(`${this.baseUrl}/${leagueId}${qs}`);
   }
 
   // New: fixtures by date (grouped by league)
