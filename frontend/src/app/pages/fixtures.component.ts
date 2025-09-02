@@ -78,7 +78,7 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
             <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
             <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
             <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
-            <span class="status {{ f.status }}">{{ f.status }}</span>
+            <span class="status {{ f.status }}">{{ statusLabel(f) }}</span>
           </div>
         </div>
       </section>
@@ -120,5 +120,27 @@ export class FixturesComponent implements OnInit {
       this.currentLeagueName = res.leagueName;
       this.fixtures = res.fixtures;
     });
+  }
+
+  // Derive display status using UTC comparison (for View All Fixtures page)
+  statusLabel(f: FixtureDTO): string {
+    if (this.hasResults(f)) return 'Completed';
+    const fixtureMs = this.toUtcMillis(f?.dateTime);
+    const nowMs = Date.now();
+    if (!isNaN(fixtureMs) && fixtureMs < nowMs) return 'Awaiting Results';
+    return 'Upcoming';
+  }
+
+  private hasResults(f: { homeScore: number | null; awayScore: number | null }): boolean {
+    return f?.homeScore != null && f?.awayScore != null;
+  }
+
+  private toUtcMillis(iso: string | undefined): number {
+    if (!iso) return NaN;
+    const hasTZ = /[zZ]|[+-]\d{2}:\d{2}$/.test(iso);
+    const s = hasTZ ? iso : iso + 'Z';
+    const t = Date.parse(s);
+    if (!isNaN(t)) return t;
+    return new Date(iso).getTime();
   }
 }

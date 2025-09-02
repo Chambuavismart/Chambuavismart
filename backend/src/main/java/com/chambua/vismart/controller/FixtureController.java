@@ -5,15 +5,19 @@ import com.chambua.vismart.dto.FixturesUploadRequest;
 import com.chambua.vismart.dto.LeagueFixturesResponse;
 import com.chambua.vismart.dto.LeagueWithUpcomingDTO;
 import com.chambua.vismart.dto.UploadResultDTO;
+import com.chambua.vismart.model.Fixture;
 import com.chambua.vismart.model.League;
 import com.chambua.vismart.repository.FixtureRepository;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.service.FixtureService;
 import com.chambua.vismart.service.FixtureUploadService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -21,6 +25,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/fixtures")
 @CrossOrigin(origins = "*")
 public class FixtureController {
+
+    private static final Logger log = LoggerFactory.getLogger(FixtureController.class);
 
     private final FixtureService fixtureService;
     private final LeagueRepository leagueRepository;
@@ -57,6 +63,47 @@ public class FixtureController {
         var fixtures = upcomingOnly ? fixtureService.getUpcomingFixturesByLeague(leagueId) : fixtureService.getFixturesByLeague(leagueId);
         var fixtureDtos = fixtures.stream().map(FixtureDTO::from).collect(Collectors.toList());
         return new LeagueFixturesResponse(league.getId(), league.getName(), fixtureDtos);
+    }
+
+    @GetMapping("/by-date")
+    public List<LeagueFixturesResponse> getFixturesByDate(@RequestParam("date") String dateIso,
+                                                          @RequestParam(value = "season", required = false) String season) {
+        LocalDate date;
+        try { date = LocalDate.parse(dateIso); } catch (Exception e){
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date format. Expected YYYY-MM-DD");
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("[FixtureController] /by-date date={} season={}", date, season);
+        }
+        List<Fixture> fixtures = fixtureService.getFixturesByDate(date, season);
+        // group by league id to avoid lazy initialization of League proxies
+        Map<Long, List<Fixture>> grouped = fixtures.stream()
+                .collect(Collectors.groupingBy(f -> f.getLeague().getId()));
+
+        // fetch league names for collected ids
+        List<Long> ids = new ArrayList<>(grouped.keySet());
+        List<League> leagues = leagueRepository.findAllById(ids);
+        Map<Long, String> idToName = leagues.stream().collect(Collectors.toMap(League::getId, League::getName));
+
+        List<LeagueFixturesResponse> out = new ArrayList<>();
+        for (Map.Entry<Long, List<Fixture>> entry : grouped.entrySet()) {
+            Long leagueId = entry.getKey();
+            String leagueName = idToName.getOrDefault(leagueId, "League " + leagueId);
+            List<FixtureDTO> fds = entry.getValue().stream().map(FixtureDTO::from).collect(Collectors.toList());
+            out.add(new LeagueFixturesResponse(leagueId, leagueName, fds));
+        }
+        // sort leagues by name for consistency
+        out.sort(Comparator.comparing(LeagueFixturesResponse::getLeagueName));
+        return out;
+    }
+
+    @GetMapping("/available-dates")
+    public Set<String> getAvailableDates(@RequestParam("year") int year,
+                                         @RequestParam("month") int month,
+                                         @RequestParam(value = "season", required = false) String season){
+        if (month < 1 || month > 12) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid month");
+        var dates = fixtureService.getAvailableDatesForMonth(year, month, season);
+        return dates.stream().map(LocalDate::toString).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     @PostMapping("/upload")
