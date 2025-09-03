@@ -20,7 +20,7 @@ import { COUNTRIES } from '../shared/countries.constant';
         <button (click)="activeTab='fixtures'" [class.active]="activeTab==='fixtures'">Fixtures Upload</button>
       </div>
 
-      <div class="card">
+      <div *ngIf="activeTab!=='fixtures'" class="card">
         <div class="mb-2">
           <label class="mr-4">
             <input type="radio" [(ngModel)]="updateMode" value="full" (change)="onUpdateModeChange()" />
@@ -107,10 +107,6 @@ Nublense
               <option *ngFor="let l of fixturesLeagues" [ngValue]="l.id">{{l.name}} ({{l.season}})</option>
             </select>
           </label>
-          <label>
-            Season
-            <input [(ngModel)]="fixturesSeason" placeholder="e.g., 2024/2025"/>
-          </label>
           <label style="grid-column: 1 / -1;">
             <input type="checkbox" [(ngModel)]="fullReplace"/> Full replace existing fixtures
           </label>
@@ -136,7 +132,7 @@ Gimnasia Mendoza
 -
         </pre>
         <textarea [(ngModel)]="fixturesRawText" rows="12" placeholder="Paste raw fixtures text here..."></textarea>
-        <button (click)="uploadFixtures()" [disabled]="!fixturesLeagueId || !fixturesSeason.trim() || !fixturesRawText.trim()">Upload Fixtures</button>
+        <button (click)="uploadFixtures()" [disabled]="!fixturesLeagueId || !fixturesRawText.trim()">Upload Fixtures</button>
       </div>
 
       <div *ngIf="message" class="alert" [class.success]="success" [class.error]="!success">
@@ -309,12 +305,11 @@ export class MatchUploadComponent {
 
   uploadFixtures(){
     this.resetFeedback();
-    if (!this.fixturesLeagueId || !this.fixturesSeason.trim() || !this.fixturesRawText.trim()){
-      this.success = false; this.message = 'Please select a league, provide season and paste fixtures text.'; return;
+    if (!this.fixturesLeagueId || !this.fixturesRawText.trim()){
+      this.success = false; this.message = 'Please select a league and paste fixtures text.'; return;
     }
     const payload = {
       leagueId: this.fixturesLeagueId,
-      season: this.fixturesSeason,
       fullReplace: this.fullReplace,
       rawText: this.fixturesRawText
     };
@@ -338,9 +333,21 @@ export class MatchUploadComponent {
     // Capture grouped results
     this.results = { updated: res?.updated || [], skipped: res?.skipped || [], warnings: res?.warnings || [] };
     const anyUpdated = (this.results.updated?.length || 0) > 0;
-    this.message = this.success
-      ? (anyUpdated ? 'Results updated successfully.' : `Processed. Inserted ${res.inserted}, deleted ${res.deleted}.`)
-      : (res?.message || 'Upload failed.');
+    const inserted = (res?.inserted !== undefined ? res.inserted : res?.insertedCount) ?? 0;
+    const deleted = (res?.deleted !== undefined ? res.deleted : res?.deletedCount) ?? 0;
+    const completedAll = (res?.completed ?? null);
+    const completedUpToToday = (res?.completedUpToToday ?? null);
+    const baseMsg = anyUpdated ? 'Results updated successfully.' : `Processed. Inserted ${inserted}, deleted ${deleted}.`;
+    let suffix = '';
+    if (completedUpToToday !== null) {
+      suffix = ` Completed in DB (<= today): ${completedUpToToday}.`;
+      if (completedAll !== null && completedAll !== completedUpToToday) {
+        suffix += ` Total completed (all dates): ${completedAll}.`;
+      }
+    } else if (completedAll !== null) {
+      suffix = ` Completed in DB: ${completedAll}.`;
+    }
+    this.message = this.success ? (baseMsg + suffix) : (res?.message || 'Upload failed.');
 
     // Emit a fixtures refresh event if incremental updates occurred
     if (this.updateMode === 'incremental' && anyUpdated) {

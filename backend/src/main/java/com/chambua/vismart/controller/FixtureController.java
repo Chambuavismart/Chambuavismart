@@ -14,7 +14,9 @@ import com.chambua.vismart.service.FixtureUploadService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
@@ -32,12 +34,14 @@ public class FixtureController {
     private final LeagueRepository leagueRepository;
     private final FixtureRepository fixtureRepository;
     private final FixtureUploadService fixtureUploadService;
+    private final com.chambua.vismart.service.FixtureRefreshService fixtureRefreshService;
 
-    public FixtureController(FixtureService fixtureService, LeagueRepository leagueRepository, FixtureRepository fixtureRepository, FixtureUploadService fixtureUploadService) {
+    public FixtureController(FixtureService fixtureService, LeagueRepository leagueRepository, FixtureRepository fixtureRepository, FixtureUploadService fixtureUploadService, com.chambua.vismart.service.FixtureRefreshService fixtureRefreshService) {
         this.fixtureService = fixtureService;
         this.leagueRepository = leagueRepository;
         this.fixtureRepository = fixtureRepository;
         this.fixtureUploadService = fixtureUploadService;
+        this.fixtureRefreshService = fixtureRefreshService;
     }
 
     @GetMapping("/leagues")
@@ -57,9 +61,13 @@ public class FixtureController {
 
     @GetMapping("/{leagueId}")
     public LeagueFixturesResponse getFixturesForLeague(@PathVariable Long leagueId,
-                                                       @RequestParam(value = "upcomingOnly", required = false, defaultValue = "false") boolean upcomingOnly) {
+                                                       @RequestParam(value = "upcomingOnly", required = false, defaultValue = "false") boolean upcomingOnly,
+                                                       @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh) {
         League league = leagueRepository.findById(leagueId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "League not found"));
+        if (refresh) {
+            try { fixtureRefreshService.refreshLeague(leagueId); } catch (Exception e) { log.warn("League refresh failed: {}", e.getMessage()); }
+        }
         var fixtures = upcomingOnly ? fixtureService.getUpcomingFixturesByLeague(leagueId) : fixtureService.getFixturesByLeague(leagueId);
         var fixtureDtos = fixtures.stream().map(FixtureDTO::from).collect(Collectors.toList());
         return new LeagueFixturesResponse(league.getId(), league.getName(), fixtureDtos);
@@ -67,10 +75,14 @@ public class FixtureController {
 
     @GetMapping("/by-date")
     public List<LeagueFixturesResponse> getFixturesByDate(@RequestParam("date") String dateIso,
-                                                          @RequestParam(value = "season", required = false) String season) {
+                                                          @RequestParam(value = "season", required = false) String season,
+                                                          @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh) {
         LocalDate date;
         try { date = LocalDate.parse(dateIso); } catch (Exception e){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date format. Expected YYYY-MM-DD");
+        }
+        if (refresh) {
+            try { fixtureRefreshService.refreshByDate(date); } catch (Exception e) { log.warn("Date refresh failed: {}", e.getMessage()); }
         }
         if (log.isDebugEnabled()) {
             log.debug("[FixtureController] /by-date date={} season={}", date, season);
@@ -109,5 +121,23 @@ public class FixtureController {
     @PostMapping("/upload")
     public UploadResultDTO uploadFixtures(@RequestBody FixturesUploadRequest request){
         return fixtureUploadService.upload(request);
+    }
+
+    @PostMapping("/upload-text")
+    public UploadResultDTO uploadFixturesText(@RequestBody FixturesUploadRequest request){
+        return fixtureUploadService.upload(request);
+    }
+
+    @PostMapping(value = "/upload-csv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public UploadResultDTO uploadFixturesCsv(@RequestParam("leagueId") Long leagueId,
+                                             @RequestParam(value = "season", required = false) String season,
+                                             @RequestParam(value = "fullReplace", required = false, defaultValue = "false") boolean fullReplace,
+                                             @RequestPart("file") MultipartFile file) {
+        try {
+            String content = new String(file.getBytes());
+            return fixtureUploadService.uploadCsv(leagueId, season, fullReplace, content);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to read CSV file: " + e.getMessage());
+        }
     }
 }

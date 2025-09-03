@@ -29,5 +29,17 @@ CREATE TABLE IF NOT EXISTS matches (
     CONSTRAINT fk_match_away_team FOREIGN KEY (away_team_id) REFERENCES teams(id) ON DELETE RESTRICT
 );
 
-CREATE INDEX IF NOT EXISTS idx_matches_league_round ON matches(league_id, round);
-CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date);
+-- Create indexes conditionally for MySQL versions without CREATE INDEX IF NOT EXISTS support
+SET @idx_exists := (
+  SELECT COUNT(1) FROM INFORMATION_SCHEMA.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND INDEX_NAME = 'idx_matches_league_round'
+);
+SET @sql := IF(@idx_exists = 0, 'CREATE INDEX idx_matches_league_round ON matches(league_id, round)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+  SELECT COUNT(1) FROM INFORMATION_SCHEMA.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND INDEX_NAME = 'idx_matches_date'
+);
+SET @sql := IF(@idx_exists = 0, 'CREATE INDEX idx_matches_date ON matches(match_date)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

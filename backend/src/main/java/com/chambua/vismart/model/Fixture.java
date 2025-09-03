@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 @Table(name = "fixtures", indexes = {
         @Index(name = "idx_fixtures_league_date", columnList = "league_id, date_time"),
         @Index(name = "idx_fixtures_status", columnList = "status")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uk_fixture_unique", columnNames = {"league_id", "home_team", "away_team", "date_time"})
 })
 public class Fixture {
 

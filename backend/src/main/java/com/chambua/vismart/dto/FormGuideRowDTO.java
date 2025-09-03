@@ -5,6 +5,8 @@ import java.util.List;
 public class FormGuideRowDTO {
     private Long teamId;
     private String teamName;
+    private int mp; // matches played in the considered window
+    private int totalMp; // total matches played so far this season (per scope)
     private int w;
     private int d;
     private int l;
@@ -21,10 +23,12 @@ public class FormGuideRowDTO {
 
     public FormGuideRowDTO() {}
 
-    public FormGuideRowDTO(Long teamId, String teamName, int w, int d, int l, int gf, int ga, int pts,
+    public FormGuideRowDTO(Long teamId, String teamName, int mp, int totalMp, int w, int d, int l, int gf, int ga, int pts,
                            double ppg, List<String> lastResults, int bttsPct, int over15Pct, int over25Pct, int over35Pct) {
         this.teamId = teamId;
         this.teamName = teamName;
+        this.mp = mp;
+        this.totalMp = totalMp;
         this.w = w;
         this.d = d;
         this.l = l;
@@ -42,6 +46,8 @@ public class FormGuideRowDTO {
 
     public Long getTeamId() { return teamId; }
     public String getTeamName() { return teamName; }
+    public int getMp() { return mp; }
+    public int getTotalMp() { return totalMp; }
     public int getW() { return w; }
     public int getD() { return d; }
     public int getL() { return l; }
@@ -58,6 +64,8 @@ public class FormGuideRowDTO {
 
     public void setTeamId(Long teamId) { this.teamId = teamId; }
     public void setTeamName(String teamName) { this.teamName = teamName; }
+    public void setMp(int mp) { this.mp = mp; }
+    public void setTotalMp(int totalMp) { this.totalMp = totalMp; }
     public void setW(int w) { this.w = w; }
     public void setD(int d) { this.d = d; }
     public void setL(int l) { this.l = l; }

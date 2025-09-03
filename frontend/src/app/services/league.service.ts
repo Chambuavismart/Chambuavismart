@@ -32,6 +32,8 @@ export interface LeagueTableEntryDTO {
 export interface FormGuideRowDTO {
   teamId: number;
   teamName: string;
+  mp: number; // number of matches considered (limited window)
+  totalMp?: number; // total matches so far in league (per scope)
   w: number;
   d: number;
   l: number;

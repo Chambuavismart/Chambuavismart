@@ -43,6 +43,7 @@ import { League, LeagueService, FormGuideRowDTO } from '../services/league.servi
             <thead>
               <tr>
                 <th (click)="onSort('teamName')" class="sortable">Team {{sortIcon('teamName')}}</th>
+                <th class="center sortable" (click)="onSort('mp')" title="MP shows all completed matches; last 10 results are displayed for readability">MP {{sortIcon('mp')}}</th>
                 <th class="center sortable" (click)="onSort('w')">W {{sortIcon('w')}}</th>
                 <th class="center sortable" (click)="onSort('d')">D {{sortIcon('d')}}</th>
                 <th class="center sortable" (click)="onSort('l')">L {{sortIcon('l')}}</th>
@@ -66,6 +67,7 @@ import { League, LeagueService, FormGuideRowDTO } from '../services/league.servi
                     <span>{{ r.teamName }}</span>
                   </div>
                 </td>
+                <td class="center">{{ matchesPlayed(r) }}</td>
                 <td class="center">{{r.w}}</td>
                 <td class="center">{{r.d}}</td>
                 <td class="center">{{r.l}}</td>
@@ -113,12 +115,13 @@ export class FormGuideComponent {
 
   leagues: League[] = [];
   leagueId: number | null = null;
-  limit: number | 'all' = 6;
+  limit: number | 'all' = 'all';
   scope: 'overall'|'home'|'away' = 'overall';
+  userSetLimit = false;
 
   rows: FormGuideRowDTO[] = [];
   sortedRows: FormGuideRowDTO[] = [];
-  sortCol: keyof FormGuideRowDTO | 'ppg' | 'teamName' = 'ppg';
+  sortCol: keyof FormGuideRowDTO | 'ppg' | 'teamName' | 'mp' = 'ppg';
   sortDir: 'asc'|'desc' = 'desc'; // default PPG desc
 
   loading = false;
@@ -139,11 +142,15 @@ export class FormGuideComponent {
 
   onLeagueChange(val: number | null){
     this.leagueId = val;
+    // Reset user override on league change so default view shows total MP
+    this.userSetLimit = false;
     if (this.leagueId) this.load();
   }
 
   onLimitChange(val: number | 'all'){
     this.limit = val;
+    // User explicitly set a limit; MP should reflect the limit (except 'all')
+    this.userSetLimit = true;
     if (this.leagueId) this.load();
   }
 
@@ -153,7 +160,7 @@ export class FormGuideComponent {
     if (this.leagueId) this.load();
   }
 
-  onSort(col: keyof FormGuideRowDTO | 'ppg' | 'teamName'){
+  onSort(col: keyof FormGuideRowDTO | 'ppg' | 'teamName' | 'mp'){
     if (this.sortCol === col) {
       this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
     } else {
@@ -175,6 +182,7 @@ export class FormGuideComponent {
     const getVal = (r: FormGuideRowDTO): any => {
       switch(col){
         case 'teamName': return (r.teamName || '').toLowerCase();
+        case 'mp': return this.matchesPlayed(r);
         case 'w': return r.w; case 'd': return r.d; case 'l': return r.l;
         case 'gf': return r.gf; case 'ga': return r.ga; case 'gd': return r.gd;
         case 'pts': return r.pts; case 'ppg': return r.ppg;
@@ -197,8 +205,8 @@ export class FormGuideComponent {
   displayResults(r: FormGuideRowDTO){
     const allSeq = (r.lastResults || []);
     if (this.limit === 'all') {
-      const shown = allSeq.slice(0, 15);
-      return shown;
+      // Cap to last 10 for readability even when entire league selected
+      return allSeq.slice(0, 10);
     }
     const seq = allSeq.slice(0, this.limit);
     while (seq.length < this.limit) seq.push('•');
@@ -206,11 +214,25 @@ export class FormGuideComponent {
   }
 
   hasMore(r: FormGuideRowDTO){
-    return this.limit === 'all' && (r.lastResults?.length || 0) > 15;
+    if (this.limit === 'all') {
+      // indicate there are more than the 10 shown if applicable
+      return (r.lastResults?.length || 0) > 10;
+    }
+    return (r.lastResults?.length || 0) > (typeof this.limit === 'number' ? this.limit : 0);
+  }
+
+  matchesPlayed(r: FormGuideRowDTO){
+    // By default (before user sets a limit), show total matches played so far.
+    // When the user sets a numeric limit, show the limited window size.
+    // If user chooses 'all', continue to show total matches.
+    const total = (r?.totalMp ?? ((r?.w || 0) + (r?.d || 0) + (r?.l || 0)));
+    if (this.limit === 'all') return total;
+    if (!this.userSetLimit) return total;
+    return r?.mp ?? total;
   }
 
   lastHeader(){
-    if (this.limit === 'all') return 'Season (latest 15)';
+    if (this.limit === 'all') return 'Last 10';
     return `Last ${this.limit}`;
   }
 

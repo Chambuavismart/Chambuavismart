@@ -1,5 +1,6 @@
 package com.chambua.vismart.service;
 
+import com.chambua.vismart.dto.MatchIngestItem;
 import com.chambua.vismart.model.League;
 import com.chambua.vismart.model.Match;
 import com.chambua.vismart.model.Team;
@@ -26,11 +27,13 @@ public class MatchUploadService {
     private final LeagueRepository leagueRepository;
     private final TeamRepository teamRepository;
     private final MatchRepository matchRepository;
+    private final MatchDataValidationService validationService;
 
-    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository) {
+    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository, MatchDataValidationService validationService) {
         this.leagueRepository = leagueRepository;
         this.teamRepository = teamRepository;
         this.matchRepository = matchRepository;
+        this.validationService = validationService;
     }
 
     public record UploadResult(boolean success, List<String> errors, int insertedCount, long deletedCount,
@@ -51,17 +54,14 @@ public class MatchUploadService {
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
         League league = findOrCreateLeague(leagueName, country, season);
-        long deleted = 0;
-        if (fullReplace) {
-            deleted = matchRepository.deleteByLeague(league);
-        }
-        int inserted = 0;
-        Set<String> seenKeys = new HashSet<>();
+
+        // 1) Parse to items (no persistence yet)
+        List<MatchIngestItem> items = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
             String header = reader.readLine();
             if (header == null) {
                 errors.add("CSV has no content");
-                return new UploadResult(false, errors, 0, deleted, updatedLogs, skippedLogs, warnLogs);
+                return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
             }
             String[] cols = normalizeHeader(header);
             Map<String, Integer> rawIndex = buildIndexMap(cols);
@@ -94,64 +94,86 @@ public class MatchUploadService {
                     int round = roundIdxOpt.map(idx -> safeParseInt(getByIndex(parts, idx, "round"), 1)).orElse(1);
                     String homeName = getByIndex(parts, homeIdx, "homeTeam");
                     String awayName = getByIndex(parts, awayIdx, "awayTeam");
-                    int homeGoals = safeParseInt(getByIndex(parts, hgIdx, "homeGoals"), 0);
-                    int awayGoals = safeParseInt(getByIndex(parts, agIdx, "awayGoals"), 0);
+                    Integer homeGoals = parseNullableInt(getByIndex(parts, hgIdx, "homeGoals"));
+                    Integer awayGoals = parseNullableInt(getByIndex(parts, agIdx, "awayGoals"));
 
-                    if (incrementalUpdate) {
-                        // Resolve teams without creating new ones
-                        Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
-                        Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
-                        if (homeOpt.isEmpty() || awayOpt.isEmpty()) {
-                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found (team not found)"));
-                        } else {
-                            Team home = homeOpt.get();
-                            Team away = awayOpt.get();
-                            String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
-                            if (seenKeys.add(key)) {
-                                // Try by round first
-                                Optional<Match> byRound = matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId());
-                                Match target = byRound.orElseGet(() -> {
-                                    List<Match> lst = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
-                                    // Prefer any 0-0 (awaiting) match
-                                    return lst.stream().filter(m -> m.getHomeGoals() != null && m.getAwayGoals() != null && m.getHomeGoals() == 0 && m.getAwayGoals() == 0)
-                                            .findFirst().orElse(null);
-                                });
-                                if (target == null) {
-                                    skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
-                                } else {
-                                    if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
-                                        warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));
-                                    }
-                                    boolean changed = false;
-                                    if (date != null && !date.equals(target.getDate())) { target.setDate(date); changed = true; }
-                                    if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
-                                        target.setHomeGoals(homeGoals);
-                                        target.setAwayGoals(awayGoals);
-                                        changed = true;
-                                    }
-                                    if (changed) {
-                                        matchRepository.save(target);
-                                    }
-                                    updatedLogs.add(new UpdateLog(target.getId(), homeName, awayName, homeGoals + "-" + awayGoals, "Finished"));
-                                }
-                            }
-                        }
-                    } else {
-                        Team home = findOrCreateTeam(league, homeName);
-                        Team away = findOrCreateTeam(league, awayName);
-                        String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
-                        if (seenKeys.add(key)) {
-                            matchRepository.save(new Match(league, home, away, date, round, homeGoals, awayGoals));
-                            inserted++;
-                        }
-                    }
+                    items.add(new MatchIngestItem(league.getId(), league.getName(), country, season, date, round, homeName, awayName, homeGoals, awayGoals));
                 } catch (Exception ex) {
                     errors.add("Row error: " + ex.getMessage() + " | line=\"" + line + "\"");
                 }
             }
         } catch (IOException e) {
             errors.add("Failed to read CSV: " + e.getMessage());
-            return new UploadResult(false, errors, inserted, deleted, updatedLogs, skippedLogs, warnLogs);
+            return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+
+        // 2) Validate
+        var vr = validationService.validate(items);
+        if (!vr.isValid()) {
+            errors.addAll(vr.errorsAsStrings());
+            warnLogs.addAll(vr.warningsAsStrings().stream().map(w -> new WarnLog(null, null, w)).toList());
+            return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+
+        // 3) Persist
+        long deleted = 0;
+        if (fullReplace) {
+            deleted = matchRepository.deleteByLeague(league);
+        }
+        int inserted = 0;
+        Set<String> seenKeys = new HashSet<>();
+        for (MatchIngestItem it : items) {
+            LocalDate date = it.getDate();
+            int round = Optional.ofNullable(it.getRound()).orElse(1);
+            String homeName = it.getHomeTeamName();
+            String awayName = it.getAwayTeamName();
+            int homeGoals = Optional.ofNullable(it.getHomeGoals()).orElse(0);
+            int awayGoals = Optional.ofNullable(it.getAwayGoals()).orElse(0);
+
+            if (incrementalUpdate) {
+                Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
+                Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
+                if (homeOpt.isEmpty() || awayOpt.isEmpty()) {
+                    skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found (team not found)"));
+                } else {
+                    Team home = homeOpt.get();
+                    Team away = awayOpt.get();
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                    if (seenKeys.add(key)) {
+                        Optional<Match> byRound = matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId());
+                        Match target = byRound.orElseGet(() -> {
+                            List<Match> lst = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
+                            return lst.stream().filter(m -> m.getHomeGoals() != null && m.getAwayGoals() != null && m.getHomeGoals() == 0 && m.getAwayGoals() == 0)
+                                    .findFirst().orElse(null);
+                        });
+                        if (target == null) {
+                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
+                        } else {
+                            if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
+                                warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));
+                            }
+                            boolean changed = false;
+                            if (date != null && !date.equals(target.getDate())) { target.setDate(date); changed = true; }
+                            if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
+                                target.setHomeGoals(homeGoals);
+                                target.setAwayGoals(awayGoals);
+                                changed = true;
+                            }
+                            if (changed) {
+                                matchRepository.save(target);
+                            }
+                            updatedLogs.add(new UpdateLog(target.getId(), homeName, awayName, homeGoals + "-" + awayGoals, "Finished"));
+                        }
+                    }
+                }
+            } else {
+                Team home = findOrCreateTeam(league, homeName);
+                Team away = findOrCreateTeam(league, awayName);
+                String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                if (seenKeys.add(key)) {
+                    inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals);
+                }
+            }
         }
         boolean ok = errors.isEmpty();
         return new UploadResult(ok, errors, inserted, deleted, updatedLogs, skippedLogs, warnLogs);
@@ -168,25 +190,17 @@ public class MatchUploadService {
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
         League league = findOrCreateLeague(leagueName, country, season);
-        long deleted = 0;
-        if (fullReplace) {
-            deleted = matchRepository.deleteByLeague(league);
-        }
-        int inserted = 0;
-        Set<String> seenKeys = new HashSet<>();
 
+        // 1) Parse to items first
+        List<MatchIngestItem> items = new ArrayList<>();
         int currentRound = -1;
         String[] lines = text.split("\r?\n");
 
-        // Process lines with support for two formats:
-        // A) Single-line: YYYY-MM-DD, Home - Away, X-Y (original)
-        // B) Vertical multi-line blocks (date line, home, home, away, away, hg, ag)
         for (int i = 0; i < lines.length; i++) {
             String raw = lines[i];
             String line = raw == null ? "" : raw.trim();
             if (line.isEmpty()) continue;
 
-            // Round header
             if (line.toLowerCase().startsWith("round")) {
                 currentRound = parseRoundNumber(line);
                 if (currentRound <= 0) {
@@ -195,13 +209,10 @@ public class MatchUploadService {
                 continue;
             }
 
-            // If looks like the original single-line CSV-like format (has commas and dash)
             if (line.contains(",") && line.contains("-")) {
                 try {
                     DateTimeFormatter df = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-                    String[] segments = Arrays.stream(line.split(","))
-                            .map(String::trim)
-                            .toArray(String[]::new);
+                    String[] segments = Arrays.stream(line.split(",")).map(String::trim).toArray(String[]::new);
                     if (segments.length < 3) {
                         throw new IllegalArgumentException("Line must have date, teams, score: " + line);
                     }
@@ -212,122 +223,62 @@ public class MatchUploadService {
                     String awayName = teamsPart[1].trim();
                     String[] scorePart = segments[2].split("-");
                     if (scorePart.length != 2) throw new IllegalArgumentException("Score must be 'home-away'");
-                    int homeGoals = Integer.parseInt(scorePart[0].trim());
-                    int awayGoals = Integer.parseInt(scorePart[1].trim());
+                    String hgStr = scorePart[0].trim();
+                    String agStr = scorePart[1].trim();
+                    int homeGoals = (hgStr.isEmpty() || hgStr.equals("-") || hgStr.equals("–") || hgStr.equals("—")) ? 0 : Integer.parseInt(hgStr);
+                    int awayGoals = (agStr.isEmpty() || agStr.equals("-") || agStr.equals("–") || agStr.equals("—")) ? 0 : Integer.parseInt(agStr);
 
                     if (currentRound <= 0) {
                         errors.add("Round not specified for line: " + line);
                         continue;
                     }
-                    if (incrementalUpdate) {
-                        Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
-                        Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
-                        if (homeOpt.isEmpty() || awayOpt.isEmpty()) {
-                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found (team not found)"));
-                        } else {
-                            Team home = homeOpt.get();
-                            Team away = awayOpt.get();
-                            String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + currentRound;
-                            if (seenKeys.add(key)) {
-                                Optional<Match> byRound = matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), currentRound, home.getId(), away.getId());
-                                Match target = byRound.orElseGet(() -> {
-                                    List<Match> lst = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
-                                    return lst.stream().filter(m -> m.getHomeGoals() != null && m.getAwayGoals() != null && m.getHomeGoals() == 0 && m.getAwayGoals() == 0)
-                                            .findFirst().orElse(null);
-                                });
-                                if (target == null) {
-                                    skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
-                                } else {
-                                    if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
-                                        warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));
-                                    }
-                                    boolean changed = false;
-                                    if (date != null && !date.equals(target.getDate())) { target.setDate(date); changed = true; }
-                                    if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
-                                        target.setHomeGoals(homeGoals);
-                                        target.setAwayGoals(awayGoals);
-                                        changed = true;
-                                    }
-                                    if (changed) matchRepository.save(target);
-                                    updatedLogs.add(new UpdateLog(target.getId(), homeName, awayName, homeGoals + "-" + awayGoals, "Finished"));
-                                }
-                            }
-                        }
-                    } else {
-                        Team home = findOrCreateTeam(league, homeName);
-                        Team away = findOrCreateTeam(league, awayName);
-                        String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + currentRound;
-                        if (seenKeys.add(key)) {
-                            matchRepository.save(new Match(league, home, away, date, currentRound, homeGoals, awayGoals));
-                            inserted++;
-                        }
-                    }
+                    items.add(new MatchIngestItem(league.getId(), league.getName(), country, season, date, currentRound, homeName, awayName, homeGoals, awayGoals));
                     continue;
                 } catch (Exception ex) {
                     // fall through to try vertical parsing and also record the error later if fails
                 }
             }
 
-            // Try vertical block starting with a date line like "dd.MM. HH:mm" or "dd.MM.HH:mm"
             if (isDayMonthTimeLine(line)) {
                 try {
                     LocalDate date = parseDayMonthToDate(line, season);
-
-                    // State-machine parse forward from the date line to find:
-                    // homeName (non-number), awayName (non-number), then two numbers for scores.
                     String homeName = null;
                     String awayName = null;
                     Integer homeGoals = null;
                     Integer awayGoals = null;
 
                     int j = i + 1;
-                    int maxLookahead = 12; // generous to handle noise/duplicates
+                    int maxLookahead = 12;
                     int steps = 0;
                     while (j < lines.length && steps < maxLookahead) {
                         String lnRaw = lines[j];
                         String ln = lnRaw == null ? "" : lnRaw.trim();
                         if (!ln.isEmpty()) {
-                            // Stop if we hit a new block header before finishing (next Round or next date line)
                             if (ln.toLowerCase().startsWith("round") || isDayMonthTimeLine(ln)) {
                                 break;
                             }
-
                             if (homeName == null) {
                                 if (!isPureNumber(ln)) {
                                     homeName = ln;
-                                    // skip immediate duplicate
                                     if (j + 1 < lines.length) {
                                         String nextLn = lines[j + 1] == null ? "" : lines[j + 1].trim();
-                                        if (!nextLn.isEmpty() && nextLn.equalsIgnoreCase(homeName)) {
-                                            j++; steps++; // consume duplicate
-                                        }
+                                        if (!nextLn.isEmpty() && nextLn.equalsIgnoreCase(homeName)) { j++; steps++; }
                                     }
                                 }
                             } else if (awayName == null) {
                                 if (!isPureNumber(ln)) {
-                                    // avoid picking home name again if repeated later
                                     if (!ln.equalsIgnoreCase(homeName)) {
                                         awayName = ln;
-                                        // skip immediate duplicate
                                         if (j + 1 < lines.length) {
                                             String nextLn = lines[j + 1] == null ? "" : lines[j + 1].trim();
-                                            if (!nextLn.isEmpty() && nextLn.equalsIgnoreCase(awayName)) {
-                                                j++; steps++; // consume duplicate
-                                            }
+                                            if (!nextLn.isEmpty() && nextLn.equalsIgnoreCase(awayName)) { j++; steps++; }
                                         }
                                     }
                                 }
                             } else if (homeGoals == null) {
-                                if (isPureNumber(ln)) {
-                                    homeGoals = Integer.parseInt(ln);
-                                }
+                                if (isPureNumber(ln)) { homeGoals = Integer.parseInt(ln); }
                             } else if (awayGoals == null) {
-                                if (isPureNumber(ln)) {
-                                    awayGoals = Integer.parseInt(ln);
-                                    // We have everything we need.
-                                    j++; steps++;
-                                    break;
-                                }
+                                if (isPureNumber(ln)) { awayGoals = Integer.parseInt(ln); j++; steps++; break; }
                             }
                         }
                         j++; steps++;
@@ -335,7 +286,7 @@ public class MatchUploadService {
 
                     if (currentRound <= 0) {
                         errors.add("Round not specified for block starting at date: " + line);
-                        i = j - 1; // advance
+                        i = j - 1;
                         continue;
                     }
                     if (homeName == null || awayName == null || homeGoals == null || awayGoals == null) {
@@ -344,50 +295,8 @@ public class MatchUploadService {
                         continue;
                     }
 
-                    if (incrementalUpdate) {
-                        Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
-                        Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
-                        if (homeOpt.isEmpty() || awayOpt.isEmpty()) {
-                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found (team not found)"));
-                        } else {
-                            Team home = homeOpt.get();
-                            Team away = awayOpt.get();
-                            String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + currentRound;
-                            if (seenKeys.add(key)) {
-                                Optional<Match> byRound = matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), currentRound, home.getId(), away.getId());
-                                Match target = byRound.orElseGet(() -> {
-                                    List<Match> lst = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
-                                    return lst.stream().filter(m -> m.getHomeGoals() != null && m.getAwayGoals() != null && m.getHomeGoals() == 0 && m.getAwayGoals() == 0)
-                                            .findFirst().orElse(null);
-                                });
-                                if (target == null) {
-                                    skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
-                                } else {
-                                    if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
-                                        warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));
-                                    }
-                                    boolean changed = false;
-                                    if (date != null && !date.equals(target.getDate())) { target.setDate(date); changed = true; }
-                                    if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
-                                        target.setHomeGoals(homeGoals);
-                                        target.setAwayGoals(awayGoals);
-                                        changed = true;
-                                    }
-                                    if (changed) matchRepository.save(target);
-                                    updatedLogs.add(new UpdateLog(target.getId(), homeName, awayName, homeGoals + "-" + awayGoals, "Finished"));
-                                }
-                            }
-                        }
-                    } else {
-                        Team home = findOrCreateTeam(league, homeName);
-                        Team away = findOrCreateTeam(league, awayName);
-                        String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + currentRound;
-                        if (seenKeys.add(key)) {
-                            matchRepository.save(new Match(league, home, away, date, currentRound, homeGoals, awayGoals));
-                            inserted++;
-                        }
-                    }
-                    i = j - 1; // advance index to last consumed
+                    items.add(new MatchIngestItem(league.getId(), league.getName(), country, season, date, currentRound, homeName, awayName, homeGoals, awayGoals));
+                    i = j - 1;
                     continue;
                 } catch (Exception ex) {
                     errors.add("Line error: " + ex.getMessage() + " | line=\"" + line + "\"");
@@ -395,13 +304,75 @@ public class MatchUploadService {
                 }
             }
 
-            // If line is just a number or noise, skip silently to avoid flooding errors
-            if (isPureNumber(line)) {
-                continue;
-            }
-
-            // If reached here and not parsed, record a gentle error
+            if (isPureNumber(line)) { continue; }
             errors.add("Unrecognized line format: " + line);
+        }
+
+        // 2) Validate
+        var vr = validationService.validate(items);
+        if (!vr.isValid()) {
+            errors.addAll(vr.errorsAsStrings());
+            warnLogs.addAll(vr.warningsAsStrings().stream().map(w -> new WarnLog(null, null, w)).toList());
+            return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+
+        // 3) Persist
+        long deleted = 0;
+        if (fullReplace) {
+            deleted = matchRepository.deleteByLeague(league);
+        }
+        int inserted = 0;
+        Set<String> seenKeys = new HashSet<>();
+        for (MatchIngestItem it : items) {
+            LocalDate date = it.getDate();
+            int round = Optional.ofNullable(it.getRound()).orElse(1);
+            String homeName = it.getHomeTeamName();
+            String awayName = it.getAwayTeamName();
+            int homeGoals = Optional.ofNullable(it.getHomeGoals()).orElse(0);
+            int awayGoals = Optional.ofNullable(it.getAwayGoals()).orElse(0);
+
+            if (incrementalUpdate) {
+                Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
+                Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
+                if (homeOpt.isEmpty() || awayOpt.isEmpty()) {
+                    skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found (team not found)"));
+                } else {
+                    Team home = homeOpt.get();
+                    Team away = awayOpt.get();
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                    if (seenKeys.add(key)) {
+                        Optional<Match> byRound = matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId());
+                        Match target = byRound.orElseGet(() -> {
+                            List<Match> lst = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
+                            return lst.stream().filter(m -> m.getHomeGoals() != null && m.getAwayGoals() != null && m.getHomeGoals() == 0 && m.getAwayGoals() == 0)
+                                    .findFirst().orElse(null);
+                        });
+                        if (target == null) {
+                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
+                        } else {
+                            if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
+                                warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));
+                            }
+                            boolean changed = false;
+                            if (date != null && !date.equals(target.getDate())) { target.setDate(date); changed = true; }
+                            if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
+                                target.setHomeGoals(homeGoals);
+                                target.setAwayGoals(awayGoals);
+                                changed = true;
+                            }
+                            if (changed) matchRepository.save(target);
+                            updatedLogs.add(new UpdateLog(target.getId(), homeName, awayName, homeGoals + "-" + awayGoals, "Finished"));
+                        }
+                    }
+                }
+            } else {
+                Team home = findOrCreateTeam(league, homeName);
+                Team away = findOrCreateTeam(league, awayName);
+                String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                if (seenKeys.add(key)) {
+                    inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals);
+                }
+            }
         }
         boolean ok = errors.isEmpty();
         return new UploadResult(ok, errors, inserted, deleted, updatedLogs, skippedLogs, warnLogs);
@@ -447,14 +418,23 @@ public class MatchUploadService {
     }
 
     private League findOrCreateLeague(String leagueName, String country, String season) {
-        String ln = opt(leagueName);
-        String c = opt(country);
-        String s = opt(season);
+        String ln = normalizeKey(opt(leagueName));
+        String c = normalizeKey(opt(country));
+        String s = normalizeSeason(opt(season));
         if (ln.isEmpty() || c.isEmpty() || s.isEmpty()) {
             throw new IllegalArgumentException("League name, country and season are required");
         }
         return leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(ln, c, s)
-                .orElseGet(() -> leagueRepository.save(new League(ln, c, s)));
+                .orElseGet(() -> {
+                    try {
+                        return leagueRepository.save(new League(ln, c, s));
+                    } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                        // Another row with the same unique key already exists (or whitespace/case normalization mismatch).
+                        // Re-fetch and return existing instead of failing with 500.
+                        return leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(ln, c, s)
+                                .orElseThrow(() -> ex);
+                    }
+                });
     }
 
     private Team findOrCreateTeam(League league, String name) {
@@ -498,6 +478,15 @@ public class MatchUploadService {
         try { return Integer.parseInt(v.trim()); } catch (Exception e) { return def; }
     }
 
+    private static Integer parseNullableInt(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        if (t.isEmpty()) return null;
+        // Treat dashes as placeholders for fixtures (0 goals)
+        if (t.equals("-") || t.equals("–") || t.equals("—")) return 0;
+        try { return Integer.parseInt(t); } catch (Exception e) { return null; }
+    }
+
     private static String[] splitCsv(String line) {
         // Simple split; assumes no quoted commas
         return line.split(",");
@@ -524,16 +513,49 @@ public class MatchUploadService {
 
     private static String opt(String s) { return s == null ? "" : s.trim(); }
 
+    private static String normalizeKey(String s) {
+        // Trim and collapse internal whitespace to a single space
+        if (s == null) return "";
+        String t = s.trim().replaceAll("\\s+", " ");
+        return t;
+    }
+
+    private static String normalizeSeason(String s) {
+        if (s == null) return "";
+        String t = s.trim();
+        // Replace common slash variants and collapse spaces
+        t = t.replace('／', '/').replace('∕', '/').replace('⁄', '/').replace('\\', '/');
+        t = t.replaceAll("\\s+", " ");
+        return t;
+    }
+
     /**
-     * Upsert a match by (league, round, home, away).
+     * Upsert a match using canonical identity (league, date, home, away).
+     * If date is null (should not happen after validation), fallback to (league, round, home, away).
      * Returns 1 if a new row was inserted, 0 if an existing row was updated or nothing changed.
      */
     private int upsertMatch(League league, Team home, Team away, LocalDate date, int round, Integer homeGoals, Integer awayGoals) {
+        if (date != null) {
+            return matchRepository
+                    .findByLeagueIdAndHomeTeamIdAndAwayTeamIdAndDate(league.getId(), home.getId(), away.getId(), date)
+                    .map(existing -> {
+                        boolean changed = false;
+                        if (!Objects.equals(round, existing.getRound())) { existing.setRound(round); changed = true; }
+                        if (homeGoals != null && !Objects.equals(homeGoals, existing.getHomeGoals())) { existing.setHomeGoals(homeGoals); changed = true; }
+                        if (awayGoals != null && !Objects.equals(awayGoals, existing.getAwayGoals())) { existing.setAwayGoals(awayGoals); changed = true; }
+                        if (changed) { matchRepository.save(existing); }
+                        return 0; // not a new insert
+                    })
+                    .orElseGet(() -> {
+                        matchRepository.save(new Match(league, home, away, date, round, homeGoals, awayGoals));
+                        return 1; // inserted
+                    });
+        }
+        // Fallback: round-based
         return matchRepository
                 .findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId())
                 .map(existing -> {
                     boolean changed = false;
-                    if (date != null && !date.equals(existing.getDate())) { existing.setDate(date); changed = true; }
                     if (homeGoals != null && !Objects.equals(homeGoals, existing.getHomeGoals())) { existing.setHomeGoals(homeGoals); changed = true; }
                     if (awayGoals != null && !Objects.equals(awayGoals, existing.getAwayGoals())) { existing.setAwayGoals(awayGoals); changed = true; }
                     if (changed) { matchRepository.save(existing); }

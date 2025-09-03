@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -56,7 +57,6 @@ public class LeagueTableService {
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 " +
                 "    AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL " +
-                "    AND m.match_date <= CURRENT_DATE " +
                 "  UNION ALL " +
                 "  SELECT m.away_team_id AS team_id, 1 AS mp, " +
                 "         CASE WHEN m.away_goals > m.home_goals THEN 1 ELSE 0 END AS w, " +
@@ -67,7 +67,6 @@ public class LeagueTableService {
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 " +
                 "    AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL " +
-                "    AND m.match_date <= CURRENT_DATE " +
                 ") s " +
                 "JOIN teams t ON t.id = s.team_id " +
                 "GROUP BY t.id, t.name " +
@@ -151,9 +150,9 @@ public class LeagueTableService {
         @SuppressWarnings("unchecked")
         List<Object[]> perTeam = em.createNativeQuery(
                 "SELECT t.id AS team_id, t.name AS team_name, COUNT(*) AS mp FROM (" +
-                        " SELECT home_team_id AS team_id FROM matches WHERE league_id = ?1 AND home_goals IS NOT NULL AND away_goals IS NOT NULL AND match_date <= CURRENT_DATE " +
+                        " SELECT home_team_id AS team_id FROM matches WHERE league_id = ?1 AND home_goals IS NOT NULL AND away_goals IS NOT NULL " +
                         " UNION ALL " +
-                        " SELECT away_team_id AS team_id FROM matches WHERE league_id = ?1 AND home_goals IS NOT NULL AND away_goals IS NOT NULL AND match_date <= CURRENT_DATE " +
+                        " SELECT away_team_id AS team_id FROM matches WHERE league_id = ?1 AND home_goals IS NOT NULL AND away_goals IS NOT NULL " +
                     ") s JOIN teams t ON t.id = s.team_id GROUP BY t.id, t.name ORDER BY mp DESC, t.name ASC")
             .setParameter(1, leagueId)
             .getResultList();

@@ -6,6 +6,8 @@
     "ng": "ng",
     "start": "ng serve --proxy-config proxy.conf.json",
     "build": "ng build",
+    "build:prod": "ng build --configuration production",
+    "check:dist": "node ./scripts/check-dist.js",
     "test": "ng test",
     "lint": "ng lint"
   },

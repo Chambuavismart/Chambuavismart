@@ -46,4 +46,7 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
     // Distinct available dates between range for a given season (via league join)
     @Query(value = "select distinct DATE(f.date_time) as d from fixtures f join leagues l on l.id = f.league_id where f.date_time >= ?1 and f.date_time < ?2 and l.season = ?3 order by d", nativeQuery = true)
     List<java.sql.Date> findDistinctDatesBetweenForSeason(LocalDateTime startInclusive, LocalDateTime endExclusive, String season);
+
+    // Finder for incremental upsert
+    java.util.Optional<Fixture> findByLeague_IdAndHomeTeamIgnoreCaseAndAwayTeamIgnoreCaseAndDateTime(Long leagueId, String homeTeam, String awayTeam, java.time.LocalDateTime dateTime);
 }
