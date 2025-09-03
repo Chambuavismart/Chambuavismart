@@ -7,6 +7,8 @@ import com.chambua.vismart.model.Team;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.repository.TeamRepository;
+import com.chambua.vismart.repository.SeasonRepository;
+import com.chambua.vismart.model.Season;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,12 +30,14 @@ public class MatchUploadService {
     private final TeamRepository teamRepository;
     private final MatchRepository matchRepository;
     private final MatchDataValidationService validationService;
+    private final SeasonRepository seasonRepository;
 
-    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository, MatchDataValidationService validationService) {
+    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository, MatchDataValidationService validationService, SeasonRepository seasonRepository) {
         this.leagueRepository = leagueRepository;
         this.teamRepository = teamRepository;
         this.matchRepository = matchRepository;
         this.validationService = validationService;
+        this.seasonRepository = seasonRepository;
     }
 
     public record UploadResult(boolean success, List<String> errors, int insertedCount, long deletedCount,
@@ -44,7 +48,7 @@ public class MatchUploadService {
     public record WarnLog(String homeTeam, String awayTeam, String reason) {}
 
     @Transactional
-    public UploadResult uploadCsv(String leagueName, String country, String season, MultipartFile file, boolean fullReplace, boolean incrementalUpdate) {
+    public UploadResult uploadCsv(String leagueName, String country, String season, Long seasonId, MultipartFile file, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode) {
         List<String> errors = new ArrayList<>();
         List<UpdateLog> updatedLogs = new ArrayList<>();
         List<SkipLog> skippedLogs = new ArrayList<>();
@@ -54,6 +58,18 @@ public class MatchUploadService {
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
         League league = findOrCreateLeague(leagueName, country, season);
+        Season seasonEntity = null;
+        if (seasonId != null) {
+            seasonEntity = seasonRepository.findById(seasonId).orElse(null);
+        }
+        if (seasonEntity == null) {
+            seasonEntity = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), normalizeSeason(season)).orElseGet(() -> {
+                Season s = new Season();
+                s.setLeague(league);
+                s.setName(normalizeSeason(season));
+                return seasonRepository.save(s);
+            });
+        }
 
         // 1) Parse to items (no persistence yet)
         List<MatchIngestItem> items = new ArrayList<>();
@@ -147,6 +163,13 @@ public class MatchUploadService {
                                     .findFirst().orElse(null);
                         });
                         if (target == null) {
+                            // Try to match a null-goals fixture as fallback
+                            if (byRound.isEmpty()) {
+                                java.util.List<Match> lst2 = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
+                                target = lst2.stream().filter(m -> m.getHomeGoals() == null && m.getAwayGoals() == null).findFirst().orElse(null);
+                            }
+                        }
+                        if (target == null) {
                             skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
                         } else {
                             if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
@@ -180,7 +203,7 @@ public class MatchUploadService {
     }
 
     @Transactional
-    public UploadResult uploadText(String leagueName, String country, String season, String text, boolean fullReplace, boolean incrementalUpdate) {
+    public UploadResult uploadText(String leagueName, String country, String season, Long seasonId, String text, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode) {
         List<String> errors = new ArrayList<>();
         List<UpdateLog> updatedLogs = new ArrayList<>();
         List<SkipLog> skippedLogs = new ArrayList<>();
@@ -190,6 +213,10 @@ public class MatchUploadService {
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
         League league = findOrCreateLeague(leagueName, country, season);
+        Season seasonEntity = null;
+        if (seasonId != null) {
+            seasonEntity = seasonRepository.findById(seasonId).orElse(null);
+        }
 
         // 1) Parse to items first
         List<MatchIngestItem> items = new ArrayList<>();
@@ -348,6 +375,13 @@ public class MatchUploadService {
                                     .findFirst().orElse(null);
                         });
                         if (target == null) {
+                            // Try to match a null-goals fixture as fallback
+                            if (byRound.isEmpty()) {
+                                java.util.List<Match> lst2 = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamId(league.getId(), home.getId(), away.getId());
+                                target = lst2.stream().filter(m -> m.getHomeGoals() == null && m.getAwayGoals() == null).findFirst().orElse(null);
+                            }
+                        }
+                        if (target == null) {
                             skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
                         } else {
                             if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
@@ -482,8 +516,8 @@ public class MatchUploadService {
         if (v == null) return null;
         String t = v.trim();
         if (t.isEmpty()) return null;
-        // Treat dashes as placeholders for fixtures (0 goals)
-        if (t.equals("-") || t.equals("–") || t.equals("—")) return 0;
+        // Treat dashes as unknown/fixture -> null
+        if (t.equals("-") || t.equals("–") || t.equals("—")) return null;
         try { return Integer.parseInt(t); } catch (Exception e) { return null; }
     }
 
@@ -535,34 +569,55 @@ public class MatchUploadService {
      * Returns 1 if a new row was inserted, 0 if an existing row was updated or nothing changed.
      */
     private int upsertMatch(League league, Team home, Team away, LocalDate date, int round, Integer homeGoals, Integer awayGoals) {
+        Integer hgToSave = homeGoals;
+        Integer agToSave = awayGoals;
+        // Do not convert 0-0 to null, as some deployments have NOT NULL constraints on goal columns.
+        // Keep explicit 0-0 for future-dated fixtures to avoid SQLIntegrityConstraintViolationException.
         if (date != null) {
+            final Integer fHg = hgToSave;
+            final Integer fAg = agToSave;
             return matchRepository
                     .findByLeagueIdAndHomeTeamIdAndAwayTeamIdAndDate(league.getId(), home.getId(), away.getId(), date)
                     .map(existing -> {
                         boolean changed = false;
                         if (!Objects.equals(round, existing.getRound())) { existing.setRound(round); changed = true; }
-                        if (homeGoals != null && !Objects.equals(homeGoals, existing.getHomeGoals())) { existing.setHomeGoals(homeGoals); changed = true; }
-                        if (awayGoals != null && !Objects.equals(awayGoals, existing.getAwayGoals())) { existing.setAwayGoals(awayGoals); changed = true; }
+                        if (!Objects.equals(fHg, existing.getHomeGoals())) { existing.setHomeGoals(fHg); changed = true; }
+                        if (!Objects.equals(fAg, existing.getAwayGoals())) { existing.setAwayGoals(fAg); changed = true; }
                         if (changed) { matchRepository.save(existing); }
                         return 0; // not a new insert
                     })
                     .orElseGet(() -> {
-                        matchRepository.save(new Match(league, home, away, date, round, homeGoals, awayGoals));
-                        return 1; // inserted
+                        // Fallback: avoid violating unique (league, round, home, away) by updating existing row if present
+                        return matchRepository
+                                .findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId())
+                                .map(existing -> {
+                                    boolean changed = false;
+                                    if (existing.getDate() == null || !existing.getDate().equals(date)) { existing.setDate(date); changed = true; }
+                                    if (!Objects.equals(fHg, existing.getHomeGoals())) { existing.setHomeGoals(fHg); changed = true; }
+                                    if (!Objects.equals(fAg, existing.getAwayGoals())) { existing.setAwayGoals(fAg); changed = true; }
+                                    if (changed) { matchRepository.save(existing); }
+                                    return 0; // updated existing
+                                })
+                                .orElseGet(() -> {
+                                    matchRepository.save(new Match(league, home, away, date, round, fHg, fAg));
+                                    return 1; // inserted
+                                });
                     });
         }
         // Fallback: round-based
+        final Integer fHg2 = hgToSave;
+        final Integer fAg2 = agToSave;
         return matchRepository
                 .findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId())
                 .map(existing -> {
                     boolean changed = false;
-                    if (homeGoals != null && !Objects.equals(homeGoals, existing.getHomeGoals())) { existing.setHomeGoals(homeGoals); changed = true; }
-                    if (awayGoals != null && !Objects.equals(awayGoals, existing.getAwayGoals())) { existing.setAwayGoals(awayGoals); changed = true; }
+                    if (!Objects.equals(fHg2, existing.getHomeGoals())) { existing.setHomeGoals(fHg2); changed = true; }
+                    if (!Objects.equals(fAg2, existing.getAwayGoals())) { existing.setAwayGoals(fAg2); changed = true; }
                     if (changed) { matchRepository.save(existing); }
                     return 0; // not a new insert
                 })
                 .orElseGet(() -> {
-                    matchRepository.save(new Match(league, home, away, date, round, homeGoals, awayGoals));
+                    matchRepository.save(new Match(league, home, away, date, round, fHg2, fAg2));
                     return 1; // inserted
                 });
     }

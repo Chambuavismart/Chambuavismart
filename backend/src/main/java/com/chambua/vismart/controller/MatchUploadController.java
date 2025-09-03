@@ -31,12 +31,14 @@ public class MatchUploadController {
             @RequestParam String leagueName,
             @RequestParam String country,
             @RequestParam String season,
+            @RequestParam(name = "seasonId", required = false) Long seasonId,
             @RequestParam(defaultValue = "true") boolean fullReplace,
             @RequestParam(defaultValue = "false") boolean incrementalUpdate,
+            @RequestParam(defaultValue = "false") boolean fixtureMode,
             @RequestParam("file") MultipartFile file
     ) {
         try {
-            var result = service.uploadCsv(leagueName, country, season, file, fullReplace, incrementalUpdate);
+            var result = service.uploadCsv(leagueName, country, season, seasonId, file, fullReplace, incrementalUpdate, fixtureMode);
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
@@ -63,7 +65,7 @@ public class MatchUploadController {
         }
     }
 
-    public record TextUploadRequest(String leagueName, String country, String season, String text, Boolean fullReplace, Boolean incrementalUpdate) {}
+    public record TextUploadRequest(String leagueName, String country, String season, Long seasonId, String text, Boolean fullReplace, Boolean incrementalUpdate, Boolean fixtureMode) {}
 
     // Minimal normalization mirroring service behavior
     private static String normalizeKey(String s) {
@@ -83,8 +85,9 @@ public class MatchUploadController {
         if (req == null) return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Missing body"));
         boolean fullReplace = req.fullReplace() == null || req.fullReplace();
         boolean incrementalUpdate = req.incrementalUpdate() != null && req.incrementalUpdate();
+        boolean fixtureMode = req.fixtureMode() != null && req.fixtureMode();
         try {
-            var result = service.uploadText(req.leagueName(), req.country(), req.season(), req.text(), fullReplace, incrementalUpdate);
+            var result = service.uploadText(req.leagueName(), req.country(), req.season(), req.seasonId(), req.text(), fullReplace, incrementalUpdate, fixtureMode);
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(req.leagueName()), normalizeKey(req.country()), normalizeSeason(req.season()));
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))

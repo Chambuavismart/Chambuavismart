@@ -23,18 +23,26 @@ public class FormGuideService {
     public enum Scope { OVERALL, HOME, AWAY }
 
     public List<FormGuideRowDTO> compute(Long leagueId, int limit, Scope scope) {
+        return compute(leagueId, null, limit, scope);
+    }
+
+    public List<FormGuideRowDTO> compute(Long leagueId, Long seasonId, int limit, Scope scope) {
         if (leagueId == null) throw new IllegalArgumentException("leagueId is required");
         if (limit <= 0) limit = 6;
         if (scope == null) scope = Scope.OVERALL;
 
+        boolean filterBySeason = (seasonId != null);
+
+        String seasonClause = filterBySeason ? " AND m.season_id = ?2" : "";
+
         String baseHome =
                 "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga " +
                 "FROM matches m JOIN teams t ON t.id = m.home_team_id " +
-                "WHERE m.league_id = ?1 AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL";
+                "WHERE m.league_id = ?1 AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL" + seasonClause;
         String baseAway =
                 "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga " +
                 "FROM matches m JOIN teams t ON t.id = m.away_team_id " +
-                "WHERE m.league_id = ?1 AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL";
+                "WHERE m.league_id = ?1 AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL" + seasonClause;
 
         String sql;
         if (scope == Scope.HOME) {
@@ -45,10 +53,11 @@ public class FormGuideService {
             sql = baseHome + " UNION ALL " + baseAway + " ORDER BY 3, 1 DESC, 2 DESC";
         }
 
+        var q = em.createNativeQuery(sql)
+                .setParameter(1, leagueId);
+        if (filterBySeason) q.setParameter(2, seasonId);
         @SuppressWarnings("unchecked")
-        List<Object[]> rows = em.createNativeQuery(sql)
-                .setParameter(1, leagueId)
-                .getResultList();
+        List<Object[]> rows = q.getResultList();
 
         // Group rows by team
         Map<Long, List<Row>> byTeam = new LinkedHashMap<>();

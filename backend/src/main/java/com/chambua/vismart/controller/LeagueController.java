@@ -30,7 +30,9 @@ public class LeagueController {
 
     @GetMapping("/{leagueId}/table")
     public List<LeagueTableEntryDTO> getLeagueTable(@PathVariable Long leagueId,
-                                                    @RequestParam(value = "season", required = false) String season) {
+                                                    @RequestParam(value = "season", required = false) String season,
+                                                    @RequestParam(value = "seasonId", required = false) Long seasonId) {
+        // season string kept for backward-compat validation but not strictly required anymore
         if (season != null) {
             League league = leagueRepository.findById(leagueId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "League not found"));
@@ -38,6 +40,9 @@ public class LeagueController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Season mismatch for leagueId");
             }
         }
-        return leagueTableService.computeTable(leagueId, season);
+        if (seasonId != null) {
+            return leagueTableService.computeTableBySeasonId(leagueId, seasonId);
+        }
+        return leagueTableService.computeTable(leagueId, (String) null);
     }
 }

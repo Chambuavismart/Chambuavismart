@@ -20,7 +20,8 @@ public class FormGuideController {
     @GetMapping("/{leagueId}")
     public List<FormGuideRowDTO> getFormGuide(@PathVariable Long leagueId,
                                               @RequestParam(name = "limit", defaultValue = "6") String limitParam,
-                                              @RequestParam(name = "scope", defaultValue = "overall") String scope) {
+                                              @RequestParam(name = "scope", defaultValue = "overall") String scope,
+                                              @RequestParam(name = "seasonId", required = false) Long seasonId) {
         FormGuideService.Scope s = switch (scope.toLowerCase()) {
             case "home" -> FormGuideService.Scope.HOME;
             case "away" -> FormGuideService.Scope.AWAY;
@@ -36,6 +37,9 @@ public class FormGuideController {
                 limit = 6;
             }
         }
-        return formGuideService.compute(leagueId, limit, s);
+        if (seasonId == null) {
+            return formGuideService.compute(leagueId, limit, s);
+        }
+        return formGuideService.compute(leagueId, seasonId, limit, s);
     }
 }

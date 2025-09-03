@@ -11,3 +11,4 @@ public class ChambuaViSmartApplication {
         SpringApplication.run(ChambuaViSmartApplication.class, args);
     }
 }
+

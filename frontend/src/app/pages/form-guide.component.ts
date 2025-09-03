@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { League, LeagueService, FormGuideRowDTO } from '../services/league.service';
+import { Season, SeasonService } from '../services/season.service';
 
 @Component({
   selector: 'app-form-guide',
@@ -16,6 +17,12 @@ import { League, LeagueService, FormGuideRowDTO } from '../services/league.servi
         <select class="select" [ngModel]="leagueId" (ngModelChange)="onLeagueChange($event)">
           <option [ngValue]="null">-- Choose a league --</option>
           <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.name }} ({{ lg.country }} {{ lg.season }})</option>
+        </select>
+
+        <label class="label">Season</label>
+        <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)" [disabled]="seasons.length === 0">
+          <option [ngValue]="null">⚡ Combined (All Seasons)</option>
+          <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
         </select>
 
         <label class="label">Limit</label>
@@ -38,6 +45,9 @@ import { League, LeagueService, FormGuideRowDTO } from '../services/league.servi
       <div *ngIf="error" class="banner">{{ error }}</div>
 
       <div class="panel" *ngIf="!loading && rows?.length">
+        <div style="font-weight:700; margin-bottom:8px; color:#9fb3cd;">
+          Form Guide – {{ headerLeagueName() }} ({{ headerSeasonName() }})
+        </div>
         <div style="overflow-x:auto;">
           <table class="table rounded-table">
             <thead>
@@ -112,6 +122,7 @@ import { League, LeagueService, FormGuideRowDTO } from '../services/league.servi
 })
 export class FormGuideComponent {
   private api = inject(LeagueService);
+  private seasonApi = inject(SeasonService);
 
   leagues: League[] = [];
   leagueId: number | null = null;
@@ -120,6 +131,8 @@ export class FormGuideComponent {
   userSetLimit = false;
 
   rows: FormGuideRowDTO[] = [];
+  seasons: Season[] = [];
+  seasonId: number | null = null;
   sortedRows: FormGuideRowDTO[] = [];
   sortCol: keyof FormGuideRowDTO | 'ppg' | 'teamName' | 'mp' = 'ppg';
   sortDir: 'asc'|'desc' = 'desc'; // default PPG desc
@@ -134,7 +147,7 @@ export class FormGuideComponent {
   private load(){
     if (!this.leagueId) return;
     this.loading = true; this.error = null; // keep current rows to avoid flicker
-    this.api.getFormGuide(this.leagueId, this.limit, this.scope).subscribe({
+    this.api.getFormGuide(this.leagueId, this.limit, this.scope, this.seasonId).subscribe({
       next: d => { this.rows = d; this.applySort(); this.loading = false; },
       error: _ => { this.error = 'Failed to load form guide'; this.loading = false; }
     })
@@ -144,7 +157,22 @@ export class FormGuideComponent {
     this.leagueId = val;
     // Reset user override on league change so default view shows total MP
     this.userSetLimit = false;
-    if (this.leagueId) this.load();
+    this.seasonId = null;
+    this.seasons = [];
+    if (this.leagueId) {
+      this.seasonApi.listSeasons(this.leagueId).subscribe({ next: s => {
+        this.seasons = s ?? [];
+        const today = new Date().toISOString().slice(0,10);
+        const current = this.seasons.find(x => (!x.startDate || x.startDate <= today) && (!x.endDate || x.endDate >= today));
+        // Put current season at the top if present
+        if (current) {
+          this.seasons = [current, ...this.seasons.filter(x => x.id !== current.id)];
+        }
+        this.seasonId = current ? current.id : (this.seasons[0]?.id ?? null);
+        // Now that seasonId is set, load data for this default season
+        this.load();
+      }, error: _ => { this.seasons = []; this.load(); } });
+    }
   }
 
   onLimitChange(val: number | 'all'){
@@ -157,6 +185,11 @@ export class FormGuideComponent {
   setScope(val: 'overall'|'home'|'away'){
     if (this.scope === val) return;
     this.scope = val;
+    if (this.leagueId) this.load();
+  }
+
+  onSeasonChange(val: number | null){
+    this.seasonId = val;
     if (this.leagueId) this.load();
   }
 
@@ -241,5 +274,15 @@ export class FormGuideComponent {
     if (val >= 66) return '#19b56244';
     if (val >= 40) return '#facc1544';
     return '#ef444444';
+  }
+
+  headerLeagueName(){
+    const lg = this.leagues.find(l => l.id === this.leagueId);
+    return lg ? `${lg.name}` : '';
+  }
+  headerSeasonName(){
+    if (!this.seasonId) return 'Combined (All Seasons)';
+    const s = this.seasons.find(x => x.id === this.seasonId);
+    return s?.name || 'Season';
   }
 }

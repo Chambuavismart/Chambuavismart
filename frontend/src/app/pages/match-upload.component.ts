@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatchUploadService } from '../services/match-upload.service';
 import { LeagueService, LeagueDto } from '../services/league.service';
+import { SeasonService, Season } from '../services/season.service';
 import { HttpClient } from '@angular/common/http';
 import { COUNTRIES } from '../shared/countries.constant';
 
@@ -20,23 +21,33 @@ import { COUNTRIES } from '../shared/countries.constant';
         <button (click)="activeTab='fixtures'" [class.active]="activeTab==='fixtures'">Fixtures Upload</button>
       </div>
 
+      <!-- Upload Type Selection (applies to CSV / Raw Text) -->
       <div *ngIf="activeTab!=='fixtures'" class="card">
         <div class="mb-2">
-          <label class="mr-4">
-            <input type="radio" [(ngModel)]="updateMode" value="full" (change)="onUpdateModeChange()" />
-            Full replace existing matches
-          </label>
-          <label>
-            <input type="radio" [(ngModel)]="updateMode" value="incremental" (change)="onUpdateModeChange()" />
-            Incremental update (fill in results, keep fixtures intact)
-          </label>
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 6px;">
+            <label title="Create a brand new league with provided country and season.">
+              <input type="radio" [(ngModel)]="uploadType" value="NEW_LEAGUE" (change)="onUploadTypeChange()" />
+              New League Upload
+            </label>
+            <label title="Replace all existing matches for a selected league and season.">
+              <input type="radio" [(ngModel)]="uploadType" value="FULL_REPLACE" (change)="onUploadTypeChange()" />
+              Complete Replacement of Existing League
+            </label>
+            <label title="Update results while keeping existing fixtures; safe to re-run.">
+              <input type="radio" [(ngModel)]="uploadType" value="INCREMENTAL" (change)="onUploadTypeChange()" />
+              Incremental Update of Existing League
+            </label>
+            <label title="Upload an older season and link it to an existing league.">
+              <input type="radio" [(ngModel)]="uploadType" value="HISTORICAL" (change)="onUploadTypeChange()" />
+              Old Season Upload (link to existing league)
+            </label>
+          </div>
         </div>
+
+        <!-- Dynamic Fields per Upload Type (CSV/Text) -->
         <div class="grid">
-          <!-- League field switches by updateMode -->
-          <ng-container *ngIf="updateMode === 'full'; else incrementalBlock">
-            <label>League Name <input [(ngModel)]="leagueName" placeholder="e.g., Premier League"/></label>
-          </ng-container>
-          <ng-template #incrementalBlock>
+          <!-- Existing league selection for FULL_REPLACE / INCREMENTAL / HISTORICAL -->
+          <ng-container *ngIf="requiresExistingLeague; else newLeagueBlock">
             <label>
               League
               <select [(ngModel)]="selectedLeague" (change)="onLeagueSelected()">
@@ -44,18 +55,50 @@ import { COUNTRIES } from '../shared/countries.constant';
                 <option *ngFor="let league of leagues" [value]="league.id">{{ league.name }}</option>
               </select>
             </label>
+          </ng-container>
+          <ng-template #newLeagueBlock>
+            <label>
+              League Name
+              <input [(ngModel)]="leagueName" placeholder="e.g., Premier League"/>
+            </label>
           </ng-template>
 
-          <label>Country
+          <!-- Country handling -->
+          <label>
+            Country
             <div class="country-select">
-              <input type="text" class="country-filter" [(ngModel)]="countryFilter" placeholder="Search country..." [disabled]="updateMode==='incremental'"/>
-              <select [(ngModel)]="country" [disabled]="updateMode==='incremental'">
+              <input type="text" class="country-filter" [(ngModel)]="countryFilter" placeholder="Search country..." [disabled]="requiresExistingLeague"/>
+              <select [(ngModel)]="country" [disabled]="requiresExistingLeague">
                 <option value="">Select country...</option>
                 <option *ngFor="let c of filteredCountries" [value]="c">{{c}}</option>
               </select>
             </div>
           </label>
-          <label>Season <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="updateMode==='incremental'"/></label>
+
+          <!-- Season text input is required for NEW_LEAGUE and HISTORICAL; for existing league types it is read-only (pre-filled) but can be overridden for FULL_REPLACE -->
+          <label>
+            Season
+            <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="uploadType==='INCREMENTAL' || uploadType==='HISTORICAL'"/>
+          </label>
+
+          <!-- Season assignment (seasonId) available when a league is selected -->
+          <label>
+            Season (assign to)
+            <select [(ngModel)]="seasonId" [disabled]="!selectedLeague">
+              <option [ngValue]="null">Auto/current</option>
+              <option *ngFor="let s of seasons" [ngValue]="s.id">{{s.name}}</option>
+            </select>
+          </label>
+
+          <!-- Help text per type -->
+          <div style="grid-column: 1 / -1;" class="hint">
+            <ng-container [ngSwitch]="uploadType">
+              <div *ngSwitchCase="'NEW_LEAGUE'">Creates a new league. All matches will be inserted under the provided season.</div>
+              <div *ngSwitchCase="'FULL_REPLACE'">Deletes existing matches for the selected league/season and uploads the provided data.</div>
+              <div *ngSwitchCase="'INCREMENTAL'">Updates results for existing fixtures; safe to run multiple times.</div>
+              <div *ngSwitchCase="'HISTORICAL'">Links uploaded matches to the selected league as a past season.</div>
+            </ng-container>
+          </div>
         </div>
       </div>
 
@@ -191,7 +234,8 @@ Gimnasia Mendoza
 })
 export class MatchUploadComponent {
   activeTab: 'csv' | 'text' | 'fixtures' = 'csv';
-  updateMode: 'full' | 'incremental' = 'full';
+  // Upload type for CSV/Text flows
+  uploadType: 'NEW_LEAGUE' | 'FULL_REPLACE' | 'INCREMENTAL' | 'HISTORICAL' = 'NEW_LEAGUE';
 
   leagueName = '';
   country = '';
@@ -206,17 +250,18 @@ export class MatchUploadComponent {
     return this.countries.filter(c => c.toLowerCase().includes(q));
   }
 
-  // Derived flags maintained at call time based on updateMode
-  fullReplace = true;
-  incrementalUpdate = false;
+  // Fixtures-only toggle remains
+  fullReplace = true; // for fixtures tab checkbox
 
-  // Incremental mode state
+  // Existing leagues dataset
   leagues: { id: number; name: string; }[] = [];
   selectedLeague: string = '';
 
   // Fixtures upload state
   fixturesLeagueId: number | null = null;
   fixturesSeason: string = '';
+  fixturesLeagueName: string = '';
+  fixturesCountry: string = '';
   fixturesRawText: string = '';
   fixturesLeagues: { id: number; name: string; season: string; }[] = [];
 
@@ -228,7 +273,14 @@ export class MatchUploadComponent {
   errors: string[] = [];
   results: { updated?: any[]; skipped?: any[]; warnings?: any[] } = {};
 
-  constructor(private api: MatchUploadService, private leagueApi: LeagueService, private http: HttpClient) {
+  seasons: Season[] = [];
+  seasonId: number | null = null;
+
+  get requiresExistingLeague(): boolean {
+    return this.uploadType === 'FULL_REPLACE' || this.uploadType === 'INCREMENTAL' || this.uploadType === 'HISTORICAL';
+  }
+
+  constructor(private api: MatchUploadService, private leagueApi: LeagueService, private seasonApi: SeasonService, private http: HttpClient) {
     // load leagues for fixtures tab
     this.leagueApi.getLeagues().subscribe(ls => {
       this.fixturesLeagues = ls.map(l => ({ id: l.id, name: `${l.name} (${l.country})`, season: l.season }));
@@ -245,24 +297,32 @@ export class MatchUploadComponent {
   onFixturesLeagueChange(){
     const l = this.fixturesLeagues.find(x => x.id === this.fixturesLeagueId);
     if (l) this.fixturesSeason = l.season;
+    if (this.fixturesLeagueId) {
+      this.leagueApi.getLeagueDetails(this.fixturesLeagueId).subscribe(details => {
+        this.fixturesLeagueName = details.name;
+        this.fixturesCountry = details.country;
+        this.fixturesSeason = details.season;
+      });
+    } else {
+      this.fixturesLeagueName = '';
+      this.fixturesCountry = '';
+    }
   }
 
-  onUpdateModeChange(){
-    // Sync flags
-    this.fullReplace = this.updateMode === 'full';
-    this.incrementalUpdate = this.updateMode === 'incremental';
-
-    if (this.updateMode === 'incremental') {
-      // Load leagues for dropdown
+  onUploadTypeChange(){
+    // Load leagues when an existing-league-based type is selected
+    if (this.requiresExistingLeague) {
       this.leagueApi.getAllLeagues().subscribe(data => {
         this.leagues = (data || []).map(d => ({ id: d.id, name: d.name }));
       });
     } else {
-      // Reset incremental-related fields
+      // Reset fields for new league upload
       this.selectedLeague = '';
       this.leagues = [];
       this.country = '';
       this.season = '';
+      this.seasons = [];
+      this.seasonId = null;
     }
   }
 
@@ -273,6 +333,11 @@ export class MatchUploadComponent {
         this.season = details.season;
         this.leagueName = details.name; // keep API contract
       });
+      // load seasons for selected league
+      const lid = Number(this.selectedLeague);
+      if (!Number.isNaN(lid)) {
+        this.seasonApi.listSeasons(lid).subscribe({ next: s => this.seasons = s ?? [], error: _ => this.seasons = [] });
+      }
     } else {
       this.country = '';
       this.season = '';
@@ -283,10 +348,8 @@ export class MatchUploadComponent {
     this.resetFeedback();
     if (!this.validateMeta()) return;
     if (!this.file) return;
-    // Ensure flags reflect mode
-    const fullReplace = this.updateMode === 'full';
-    const incrementalUpdate = this.updateMode === 'incremental';
-    this.api.uploadCsv(this.leagueName, this.country, this.season, this.file, fullReplace, incrementalUpdate).subscribe({
+    const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
+    this.api.uploadUnifiedCsv(this.uploadType, this.leagueName, this.country, this.season, this.file, { seasonId: this.seasonId, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -295,9 +358,8 @@ export class MatchUploadComponent {
   uploadText(){
     this.resetFeedback();
     if (!this.validateMeta()) return;
-    const fullReplace = this.updateMode === 'full';
-    const incrementalUpdate = this.updateMode === 'incremental';
-    this.api.uploadText(this.leagueName, this.country, this.season, this.text, fullReplace, incrementalUpdate).subscribe({
+    const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
+    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: this.seasonId, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -308,18 +370,14 @@ export class MatchUploadComponent {
     if (!this.fixturesLeagueId || !this.fixturesRawText.trim()){
       this.success = false; this.message = 'Please select a league and paste fixtures text.'; return;
     }
-    const payload = {
-      leagueId: this.fixturesLeagueId,
-      fullReplace: this.fullReplace,
-      rawText: this.fixturesRawText
-    };
-    this.http.post<any>('/api/fixtures/upload', payload).subscribe({
+    if (!this.fixturesLeagueName || !this.fixturesCountry || !this.fixturesSeason){
+      this.success = false; this.message = 'League details missing. Please re-select the league.'; return;
+    }
+    this.api.uploadUnifiedText('FIXTURE', this.fixturesLeagueName, this.fixturesCountry, this.fixturesSeason, this.fixturesRawText, { leagueId: this.fixturesLeagueId, seasonId: null, autoDetectSeason: false }).subscribe({
       next: res => {
         this.handleResult(res);
         if (res?.success){
-          // Clear textarea on success
           this.fixturesRawText = '';
-          // Show specific success message as toast-equivalent
           this.message = res.message || `Fixtures uploaded successfully.`;
         }
       },
@@ -350,7 +408,7 @@ export class MatchUploadComponent {
     this.message = this.success ? (baseMsg + suffix) : (res?.message || 'Upload failed.');
 
     // Emit a fixtures refresh event if incremental updates occurred
-    if (this.updateMode === 'incremental' && anyUpdated) {
+    if (this.uploadType === 'INCREMENTAL' && anyUpdated) {
       const ev = new CustomEvent('fixtures:refresh', { detail: { leagueName: this.leagueName, season: this.season } });
       window.dispatchEvent(ev);
     }
@@ -367,20 +425,29 @@ export class MatchUploadComponent {
   }
   private resetFeedback(){ this.message=''; this.success=false; this.errors=[]; }
   private validateMeta(){
-    if (this.updateMode === 'incremental') {
+    // Fixtures tab uses its own validation
+    if (this.activeTab === 'fixtures') return true;
+
+    // Existing league required types
+    if (this.requiresExistingLeague) {
       if (!this.selectedLeague) {
-        this.success = false; this.message = 'Please select a league for incremental update.'; return false;
+        const scope = this.uploadType === 'INCREMENTAL' ? 'incremental update' : (this.uploadType === 'FULL_REPLACE' ? 'complete replacement' : 'old season upload');
+        this.success = false; this.message = `Please select a league for ${scope}.`; return false;
       }
       if (!this.country.trim() || !this.season.trim()){
         this.success = false; this.message = 'League details missing. Please re-select the league.'; return false;
       }
-      // leagueName is set from details; ensure it's present
       if (!this.leagueName.trim()) {
         this.success = false; this.message = 'Internal error: league name not set from selection.'; return false;
       }
+      // For HISTORICAL we require a season text to be present (read-only but must exist)
+      if (this.uploadType === 'HISTORICAL' && !this.season.trim()) {
+        this.success = false; this.message = 'Please provide a season label for the old season.'; return false;
+      }
       return true;
     }
-    // full replace requires manual fields
+
+    // NEW_LEAGUE requires all fields manually
     if (!this.leagueName.trim() || !this.country.trim() || !this.season.trim()){
       this.success = false; this.message = 'Please provide league name, country and season.'; return false;
     }

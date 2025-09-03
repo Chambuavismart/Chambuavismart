@@ -29,6 +29,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
           <a routerLink="/fixtures" routerLinkActive="active">Fixtures</a>
           <a routerLink="/match-analysis" routerLinkActive="active">Match Analysis</a>
           <a routerLink="/form-guide" routerLinkActive="active">Form Guide</a>
+          <a routerLink="/league" routerLinkActive="active">League Table</a>
           <a routerLink="/history" routerLinkActive="active">History</a>
           <a routerLink="/fixture-predictions" routerLinkActive="active">Fixture Predictions</a>
           <a routerLink="/analyzed-fixtures" routerLinkActive="active">Analyzed Fixtures</a>

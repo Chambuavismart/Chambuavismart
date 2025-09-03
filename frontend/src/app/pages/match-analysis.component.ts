@@ -38,12 +38,18 @@ import { MatchAnalysisService, MatchAnalysisResponse } from '../services/match-a
 
     <div class="toolbar">
       <label>League</label>
-      <select class="select" [(ngModel)]="selectedLeagueId">
+      <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="onLeagueChange()">
         <option [ngValue]="null">Select league...</option>
         <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }}</option>
       </select>
-      <input class="input" placeholder="Home team" [(ngModel)]="homeTeamName"/>
-      <input class="input" placeholder="Away team" [(ngModel)]="awayTeamName"/>
+      <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="homeTeamName">
+        <option [ngValue]="''">Select home team...</option>
+        <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
+      </select>
+      <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="awayTeamName">
+        <option [ngValue]="''">Select away team...</option>
+        <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
+      </select>
       <button class="btn primary" (click)="analyze()">Analyze</button>
       <span style="flex:1"></span>
       <a routerLink="/fixtures" class="btn">Pick from Fixtures</a>
@@ -53,12 +59,18 @@ import { MatchAnalysisService, MatchAnalysisResponse } from '../services/match-a
       <aside class="sidebar">
         <div style="font-weight:800; margin-bottom:8px;">Quick Search</div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-          <select class="select" [(ngModel)]="selectedLeagueId">
+          <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="onLeagueChange()">
             <option [ngValue]="null">Select league...</option>
             <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }}</option>
           </select>
-          <input class="input" placeholder="Home team" [(ngModel)]="homeTeamName"/>
-          <input class="input" placeholder="Away team" [(ngModel)]="awayTeamName"/>
+          <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="homeTeamName">
+            <option [ngValue]="''">Select home team...</option>
+            <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
+          </select>
+          <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="awayTeamName">
+            <option [ngValue]="''">Select away team...</option>
+            <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
+          </select>
           <button class="btn primary" (click)="analyze()">Analyze</button>
         </div>
       </aside>
@@ -137,6 +149,7 @@ export class MatchAnalysisComponent implements OnInit {
   selectedLeagueId: number | null = null;
   homeTeamName = '';
   awayTeamName = '';
+  teamsForLeague: string[] = [];
 
   loading = false;
   error: string | null = null;
@@ -150,11 +163,33 @@ export class MatchAnalysisComponent implements OnInit {
       const home = p.get('homeTeamName');
       const away = p.get('awayTeamName');
       this.selectedLeagueId = leagueIdStr ? Number(leagueIdStr) : this.selectedLeagueId;
+      if (this.selectedLeagueId) {
+        this.onLeagueChange(false);
+      }
       this.homeTeamName = home ?? this.homeTeamName;
       this.awayTeamName = away ?? this.awayTeamName;
       if (this.selectedLeagueId && this.homeTeamName && this.awayTeamName) {
         this.analyze();
       }
+    });
+  }
+
+  onLeagueChange(resetTeams: boolean = true) {
+    if (!this.selectedLeagueId) {
+      this.teamsForLeague = [];
+      if (resetTeams) { this.homeTeamName = ''; this.awayTeamName = ''; }
+      return;
+    }
+    // Clear selections on league change to avoid mismatch
+    if (resetTeams) { this.homeTeamName = ''; this.awayTeamName = ''; }
+    this.teamsForLeague = [];
+    this.fixturesApi.getLeagueFixtures(this.selectedLeagueId).subscribe(res => {
+      const set = new Set<string>();
+      for (const f of res.fixtures) {
+        if (f.homeTeam) set.add(f.homeTeam.trim());
+        if (f.awayTeam) set.add(f.awayTeam.trim());
+      }
+      this.teamsForLeague = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     });
   }
 

@@ -68,18 +68,19 @@ export class LeagueService {
     return this.http.get<LeagueDto>(`/api/leagues/${leagueId}`);
   }
 
-  // Fetch league table for a given league (optional season param)
-  getLeagueTable(leagueId: number, season?: string): Observable<LeagueTableEntryDTO[]> {
+  // Fetch league table for a given league (optional seasonId param)
+  getLeagueTable(leagueId: number, seasonId?: number | null): Observable<LeagueTableEntryDTO[]> {
     let params = new HttpParams();
-    if (season) params = params.set('season', season);
+    if (seasonId) params = params.set('seasonId', String(seasonId));
     return this.http.get<LeagueTableEntryDTO[]>(`/api/league/${leagueId}/table`, { params });
   }
 
-  // Fetch form guide rows
-  getFormGuide(leagueId: number, limit: number | 'all', scope: 'overall' | 'home' | 'away'): Observable<FormGuideRowDTO[]> {
+  // Fetch form guide rows (optional seasonId)
+  getFormGuide(leagueId: number, limit: number | 'all', scope: 'overall' | 'home' | 'away', seasonId?: number | null): Observable<FormGuideRowDTO[]> {
     let params = new HttpParams()
       .set('limit', String(limit))
       .set('scope', scope);
+    if (seasonId) params = params.set('seasonId', String(seasonId));
     return this.http.get<FormGuideRowDTO[]>(`/api/form-guide/${leagueId}`, { params });
   }
 }

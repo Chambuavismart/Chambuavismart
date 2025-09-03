@@ -20,6 +20,10 @@ public class Match {
     @JoinColumn(name = "league_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_league"))
     private League league;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "season_id", foreignKey = @ForeignKey(name = "fk_match_season"))
+    private Season season; // nullable during rollout
+
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "home_team_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_home_team"))
     private Team homeTeam;
@@ -34,10 +38,10 @@ public class Match {
     @Column(nullable = false)
     private Integer round;
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     private Integer homeGoals;
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     private Integer awayGoals;
 
     public Match() {}
@@ -57,6 +61,9 @@ public class Match {
 
     public League getLeague() { return league; }
     public void setLeague(League league) { this.league = league; }
+
+    public Season getSeason() { return season; }
+    public void setSeason(Season season) { this.season = season; }
 
     public Team getHomeTeam() { return homeTeam; }
     public void setHomeTeam(Team homeTeam) { this.homeTeam = homeTeam; }
