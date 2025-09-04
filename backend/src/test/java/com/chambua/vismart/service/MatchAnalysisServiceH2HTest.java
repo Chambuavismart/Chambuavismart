@@ -1,0 +1,140 @@
+package com.chambua.vismart.service;
+
+import com.chambua.vismart.dto.FormGuideRowDTO;
+import com.chambua.vismart.dto.MatchAnalysisResponse;
+import com.chambua.vismart.model.League;
+import com.chambua.vismart.model.Match;
+import com.chambua.vismart.model.Season;
+import com.chambua.vismart.model.Team;
+import com.chambua.vismart.repository.MatchAnalysisResultRepository;
+import com.chambua.vismart.repository.MatchRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.BDDMockito.given;
+
+@ExtendWith(MockitoExtension.class)
+class MatchAnalysisServiceH2HTest {
+
+    @Mock private MatchAnalysisResultRepository cacheRepo;
+    @Mock private FormGuideService formGuideService;
+    @Mock private SeasonService seasonService;
+    @Mock private MatchRepository matchRepository;
+        @Mock private LeagueTableService leagueTableService;
+
+    private ObjectMapper objectMapper;
+
+    @InjectMocks
+    private MatchAnalysisService service;
+
+    private League league; private Team home; private Team away; private Season season;
+
+    @BeforeEach
+    void setup() {
+        objectMapper = new ObjectMapper();
+        service = new MatchAnalysisService(cacheRepo, objectMapper, formGuideService, seasonService, matchRepository, leagueTableService);
+        given(cacheRepo.findByLeagueIdAndHomeTeamIdAndAwayTeamId(anyLong(), anyLong(), anyLong())).willReturn(Optional.empty());
+        league = new League(); league.setId(1L);
+        home = new Team(); home.setId(10L); home.setName("Home");
+        away = new Team(); away.setId(20L); away.setName("Away");
+        season = new Season(); season.setId(100L);
+        given(seasonService.findCurrentSeason(1L)).willReturn(Optional.of(season));
+                given(leagueTableService.computeTableBySeasonId(anyLong(), anyLong())).willReturn(List.of());
+    }
+
+    private FormGuideRowDTO basicRow(long id, String name, double overallPpg, int btts, int ov25) {
+        return new FormGuideRowDTO(id, name, 6, 6, 0,0,0, 0,0, 0, overallPpg, List.of(), btts, 0, ov25, 0);
+    }
+
+    private Match played(LocalDate date, Team h, Team a, int hg, int ag, int round) {
+        Match m = new Match(league, h, a, date, round, hg, ag);
+        m.setSeason(season);
+        return m;
+    }
+
+    @Test
+    void standardH2H_history_blendsTowardH2H() {
+        // Baseline form slight edge to away
+        FormGuideRowDTO homeRow = basicRow(home.getId(), home.getName(), 1.0, 50, 50);
+        FormGuideRowDTO awayRow = basicRow(away.getId(), away.getName(), 2.0, 50, 50);
+        given(formGuideService.compute(eq(1L), eq(100L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
+                .willReturn(List.of(homeRow, awayRow));
+        // H2H last 6 favor Home (4W,1D,1L from Home perspective)
+        List<Match> h2h = List.of(
+                played(LocalDate.now().minusDays(1), home, away, 2, 0, 30), // H W
+                played(LocalDate.now().minusDays(5), away, home, 0, 1, 29), // Home won away
+                played(LocalDate.now().minusDays(10), home, away, 1, 1, 28), // D
+                played(LocalDate.now().minusDays(15), away, home, 0, 3, 27), // Home W
+                played(LocalDate.now().minusDays(20), home, away, 2, 1, 26), // H W
+                played(LocalDate.now().minusDays(25), away, home, 2, 0, 25)  // Home L
+        );
+        given(matchRepository.findHeadToHead(1L, 10L, 20L)).willReturn(h2h);
+
+        MatchAnalysisResponse resp = service.analyzeDeterministic(1L, 10L, 20L, "League", "Home", "Away", true);
+        // Expect home probability increased compared to a pure form baseline (which would have favored away)
+        int h = resp.getWinProbabilities().getHomeWin();
+        int d = resp.getWinProbabilities().getDraw();
+        int a = resp.getWinProbabilities().getAwayWin();
+        assertEquals(100, h + d + a);
+        assertTrue(h > a, "H2H should tilt toward Home despite form favoring Away");
+    }
+
+    @Test
+    void noH2H_history_fallback_to_form_only() {
+        FormGuideRowDTO homeRow = basicRow(home.getId(), home.getName(), 2.0, 40, 45);
+        FormGuideRowDTO awayRow = basicRow(away.getId(), away.getName(), 1.0, 60, 55);
+        given(formGuideService.compute(eq(1L), eq(100L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
+                .willReturn(List.of(homeRow, awayRow));
+        given(matchRepository.findHeadToHead(1L, 10L, 20L)).willReturn(List.of());
+
+        MatchAnalysisResponse resp = service.analyzeDeterministic(1L, 10L, 20L, "League", "Home", "Away", true);
+        // form only should favor home
+        assertTrue(resp.getWinProbabilities().getHomeWin() > resp.getWinProbabilities().getAwayWin());
+    }
+
+    @Test
+    void edge_all_draws_pushes_draw_up() {
+        FormGuideRowDTO homeRow = basicRow(home.getId(), home.getName(), 1.5, 50, 50);
+        FormGuideRowDTO awayRow = basicRow(away.getId(), away.getName(), 1.5, 50, 50);
+        given(formGuideService.compute(eq(1L), eq(100L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
+                .willReturn(List.of(homeRow, awayRow));
+        List<Match> h2h = List.of(
+                played(LocalDate.now().minusDays(1), home, away, 1, 1, 30),
+                played(LocalDate.now().minusDays(5), away, home, 2, 2, 29),
+                played(LocalDate.now().minusDays(10), home, away, 0, 0, 28),
+                played(LocalDate.now().minusDays(15), away, home, 3, 3, 27)
+        );
+        given(matchRepository.findHeadToHead(1L, 10L, 20L)).willReturn(h2h);
+
+        MatchAnalysisResponse resp = service.analyzeDeterministic(1L, 10L, 20L, "League", "Home", "Away", true);
+        assertTrue(resp.getWinProbabilities().getDraw() >= 25, "Draw should be boosted by H2H all draws");
+    }
+
+    @Test
+    void edge_all_wins_for_away_pushes_away_up() {
+        FormGuideRowDTO homeRow = basicRow(home.getId(), home.getName(), 1.5, 50, 50);
+        FormGuideRowDTO awayRow = basicRow(away.getId(), away.getName(), 1.5, 50, 50);
+        given(formGuideService.compute(eq(1L), eq(100L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
+                .willReturn(List.of(homeRow, awayRow));
+        List<Match> h2h = List.of(
+                played(LocalDate.now().minusDays(1), home, away, 0, 1, 30),
+                played(LocalDate.now().minusDays(5), away, home, 3, 0, 29),
+                played(LocalDate.now().minusDays(10), home, away, 1, 2, 28)
+        );
+        given(matchRepository.findHeadToHead(1L, 10L, 20L)).willReturn(h2h);
+
+        MatchAnalysisResponse resp = service.analyzeDeterministic(1L, 10L, 20L, "League", "Home", "Away", true);
+        assertTrue(resp.getWinProbabilities().getAwayWin() > resp.getWinProbabilities().getHomeWin(), "Away should be boosted by H2H wins");
+    }
+}

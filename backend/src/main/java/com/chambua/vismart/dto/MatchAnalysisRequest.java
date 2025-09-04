@@ -2,6 +2,7 @@ package com.chambua.vismart.dto;
 
 public class MatchAnalysisRequest {
     private Long leagueId;
+    private Long seasonId; // required: analyze for selected season only
     private Long homeTeamId;
     private Long awayTeamId;
 
@@ -14,6 +15,9 @@ public class MatchAnalysisRequest {
 
     public Long getLeagueId() { return leagueId; }
     public void setLeagueId(Long leagueId) { this.leagueId = leagueId; }
+
+    public Long getSeasonId() { return seasonId; }
+    public void setSeasonId(Long seasonId) { this.seasonId = seasonId; }
 
     public Long getHomeTeamId() { return homeTeamId; }
     public void setHomeTeamId(Long homeTeamId) { this.homeTeamId = homeTeamId; }

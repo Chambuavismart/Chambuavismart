@@ -3,6 +3,7 @@ package com.chambua.vismart.service;
 import com.chambua.vismart.dto.MatchIngestItem;
 import com.chambua.vismart.model.League;
 import com.chambua.vismart.model.Match;
+import com.chambua.vismart.model.MatchStatus;
 import com.chambua.vismart.model.Team;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
@@ -48,7 +49,7 @@ public class MatchUploadService {
     public record WarnLog(String homeTeam, String awayTeam, String reason) {}
 
     @Transactional
-    public UploadResult uploadCsv(String leagueName, String country, String season, Long seasonId, MultipartFile file, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode) {
+    public UploadResult uploadCsv(String leagueName, String country, String season, Long seasonId, MultipartFile file, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode, boolean strict, boolean dryRun, boolean allowSeasonAutoCreate) {
         List<String> errors = new ArrayList<>();
         List<UpdateLog> updatedLogs = new ArrayList<>();
         List<SkipLog> skippedLogs = new ArrayList<>();
@@ -63,12 +64,22 @@ public class MatchUploadService {
             seasonEntity = seasonRepository.findById(seasonId).orElse(null);
         }
         if (seasonEntity == null) {
-            seasonEntity = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), normalizeSeason(season)).orElseGet(() -> {
+            String normalizedSeason = normalizeSeason(season);
+            if (!normalizedSeason.isBlank()) {
+                seasonEntity = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), normalizedSeason).orElse(null);
+            }
+            if (seasonEntity == null && allowSeasonAutoCreate) {
+                if (normalizedSeason == null || normalizedSeason.isBlank()) {
+                    throw new IllegalArgumentException("Please provide a season (e.g. 2025/2026) when creating a new league.");
+                }
                 Season s = new Season();
                 s.setLeague(league);
-                s.setName(normalizeSeason(season));
-                return seasonRepository.save(s);
-            });
+                s.setName(normalizedSeason);
+                seasonEntity = seasonRepository.save(s);
+            }
+            if (seasonEntity == null && strict) {
+                throw new IllegalArgumentException("Season not found for league; provide seasonId or enable allowSeasonAutoCreate");
+            }
         }
 
         // 1) Parse to items (no persistence yet)
@@ -134,6 +145,54 @@ public class MatchUploadService {
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
 
+        // 2b) Season date-window validation (strict by default)
+        LocalDate winStart = null;
+        LocalDate winEnd = null;
+        if (seasonEntity != null) {
+            winStart = seasonEntity.getStartDate();
+            winEnd = seasonEntity.getEndDate();
+        }
+        if ((winStart == null || winEnd == null)) {
+            String seasonStr = seasonEntity != null ? seasonEntity.getName() : normalizeSeason(season);
+            if (seasonStr != null && !seasonStr.isBlank()) {
+                if (seasonStr.matches("^\\d{4}/\\d{4}$")) {
+                    int y1 = Integer.parseInt(seasonStr.substring(0,4));
+                    int y2 = Integer.parseInt(seasonStr.substring(5,9));
+                    winStart = LocalDate.of(y1, 7, 1);
+                    winEnd = LocalDate.of(y2, 6, 30);
+                } else if (seasonStr.matches("^\\d{4}$")) {
+                    int y = Integer.parseInt(seasonStr);
+                    winStart = LocalDate.of(y, 1, 1);
+                    winEnd = LocalDate.of(y, 12, 31);
+                }
+            }
+        }
+        if (strict && seasonEntity == null) {
+            errors.add("Season not resolved; cannot validate window in strict mode");
+            return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+        if (winStart != null && winEnd != null) {
+            for (MatchIngestItem it : items) {
+                LocalDate d = it.getDate();
+                if (d != null && (d.isBefore(winStart) || d.isAfter(winEnd))) {
+                    String msg = "Out-of-window match date " + d + " not within [" + winStart + ".." + winEnd + "] for season";
+                    if (strict) {
+                        errors.add(msg + " | Round " + it.getRound() + ": " + it.getHomeTeamName() + " vs " + it.getAwayTeamName());
+                    } else {
+                        warnLogs.add(new WarnLog(it.getHomeTeamName(), it.getAwayTeamName(), msg));
+                    }
+                }
+            }
+            if (strict && !errors.isEmpty()) {
+                return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+            }
+        }
+
+        if (dryRun) {
+            // Preview only – do not persist
+            return new UploadResult(errors.isEmpty(), errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+
         // 3) Persist
         long deleted = 0;
         if (fullReplace) {
@@ -183,6 +242,12 @@ public class MatchUploadService {
                             if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
                                 target.setHomeGoals(homeGoals);
                                 target.setAwayGoals(awayGoals);
+                                // set status based on goals
+                                if (homeGoals != null && awayGoals != null) {
+                                    target.setStatus(MatchStatus.PLAYED);
+                                } else {
+                                    target.setStatus(MatchStatus.SCHEDULED);
+                                }
                                 changed = true;
                             }
                             if (seasonEntity != null && (target.getSeason() == null || !seasonEntity.getId().equals(target.getSeason().getId()))) { target.setSeason(seasonEntity); changed = true; }
@@ -207,7 +272,7 @@ public class MatchUploadService {
     }
 
     @Transactional
-    public UploadResult uploadText(String leagueName, String country, String season, Long seasonId, String text, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode, boolean autoCreateTeams) {
+    public UploadResult uploadText(String leagueName, String country, String season, Long seasonId, String text, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode, boolean autoCreateTeams, boolean strict, boolean dryRun, boolean allowSeasonAutoCreate) {
         List<String> errors = new ArrayList<>();
         List<UpdateLog> updatedLogs = new ArrayList<>();
         List<SkipLog> skippedLogs = new ArrayList<>();
@@ -221,17 +286,23 @@ public class MatchUploadService {
         if (seasonId != null) {
             seasonEntity = seasonRepository.findById(seasonId).orElse(null);
         }
-        // If seasonId wasn't provided or season not found, resolve/create Season entity by league + season name
+        // If seasonId wasn't provided or season not found, resolve Season entity by league + season name
         if (seasonEntity == null) {
             String normalizedSeason = normalizeSeason(season);
             if (normalizedSeason != null && !normalizedSeason.isBlank()) {
-                seasonEntity = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), normalizedSeason)
-                        .orElseGet(() -> {
-                            Season s = new Season();
-                            s.setLeague(league);
-                            s.setName(normalizedSeason);
-                            return seasonRepository.save(s);
-                        });
+                seasonEntity = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), normalizedSeason).orElse(null);
+            }
+            if (seasonEntity == null && allowSeasonAutoCreate) {
+                if (normalizedSeason == null || normalizedSeason.isBlank()) {
+                    throw new IllegalArgumentException("Please provide a season (e.g. 2025/2026) when creating a new league.");
+                }
+                Season s = new Season();
+                s.setLeague(league);
+                s.setName(normalizedSeason);
+                seasonEntity = seasonRepository.save(s);
+            }
+            if (seasonEntity == null && strict) {
+                throw new IllegalArgumentException("Season not found for league; provide seasonId or enable allowSeasonAutoCreate");
             }
         }
 
@@ -271,11 +342,7 @@ public class MatchUploadService {
                     String agStr = scorePart[1].trim();
                     Integer homeGoals = parseNullableInt(hgStr);
                     Integer awayGoals = parseNullableInt(agStr);
-                    if (!fixtureMode) {
-                        // In result mode, default nulls to 0
-                        homeGoals = homeGoals == null ? 0 : homeGoals;
-                        awayGoals = awayGoals == null ? 0 : awayGoals;
-                    }
+                    // Do not coerce nulls to 0; non-fixture mode requires goals to be provided and valid via validation.
 
                     if (currentRound <= 0) {
                         errors.add("Round not specified for line: " + line);
@@ -375,6 +442,54 @@ public class MatchUploadService {
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
 
+        // 2b) Season date-window validation (strict by default)
+        LocalDate winStart = null;
+        LocalDate winEnd = null;
+        if (seasonEntity != null) {
+            winStart = seasonEntity.getStartDate();
+            winEnd = seasonEntity.getEndDate();
+        }
+        if ((winStart == null || winEnd == null)) {
+            String seasonStr = seasonEntity != null ? seasonEntity.getName() : normalizeSeason(season);
+            if (seasonStr != null && !seasonStr.isBlank()) {
+                if (seasonStr.matches("^\\d{4}/\\d{4}$")) {
+                    int y1 = Integer.parseInt(seasonStr.substring(0,4));
+                    int y2 = Integer.parseInt(seasonStr.substring(5,9));
+                    winStart = LocalDate.of(y1, 7, 1);
+                    winEnd = LocalDate.of(y2, 6, 30);
+                } else if (seasonStr.matches("^\\d{4}$")) {
+                    int y = Integer.parseInt(seasonStr);
+                    winStart = LocalDate.of(y, 1, 1);
+                    winEnd = LocalDate.of(y, 12, 31);
+                }
+            }
+        }
+        if (strict && seasonEntity == null) {
+            errors.add("Season not resolved; cannot validate window in strict mode");
+            return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+        if (winStart != null && winEnd != null) {
+            for (MatchIngestItem it : items) {
+                LocalDate d = it.getDate();
+                if (d != null && (d.isBefore(winStart) || d.isAfter(winEnd))) {
+                    String msg = "Out-of-window match date " + d + " not within [" + winStart + ".." + winEnd + "] for season";
+                    if (strict) {
+                        errors.add(msg + " | Round " + it.getRound() + ": " + it.getHomeTeamName() + " vs " + it.getAwayTeamName());
+                    } else {
+                        warnLogs.add(new WarnLog(it.getHomeTeamName(), it.getAwayTeamName(), msg));
+                    }
+                }
+            }
+            if (strict && !errors.isEmpty()) {
+                return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+            }
+        }
+
+        if (dryRun) {
+            // Preview only – do not persist
+            return new UploadResult(errors.isEmpty(), errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
+        }
+
         // 3) Persist
         long deleted = 0;
         if (fullReplace) {
@@ -424,6 +539,12 @@ public class MatchUploadService {
                             if (!Objects.equals(homeGoals, target.getHomeGoals()) || !Objects.equals(awayGoals, target.getAwayGoals())) {
                                 target.setHomeGoals(homeGoals);
                                 target.setAwayGoals(awayGoals);
+                                // set status based on goals
+                                if (homeGoals != null && awayGoals != null) {
+                                    target.setStatus(MatchStatus.PLAYED);
+                                } else {
+                                    target.setStatus(MatchStatus.SCHEDULED);
+                                }
                                 changed = true;
                             }
                             if (changed) matchRepository.save(target);
@@ -642,6 +763,11 @@ public class MatchUploadService {
                         if (!Objects.equals(fHg, existing.getHomeGoals())) { existing.setHomeGoals(fHg); changed = true; }
                         if (!Objects.equals(fAg, existing.getAwayGoals())) { existing.setAwayGoals(fAg); changed = true; }
                         if (season != null && (existing.getSeason() == null || !season.getId().equals(existing.getSeason().getId()))) { existing.setSeason(season); changed = true; }
+                        if (homeGoals != null && awayGoals != null) {
+                            existing.setStatus(MatchStatus.PLAYED);
+                        } else {
+                            existing.setStatus(MatchStatus.SCHEDULED);
+                        }
                         if (changed) { matchRepository.save(existing); }
                         return 0; // not a new insert
                     })
@@ -654,12 +780,24 @@ public class MatchUploadService {
                                     if (existing.getDate() == null || !existing.getDate().equals(date)) { existing.setDate(date); changed = true; }
                                     if (!Objects.equals(fHg, existing.getHomeGoals())) { existing.setHomeGoals(fHg); changed = true; }
                                     if (!Objects.equals(fAg, existing.getAwayGoals())) { existing.setAwayGoals(fAg); changed = true; }
+                                    if (fHg != null && fAg != null) { existing.setStatus(MatchStatus.PLAYED); } else { existing.setStatus(MatchStatus.SCHEDULED); }
                                     if (changed) { matchRepository.save(existing); }
                                     return 0; // updated existing
                                 })
                                 .orElseGet(() -> {
+                                    // Reject duplicates within same season before inserting
+                                    if (season != null && date != null) {
+                                        var existingSame = matchRepository.findBySeasonIdAndHomeTeamIdAndAwayTeamIdAndDate(season.getId(), home.getId(), away.getId(), date);
+                                        if (existingSame.isPresent()) {
+                                            throw new IllegalArgumentException("Duplicate match for season/date/teams: " + season.getName() + ", " + date + ", " + home.getName() + " vs " + away.getName());
+                                        }
+                                    }
                                     Match m = new Match(league, home, away, date, round, fHg, fAg);
                                     if (season != null) m.setSeason(season);
+                                    // Match constructor already sets status based on goals; ensure not null
+                                    if (m.getStatus() == null) {
+                                        m.setStatus((fHg != null && fAg != null) ? MatchStatus.PLAYED : MatchStatus.SCHEDULED);
+                                    }
                                     matchRepository.save(m);
                                     return 1; // inserted
                                 });
@@ -675,12 +813,21 @@ public class MatchUploadService {
                     if (!Objects.equals(fHg2, existing.getHomeGoals())) { existing.setHomeGoals(fHg2); changed = true; }
                     if (!Objects.equals(fAg2, existing.getAwayGoals())) { existing.setAwayGoals(fAg2); changed = true; }
                     if (season != null && (existing.getSeason() == null || !season.getId().equals(existing.getSeason().getId()))) { existing.setSeason(season); changed = true; }
+                    if (fHg2 != null && fAg2 != null) { existing.setStatus(MatchStatus.PLAYED); } else { existing.setStatus(MatchStatus.SCHEDULED); }
                     if (changed) { matchRepository.save(existing); }
                     return 0; // not a new insert
                 })
                 .orElseGet(() -> {
+                    // Reject duplicates within same season before inserting (round-based fallback)
+                    if (season != null && date != null) {
+                        var existingSame = matchRepository.findBySeasonIdAndHomeTeamIdAndAwayTeamIdAndDate(season.getId(), home.getId(), away.getId(), date);
+                        if (existingSame.isPresent()) {
+                            throw new IllegalArgumentException("Duplicate match for season/date/teams: " + (season.getName() == null ? season.getId() : season.getName()) + ", " + date + ", " + home.getName() + " vs " + away.getName());
+                        }
+                    }
                     Match m = new Match(league, home, away, date, round, fHg2, fAg2);
                     if (season != null) m.setSeason(season);
+                    if (m.getStatus() == null) { m.setStatus((fHg2 != null && fAg2 != null) ? MatchStatus.PLAYED : MatchStatus.SCHEDULED); }
                     matchRepository.save(m);
                     return 1; // inserted
                 });

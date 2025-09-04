@@ -37,16 +37,12 @@ import { COUNTRIES } from '../shared/countries.constant';
               <input type="radio" [(ngModel)]="uploadType" value="INCREMENTAL" (change)="onUploadTypeChange()" />
               Incremental Update of Existing League
             </label>
-            <label title="Upload an older season and link it to an existing league.">
-              <input type="radio" [(ngModel)]="uploadType" value="HISTORICAL" (change)="onUploadTypeChange()" />
-              Old Season Upload (link to existing league)
-            </label>
           </div>
         </div>
 
         <!-- Dynamic Fields per Upload Type (CSV/Text) -->
         <div class="grid">
-          <!-- Existing league selection for FULL_REPLACE / INCREMENTAL / HISTORICAL -->
+          <!-- Existing league selection for FULL_REPLACE / INCREMENTAL -->
           <ng-container *ngIf="requiresExistingLeague; else newLeagueBlock">
             <label>
               League
@@ -75,10 +71,10 @@ import { COUNTRIES } from '../shared/countries.constant';
             </div>
           </label>
 
-          <!-- Season text input is required for NEW_LEAGUE and HISTORICAL; for existing league types it is read-only (pre-filled) but can be overridden for FULL_REPLACE -->
+          <!-- Season text input is required for NEW_LEAGUE; for existing league types it is read-only (pre-filled) but can be overridden for FULL_REPLACE -->
           <label>
             Season
-            <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="uploadType==='INCREMENTAL' || uploadType==='HISTORICAL'"/>
+            <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="uploadType==='INCREMENTAL'"/>
           </label>
 
           <!-- Season assignment (seasonId) available when a league is selected -->
@@ -96,7 +92,6 @@ import { COUNTRIES } from '../shared/countries.constant';
               <div *ngSwitchCase="'NEW_LEAGUE'">Creates a new league. All matches will be inserted under the provided season.</div>
               <div *ngSwitchCase="'FULL_REPLACE'">Deletes existing matches for the selected league/season and uploads the provided data.</div>
               <div *ngSwitchCase="'INCREMENTAL'">Updates results for existing fixtures; safe to run multiple times.</div>
-              <div *ngSwitchCase="'HISTORICAL'">Links uploaded matches to the selected league as a past season.</div>
             </ng-container>
           </div>
         </div>
@@ -236,7 +231,7 @@ Gimnasia Mendoza
 export class MatchUploadComponent {
   activeTab: 'csv' | 'text' | 'fixtures' = 'csv';
   // Upload type for CSV/Text flows
-  uploadType: 'NEW_LEAGUE' | 'FULL_REPLACE' | 'INCREMENTAL' | 'HISTORICAL' = 'NEW_LEAGUE';
+  uploadType: 'NEW_LEAGUE' | 'FULL_REPLACE' | 'INCREMENTAL' = 'NEW_LEAGUE';
 
   leagueName = '';
   country = '';
@@ -278,7 +273,7 @@ export class MatchUploadComponent {
   seasonId: number | null = null;
 
   get requiresExistingLeague(): boolean {
-    return this.uploadType === 'FULL_REPLACE' || this.uploadType === 'INCREMENTAL' || this.uploadType === 'HISTORICAL';
+    return this.uploadType === 'FULL_REPLACE' || this.uploadType === 'INCREMENTAL';
   }
 
   constructor(private api: MatchUploadService, private leagueApi: LeagueService, private seasonApi: SeasonService, private http: HttpClient) {
@@ -412,7 +407,13 @@ export class MatchUploadComponent {
     } else if (completedAll !== null) {
       suffix = ` Completed in DB: ${completedAll}.`;
     }
-    this.message = this.success ? (baseMsg + suffix) : (res?.message || 'Upload failed.');
+    if (this.success) {
+      this.message = baseMsg + suffix;
+    } else {
+      // Summarize strict out-of-window errors when present
+      const out = this.errors.filter(e => /out-of-window|outside season window/i.test(e)).length;
+      this.message = out > 0 ? `${out} matches rejected because they are outside season window (strict mode).` : (res?.message || 'Upload failed.');
+    }
 
     // Emit a fixtures refresh event if incremental updates occurred
     if (this.uploadType === 'INCREMENTAL' && anyUpdated) {
@@ -429,6 +430,14 @@ export class MatchUploadComponent {
     this.success = false;
     this.message = err?.error?.message || 'Server error during upload';
     if (err?.error?.errors) this.errors = err.error.errors;
+    // Friendly summary for strict mode out-of-window rejections
+    try {
+      const errs: string[] = this.errors || [];
+      const out = errs.filter(e => /out-of-window|outside season window/i.test(e)).length;
+      if (out > 0) {
+        this.message = `${out} matches rejected because they are outside season window (strict mode).`;
+      }
+    } catch { /* ignore */ }
   }
   private resetFeedback(){ this.message=''; this.success=false; this.errors=[]; }
   private validateMeta(){
@@ -438,7 +447,7 @@ export class MatchUploadComponent {
     // Existing league required types
     if (this.requiresExistingLeague) {
       if (!this.selectedLeague) {
-        const scope = this.uploadType === 'INCREMENTAL' ? 'incremental update' : (this.uploadType === 'FULL_REPLACE' ? 'complete replacement' : 'old season upload');
+        const scope = this.uploadType === 'INCREMENTAL' ? 'incremental update' : 'complete replacement';
         this.success = false; this.message = `Please select a league for ${scope}.`; return false;
       }
       if (!this.country.trim() || !this.season.trim()){
@@ -446,10 +455,6 @@ export class MatchUploadComponent {
       }
       if (!this.leagueName.trim()) {
         this.success = false; this.message = 'Internal error: league name not set from selection.'; return false;
-      }
-      // For HISTORICAL we require a season text to be present (read-only but must exist)
-      if (this.uploadType === 'HISTORICAL' && !this.season.trim()) {
-        this.success = false; this.message = 'Please provide a season label for the old season.'; return false;
       }
       return true;
     }

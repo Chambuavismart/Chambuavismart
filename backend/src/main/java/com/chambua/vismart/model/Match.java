@@ -6,9 +6,11 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "matches", indexes = {
         @Index(name = "idx_matches_league_round", columnList = "league_id, round"),
-        @Index(name = "idx_matches_date", columnList = "match_date")
+        @Index(name = "idx_matches_date", columnList = "match_date"),
+        @Index(name = "idx_matches_season_teams_date", columnList = "season_id, home_team_id, away_team_id, match_date")
 }, uniqueConstraints = {
-        @UniqueConstraint(name = "uk_match_league_round_home_away", columnNames = {"league_id", "round", "home_team_id", "away_team_id"})
+        @UniqueConstraint(name = "uk_match_league_round_home_away", columnNames = {"league_id", "round", "home_team_id", "away_team_id"}),
+        @UniqueConstraint(name = "uk_match_season_home_away_date", columnNames = {"season_id", "home_team_id", "away_team_id", "match_date"})
 })
 public class Match {
 
@@ -44,6 +46,10 @@ public class Match {
     @Column(nullable = true)
     private Integer awayGoals;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private MatchStatus status = MatchStatus.SCHEDULED;
+
     public Match() {}
 
     public Match(League league, Team homeTeam, Team awayTeam, LocalDate date, Integer round, Integer homeGoals, Integer awayGoals) {
@@ -54,6 +60,12 @@ public class Match {
         this.round = round;
         this.homeGoals = homeGoals;
         this.awayGoals = awayGoals;
+        // derive status based on goals if provided
+        if (homeGoals != null && awayGoals != null) {
+            this.status = MatchStatus.PLAYED;
+        } else {
+            this.status = MatchStatus.SCHEDULED;
+        }
     }
 
     public Long getId() { return id; }
@@ -82,4 +94,7 @@ public class Match {
 
     public Integer getAwayGoals() { return awayGoals; }
     public void setAwayGoals(Integer awayGoals) { this.awayGoals = awayGoals; }
+
+    public MatchStatus getStatus() { return status; }
+    public void setStatus(MatchStatus status) { this.status = status; }
 }

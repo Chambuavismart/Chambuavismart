@@ -10,6 +10,9 @@ public class MatchAnalysisResponse {
     private ExpectedGoals expectedGoals;
     private int confidenceScore;
     private String advice;
+    // Optional: expose unblended form stats and H2H summary for UI visualization
+    private FormSummary formSummary; // may be null
+    private H2HSummary h2hSummary;   // may be null
 
     public MatchAnalysisResponse() {}
 
@@ -45,6 +48,10 @@ public class MatchAnalysisResponse {
     public void setConfidenceScore(int confidenceScore) { this.confidenceScore = confidenceScore; }
     public String getAdvice() { return advice; }
     public void setAdvice(String advice) { this.advice = advice; }
+    public FormSummary getFormSummary() { return formSummary; }
+    public void setFormSummary(FormSummary formSummary) { this.formSummary = formSummary; }
+    public H2HSummary getH2hSummary() { return h2hSummary; }
+    public void setH2hSummary(H2HSummary h2hSummary) { this.h2hSummary = h2hSummary; }
 
     public static class WinProbabilities {
         private int homeWin;
@@ -71,5 +78,51 @@ public class MatchAnalysisResponse {
         public void setHome(double home) { this.home = home; }
         public double getAway() { return away; }
         public void setAway(double away) { this.away = away; }
+    }
+
+    // Base unblended stats derived from team form (before H2H and league adjustments)
+    public static class FormSummary {
+        private int homeWin;
+        private int draw;
+        private int awayWin;
+        private int btts;
+        private int over25;
+        public FormSummary() {}
+        public FormSummary(int homeWin, int draw, int awayWin, int btts, int over25) {
+            this.homeWin = homeWin; this.draw = draw; this.awayWin = awayWin; this.btts = btts; this.over25 = over25;
+        }
+        public int getHomeWin() { return homeWin; }
+        public void setHomeWin(int homeWin) { this.homeWin = homeWin; }
+        public int getDraw() { return draw; }
+        public void setDraw(int draw) { this.draw = draw; }
+        public int getAwayWin() { return awayWin; }
+        public void setAwayWin(int awayWin) { this.awayWin = awayWin; }
+        public int getBtts() { return btts; }
+        public void setBtts(int btts) { this.btts = btts; }
+        public int getOver25() { return over25; }
+        public void setOver25(int over25) { this.over25 = over25; }
+    }
+
+    // Recency-weighted H2H metrics and last N window used
+    public static class H2HSummary {
+        private int lastN;
+        private double ppgHome;
+        private double ppgAway;
+        private int bttsPct;
+        private int over25Pct;
+        public H2HSummary() {}
+        public H2HSummary(int lastN, double ppgHome, double ppgAway, int bttsPct, int over25Pct) {
+            this.lastN = lastN; this.ppgHome = ppgHome; this.ppgAway = ppgAway; this.bttsPct = bttsPct; this.over25Pct = over25Pct;
+        }
+        public int getLastN() { return lastN; }
+        public void setLastN(int lastN) { this.lastN = lastN; }
+        public double getPpgHome() { return ppgHome; }
+        public void setPpgHome(double ppgHome) { this.ppgHome = ppgHome; }
+        public double getPpgAway() { return ppgAway; }
+        public void setPpgAway(double ppgAway) { this.ppgAway = ppgAway; }
+        public int getBttsPct() { return bttsPct; }
+        public void setBttsPct(int bttsPct) { this.bttsPct = bttsPct; }
+        public int getOver25Pct() { return over25Pct; }
+        public void setOver25Pct(int over25Pct) { this.over25Pct = over25Pct; }
     }
 }

@@ -2,7 +2,11 @@ package com.chambua.vismart.controller;
 
 import com.chambua.vismart.dto.FormGuideRowDTO;
 import com.chambua.vismart.service.FormGuideService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -10,6 +14,8 @@ import java.util.List;
 @RequestMapping("/api/form-guide")
 @CrossOrigin(origins = "*")
 public class FormGuideController {
+
+    private static final Logger log = LoggerFactory.getLogger(FormGuideController.class);
 
     private final FormGuideService formGuideService;
 
@@ -19,9 +25,11 @@ public class FormGuideController {
 
     @GetMapping("/{leagueId}")
     public List<FormGuideRowDTO> getFormGuide(@PathVariable Long leagueId,
+                                              @RequestParam(name = "seasonId", required = false) Long seasonId,
                                               @RequestParam(name = "limit", defaultValue = "6") String limitParam,
-                                              @RequestParam(name = "scope", defaultValue = "overall") String scope,
-                                              @RequestParam(name = "seasonId", required = false) Long seasonId) {
+                                              @RequestParam(name = "scope", defaultValue = "overall") String scope) {
+        long start = System.currentTimeMillis();
+        log.info("[FormGuide][REQ] leagueId={}, seasonId={}, limit={}, scope={}", leagueId, seasonId, limitParam, scope);
         FormGuideService.Scope s = switch (scope.toLowerCase()) {
             case "home" -> FormGuideService.Scope.HOME;
             case "away" -> FormGuideService.Scope.AWAY;
@@ -38,8 +46,16 @@ public class FormGuideController {
             }
         }
         if (seasonId == null) {
-            return formGuideService.compute(leagueId, limit, s);
+            // Explicitly reject missing season to avoid server error and guide client
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "seasonId query parameter is required for form guide");
         }
-        return formGuideService.compute(leagueId, seasonId, limit, s);
+        try {
+            List<FormGuideRowDTO> rows = formGuideService.compute(leagueId, seasonId, limit, s);
+            log.info("[FormGuide][OK] leagueId={}, seasonId={}, rows={}, ms={}", leagueId, seasonId, rows.size(), (System.currentTimeMillis() - start));
+            return rows;
+        } catch (IllegalArgumentException ex) {
+            // Map service validation errors to 400 instead of 500
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 }

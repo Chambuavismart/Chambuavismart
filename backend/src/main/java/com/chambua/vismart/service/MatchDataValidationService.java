@@ -78,6 +78,21 @@ public class MatchDataValidationService {
             }
         }
 
+        // Batch-level duplicate detection within same season: same date + teams
+        // We use the string season field from items; service resolves to Season entity during persistence.
+        Map<String, Integer> seen = new HashMap<>();
+        for (int i = 0; i < items.size(); i++) {
+            MatchIngestItem it = items.get(i);
+            if (it.getDate() == null || isBlank(it.getHomeTeamName()) || isBlank(it.getAwayTeamName()) || isBlank(it.getSeason())) continue;
+            String key = (it.getSeason().trim().toLowerCase()) + "|" + it.getDate() + "|" + it.getHomeTeamName().trim().toLowerCase() + "|" + it.getAwayTeamName().trim().toLowerCase();
+            Integer prev = seen.putIfAbsent(key, i);
+            if (prev != null) {
+                String ctxA = context(items.get(prev));
+                String ctxB = context(it);
+                issues.add(err("Duplicate match in upload batch for season/date/teams: " + it.getSeason() + ", " + it.getDate() + ", " + it.getHomeTeamName() + " vs " + it.getAwayTeamName() + " | " + ctxA + " and " + ctxB, ctxB));
+            }
+        }
+
         // Per-league chronological ordering by round -> date should be non-decreasing
         Map<Long, List<MatchIngestItem>> byLeague = items.stream().collect(Collectors.groupingBy(MatchIngestItem::getLeagueId));
         for (Map.Entry<Long, List<MatchIngestItem>> e : byLeague.entrySet()) {

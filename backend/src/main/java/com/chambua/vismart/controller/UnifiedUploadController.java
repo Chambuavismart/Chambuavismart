@@ -32,7 +32,7 @@ public class UnifiedUploadController {
         this.matchRepository = matchRepository;
     }
 
-    public enum UploadType { NEW_LEAGUE, FULL_REPLACE, INCREMENTAL, FIXTURE, HISTORICAL }
+    public enum UploadType { NEW_LEAGUE, FULL_REPLACE, INCREMENTAL, FIXTURE }
 
     @PostMapping(path = "/matches", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadMatches(
@@ -40,6 +40,9 @@ public class UnifiedUploadController {
             @RequestParam(required = false) Long leagueId, // reserved for future use
             @RequestParam(required = false) Long seasonId,
             @RequestParam(defaultValue = "false") boolean autoDetectSeason, // reserved for future use
+            @RequestParam(defaultValue = "true") boolean strict,
+            @RequestParam(defaultValue = "false") boolean dryRun,
+            @RequestParam(defaultValue = "false") boolean allowSeasonAutoCreate,
             @RequestParam String leagueName,
             @RequestParam String country,
             @RequestParam String season,
@@ -54,18 +57,31 @@ public class UnifiedUploadController {
                 case FULL_REPLACE -> fullReplace = true;
                 case INCREMENTAL -> incremental = true;
                 case FIXTURE -> fixtureMode = true;
-                case HISTORICAL -> { /* defaults already set */ }
+            }
+
+            // Implicit flags for NEW_LEAGUE
+            if (uploadType == UploadType.NEW_LEAGUE) {
+                allowSeasonAutoCreate = true;
+                strict = true;
+                dryRun = false;
+                if (season == null || season.trim().isEmpty()) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "success", false,
+                            "message", "Please provide a season (e.g. 2025/2026) when creating a new league."
+                    ));
+                }
             }
 
             String seasonToUse = autoDetectSeason ? tryDetectSeasonFromCsv(file, season) : season;
-            var result = service.uploadCsv(leagueName, country, seasonToUse, seasonId, file, fullReplace, incremental, fixtureMode);
+            var result = service.uploadCsv(leagueName, country, seasonToUse, seasonId, file, fullReplace, incremental, fixtureMode, strict, dryRun, allowSeasonAutoCreate);
 
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
                     .orElse(0L);
-            // Treat any match with scores as completed regardless of its date (historical uploads)
-            long completedUpToToday = completedAllTime;
+            long completedUpToToday = leagueOpt
+                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
+                    .orElse(0L);
 
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),
@@ -97,6 +113,9 @@ public class UnifiedUploadController {
             String country = (String) body.get("country");
             String season = (String) body.get("season");
             String text = (String) body.get("text");
+            boolean strict = body.get("strict") instanceof Boolean ? (Boolean) body.get("strict") : true;
+            boolean dryRun = body.get("dryRun") instanceof Boolean ? (Boolean) body.get("dryRun") : false;
+            boolean allowSeasonAutoCreate = body.get("allowSeasonAutoCreate") instanceof Boolean ? (Boolean) body.get("allowSeasonAutoCreate") : false;
 
             boolean fullReplace = false;
             boolean incremental = false;
@@ -106,19 +125,32 @@ public class UnifiedUploadController {
                 case FULL_REPLACE -> fullReplace = true;
                 case INCREMENTAL -> incremental = true;
                 case FIXTURE -> fixtureMode = true; // not typically used with raw text, but keep alignment
-                case HISTORICAL -> { /* defaults */ }
             }
             boolean autoCreateTeams = (uploadType == UploadType.NEW_LEAGUE)
-                    || (uploadType == UploadType.FULL_REPLACE)
-                    || (uploadType == UploadType.HISTORICAL);
+                    || (uploadType == UploadType.FULL_REPLACE);
 
-            var result = service.uploadText(leagueName, country, season, seasonId, text, fullReplace, incremental, fixtureMode, autoCreateTeams);
+            // Implicit flags and validation for NEW_LEAGUE
+            if (uploadType == UploadType.NEW_LEAGUE) {
+                allowSeasonAutoCreate = true;
+                strict = true;
+                dryRun = false;
+                if (season == null || season.trim().isEmpty()) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "success", false,
+                            "message", "Please provide a season (e.g. 2025/2026) when creating a new league."
+                    ));
+                }
+            }
+
+            var result = service.uploadText(leagueName, country, season, seasonId, text, fullReplace, incremental, fixtureMode, autoCreateTeams, strict, dryRun, allowSeasonAutoCreate);
 
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
                     .orElse(0L);
-            long completedUpToToday = completedAllTime; // treat all finished as completed for unified API
+            long completedUpToToday = leagueOpt
+                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
+                    .orElse(0L);
 
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),

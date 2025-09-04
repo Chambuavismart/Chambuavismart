@@ -38,7 +38,8 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
     }
   `],
   template: `
-    <h1 style="font-weight:800; margin: 8px 0 12px;">Fixtures</h1>
+    <h1 style="font-weight:800; margin: 8px 0 4px;">Fixtures</h1>
+    <div class="muted" style="margin: 0 0 12px;">Note: Fixtures currently don’t use season filters. Season context may be inferred heuristically.</div>
 
     <!-- Mobile league picker -->
     <div class="mobile">

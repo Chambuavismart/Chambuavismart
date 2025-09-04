@@ -1,6 +1,7 @@
 package com.chambua.vismart.controller;
 
 import com.chambua.vismart.controller.UnifiedUploadController.UploadType;
+import com.chambua.vismart.model.MatchStatus;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.service.MatchUploadService;
@@ -51,16 +52,19 @@ public class UnifiedUploadTextController {
                 case FULL_REPLACE -> fullReplace = true;
                 case INCREMENTAL -> incremental = true;
                 case FIXTURE -> fixtureMode = true;
-                case HISTORICAL -> { /* defaults already set */ }
             }
 
             String seasonToUse = (req.autoDetectSeason() != null && req.autoDetectSeason()) ? tryDetectSeasonFromText(req.text(), req.season()) : req.season();
-            boolean autoCreateTeams = (req.uploadType() == UploadType.HISTORICAL);
-                        var result = service.uploadText(req.leagueName(), req.country(), seasonToUse, req.seasonId(), req.text(), fullReplace, incremental, fixtureMode, autoCreateTeams);
+            boolean autoCreateTeams = (req.uploadType() == UploadType.NEW_LEAGUE)
+                    || (req.uploadType() == UploadType.FULL_REPLACE);
+            boolean strict = true;
+            boolean dryRun = false;
+            boolean allowSeasonAutoCreate = false;
+            var result = service.uploadText(req.leagueName(), req.country(), seasonToUse, req.seasonId(), req.text(), fullReplace, incremental, fixtureMode, autoCreateTeams, strict, dryRun, allowSeasonAutoCreate);
 
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(req.leagueName()), normalizeKey(req.country()), normalizeSeason(req.season()));
             long completedAllTime = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
+                    .map(l -> matchRepository.countByLeagueIdAndStatus(l.getId(), MatchStatus.PLAYED))
                     .orElse(0L);
             // Treat any match with scores as completed regardless of its date (historical uploads)
             long completedUpToToday = completedAllTime;

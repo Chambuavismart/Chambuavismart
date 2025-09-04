@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { LeagueService, LeagueTableEntryDTO, League } from '../services/league.service';
-import { SeasonService, Season } from '../services/season.service';
+import { Season, SeasonService } from '../services/season.service';
 
 @Component({
   selector: 'app-league-table',
@@ -20,9 +20,8 @@ import { SeasonService, Season } from '../services/season.service';
           <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.name }} ({{ lg.country }} {{ lg.season }})</option>
         </select>
 
-        <label class="label">Season</label>
-        <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
-          <option [ngValue]="null">⚡ Combined (All Seasons)</option>
+        <label *ngIf="selectedLeagueId" for="seasonSelect" class="label">Season</label>
+        <select *ngIf="selectedLeagueId" id="seasonSelect" class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
           <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
         </select>
 
@@ -35,7 +34,7 @@ import { SeasonService, Season } from '../services/season.service';
 
       <div class="panel" *ngIf="!loading && table?.length">
         <div style="font-weight:700; margin-bottom:8px; color:#9fb3cd;">
-          League Table – {{ headerLeagueName() }} ({{ headerSeasonName() }})
+          League Table – {{ headerLeagueName() }}
         </div>
         <div style="overflow-x:auto;">
           <table class="table league-table">
@@ -85,8 +84,8 @@ export class LeagueTableComponent {
   private seasonService = inject(SeasonService);
 
   leagues: League[] = [];
-  seasons: Season[] = [];
   selectedLeagueId: number | null = null;
+  seasons: Season[] = [];
   seasonId: number | null = null;
   table: LeagueTableEntryDTO[] = [];
   loading = false;
@@ -99,14 +98,13 @@ export class LeagueTableComponent {
       error: _ => this.error = 'Failed to load leagues'
     });
 
-    // If route param exists, load immediately
+    // If route param exists, load immediately and resolve seasons
     this.route.paramMap.subscribe(params => {
       const idStr = params.get('leagueId');
       const id = idStr ? Number(idStr) : null;
       if (id) {
         this.selectedLeagueId = id;
-        this.loadSeasons(id);
-        this.fetch(id);
+        this.loadSeasonsAndFetch(id);
       }
     });
   }
@@ -115,55 +113,50 @@ export class LeagueTableComponent {
     this.selectedLeagueId = id;
     this.table = [];
     this.seasons = [];
-    this.seasonId = null; // default Combined
+    this.seasonId = null;
     if (id) {
-      // Normalize URL for shareability
-      this.router.navigate(['/league', id]);
-      this.loadSeasons(id);
-      this.fetch(id);
+      this.loadSeasonsAndFetch(id);
     }
   }
 
-  onSeasonChange(seasonId: number | null) {
-    this.seasonId = seasonId;
-    if (this.selectedLeagueId) this.fetch(this.selectedLeagueId);
+  onSeasonChange(id: number | null) {
+    this.seasonId = id;
+    if (this.selectedLeagueId && this.seasonId) {
+      this.fetch(this.selectedLeagueId, this.seasonId);
+    }
   }
 
-  private loadSeasons(leagueId: number) {
+  private loadSeasonsAndFetch(leagueId: number) {
+    this.loading = true;
     this.seasonService.listSeasons(leagueId).subscribe({
-      next: ss => {
-        this.seasons = ss ?? [];
-        // Default to current season if available: choose the one whose dates include today, otherwise the most recent by startDate (already ordered desc backend)
+      next: (seasons) => {
+        this.seasons = seasons ?? [];
         const today = new Date().toISOString().slice(0,10);
-        const current = this.seasons.find(s => (!s.startDate || s.startDate <= today) && (!s.endDate || s.endDate >= today));
-        // Put current season at the top if present
-        if (current) {
-          this.seasons = [current, ...this.seasons.filter(x => x.id !== current.id)];
-        }
+        const current = this.seasons.find(x => (!x.startDate || x.startDate <= today) && (!x.endDate || x.endDate >= today));
         this.seasonId = current ? current.id : (this.seasons[0]?.id ?? null);
-        // Now fetch table for the chosen default season
-        this.fetch(leagueId);
+        if (this.seasonId) {
+          this.fetch(leagueId, this.seasonId);
+        } else {
+          this.loading = false;
+        }
       },
-      error: _ => { this.seasons = []; this.seasonId = null; this.fetch(leagueId); }
+      error: _ => { this.seasons = []; this.seasonId = null; this.loading = false; this.error = 'Failed to load seasons'; }
     });
   }
 
-  private fetch(leagueId: number) {
+  private fetch(leagueId: number, seasonId: number) {
     this.loading = true;
     this.error = null;
-    this.leagueService.getLeagueTable(leagueId, this.seasonId).subscribe({
+    console.debug('[LeagueTable] fetch params', { leagueId, seasonId });
+    this.leagueService.getLeagueTable(leagueId, seasonId).subscribe({
       next: data => { this.table = data; this.loading = false; },
-      error: _ => { this.error = 'Failed to load league table'; this.loading = false; }
+      error: err => { this.error = err?.error?.message || 'Failed to load league table'; this.loading = false; }
     });
   }
 
   headerLeagueName() {
     const lg = this.leagues.find(l => l.id === this.selectedLeagueId);
-    return lg ? `${lg.name}` : '';
-  }
-  headerSeasonName() {
-    if (!this.seasonId) return 'Combined (All Seasons)';
-    const s = this.seasons.find(x => x.id === this.seasonId);
-    return s?.name || 'Season';
+    // Show league with its season label from entity to keep context
+    return lg ? `${lg.name} (${lg.country} ${lg.season})` : '';
   }
 }

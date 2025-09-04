@@ -1,8 +1,11 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router, ActivatedRoute } from '@angular/router';
 import { League, LeagueService, FormGuideRowDTO } from '../services/league.service';
 import { Season, SeasonService } from '../services/season.service';
+import { Subject, of } from 'rxjs';
+import { switchMap, distinctUntilChanged, map, tap, catchError, finalize } from 'rxjs/operators';
 
 @Component({
   selector: 'app-form-guide',
@@ -21,7 +24,6 @@ import { Season, SeasonService } from '../services/season.service';
 
         <label class="label">Season</label>
         <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
-          <option [ngValue]="null">⚡ Combined (All Seasons)</option>
           <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
         </select>
 
@@ -48,6 +50,7 @@ import { Season, SeasonService } from '../services/season.service';
         <div style="font-weight:700; margin-bottom:8px; color:#9fb3cd;">
           Form Guide – {{ headerLeagueName() }} ({{ headerSeasonName() }})
         </div>
+        <div *ngIf="weightedWarning" class="banner warning">{{ weightedWarning }}</div>
         <div style="overflow-x:auto;">
           <table class="table rounded-table">
             <thead>
@@ -61,14 +64,20 @@ import { Season, SeasonService } from '../services/season.service';
                 <th class="center sortable" (click)="onSort('ga')">GA {{sortIcon('ga')}}</th>
                 <th class="center sortable" (click)="onSort('gd')">GD {{sortIcon('gd')}}</th>
                 <th class="center sortable" (click)="onSort('pts')">Pts {{sortIcon('pts')}}</th>
-                <th class="center sortable" (click)="onSort('ppg')">PPG {{sortIcon('ppg')}}</th>
+                <th class="center sortable" (click)="onSort('ppg')" [title]="weightTip">Weighted PPG <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('ppg')}}</th>
                 <th class="center">{{ lastHeader() }}</th>
-                <th class="center sortable" (click)="onSort('bttsPct')">BTTS % {{sortIcon('bttsPct')}}</th>
-                <th class="center sortable" (click)="onSort('over15Pct')">Over 1.5 % {{sortIcon('over15Pct')}}</th>
-                <th class="center sortable" (click)="onSort('over25Pct')">Over 2.5 % {{sortIcon('over25Pct')}}</th>
-                <th class="center sortable" (click)="onSort('over35Pct')">Over 3.5 % {{sortIcon('over35Pct')}}</th>
+                <th class="center sortable" (click)="onSort('bttsPct')" [title]="weightTip">Weighted BTTS % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('bttsPct')}}</th>
+                <th class="center sortable" (click)="onSort('over15Pct')" [title]="weightTip">Weighted Over 1.5 % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over15Pct')}}</th>
+                <th class="center sortable" (click)="onSort('over25Pct')" [title]="weightTip">Weighted Over 2.5 % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over25Pct')}}</th>
+                <th class="center sortable" (click)="onSort('over35Pct')" [title]="weightTip">Weighted Over 3.5 % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over35Pct')}}</th>
+                <th class="center" title="Home/Away recency-weighted PPG">PPG H/A</th>
+                <th class="center" title="Home/Away recency-weighted BTTS%">BTTS% H/A</th>
+                <th class="center" title="Home/Away recency-weighted Over 1.5%">O1.5% H/A</th>
+                <th class="center" title="Home/Away recency-weighted Over 2.5%">O2.5% H/A</th>
+                <th class="center" title="Home/Away recency-weighted Over 3.5%">O3.5% H/A</th>
               </tr>
             </thead>
+            <ng-template #naTpl><span class="muted-na">N/A</span></ng-template>
             <tbody>
               <tr *ngFor="let r of sortedRows">
                 <td>
@@ -85,7 +94,7 @@ import { Season, SeasonService } from '../services/season.service';
                 <td class="center">{{r.ga}}</td>
                 <td class="center">{{r.gd}}</td>
                 <td class="center">{{r.pts}}</td>
-                <td class="center">{{r.ppg | number:'1.2-2'}}</td>
+                <td class="center" [title]="weightTip">{{ safePpg(r) }}</td>
                 <td class="center">
                   <span *ngFor="let s of displayResults(r); let i = index" class="pill" [ngClass]="{
                     'win': s==='W', 'draw': s==='D', 'loss': s==='L'
@@ -94,10 +103,65 @@ import { Season, SeasonService } from '../services/season.service';
                     <span class="pill" title="More results">+</span>
                   </ng-container>
                 </td>
-                <td class="center"><span class="percent" [style.background]="percentBg(r.bttsPct)">{{r.bttsPct}}%</span></td>
-                <td class="center"><span class="percent" [style.background]="percentBg(r.over15Pct)">{{r.over15Pct}}%</span></td>
-                <td class="center"><span class="percent" [style.background]="percentBg(r.over25Pct)">{{r.over25Pct}}%</span></td>
-                <td class="center"><span class="percent" [style.background]="percentBg(r.over35Pct)">{{r.over35Pct}}%</span></td>
+                <td class="center">
+                  <ng-container *ngIf="isNumber(r.bttsPct); else naTpl"><span class="percent" [style.background]="percentBg(r.bttsPct)" [title]="weightTip">{{r.bttsPct}}%</span></ng-container>
+                </td>
+                <td class="center">
+                  <ng-container *ngIf="isNumber(r.over15Pct); else naTpl"><span class="percent" [style.background]="percentBg(r.over15Pct)" [title]="weightTip">{{r.over15Pct}}%</span></ng-container>
+                </td>
+                <td class="center">
+                  <ng-container *ngIf="isNumber(r.over25Pct); else naTpl"><span class="percent" [style.background]="percentBg(r.over25Pct)" [title]="weightTip">{{r.over25Pct}}%</span></ng-container>
+                </td>
+                <td class="center">
+                  <ng-container *ngIf="isNumber(r.over35Pct); else naTpl"><span class="percent" [style.background]="percentBg(r.over35Pct)" [title]="weightTip">{{r.over35Pct}}%</span></ng-container>
+                </td>
+                <td class="center">
+                  {{ splitPpg(r).home }} / {{ splitPpg(r).away }}
+                </td>
+                <td class="center">
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').homeRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').home !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').home }}
+                  </span>
+                  /
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').awayRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').away !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').away }}
+                  </span>
+                </td>
+                <td class="center">
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeOver15Percent', 'weightedAwayOver15Percent', 'over15Pct').homeRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeOver15Percent', 'weightedAwayOver15Percent', 'over15Pct').home !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeOver15Percent', 'weightedAwayOver15Percent', 'over15Pct').home }}
+                  </span>
+                  /
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeOver15Percent', 'weightedAwayOver15Percent', 'over15Pct').awayRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeOver15Percent', 'weightedAwayOver15Percent', 'over15Pct').away !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeOver15Percent', 'weightedAwayOver15Percent', 'over15Pct').away }}
+                  </span>
+                </td>
+                <td class="center">
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeOver25Percent', 'weightedAwayOver25Percent', 'over25Pct').homeRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeOver25Percent', 'weightedAwayOver25Percent', 'over25Pct').home !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeOver25Percent', 'weightedAwayOver25Percent', 'over25Pct').home }}
+                  </span>
+                  /
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeOver25Percent', 'weightedAwayOver25Percent', 'over25Pct').awayRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeOver25Percent', 'weightedAwayOver25Percent', 'over25Pct').away !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeOver25Percent', 'weightedAwayOver25Percent', 'over25Pct').away }}
+                  </span>
+                </td>
+                <td class="center">
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeOver35Percent', 'weightedAwayOver35Percent', 'over35Pct').homeRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeOver35Percent', 'weightedAwayOver35Percent', 'over35Pct').home !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeOver35Percent', 'weightedAwayOver35Percent', 'over35Pct').home }}
+                  </span>
+                  /
+                  <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeOver35Percent', 'weightedAwayOver35Percent', 'over35Pct').awayRaw)" [title]="weightTip"
+                        *ngIf="splitPercent(r, 'weightedHomeOver35Percent', 'weightedAwayOver35Percent', 'over35Pct').away !== 'N/A'; else naTpl">
+                    {{ splitPercent(r, 'weightedHomeOver35Percent', 'weightedAwayOver35Percent', 'over35Pct').away }}
+                  </span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -118,11 +182,19 @@ import { Season, SeasonService } from '../services/season.service';
     .tab.active { background:#19b562; color:#04110a; border-color:#19b562; }
     .percent { display:inline-block; padding:2px 6px; border-radius:6px; color:#04110a; font-weight:700; }
     .sortable { cursor: pointer; user-select: none; }
+    .banner.warning { background: #facc1533; color: #d97706; border: 1px solid #d97706; padding: 6px 10px; border-radius: 8px; margin-bottom: 8px; }
+    .muted-na { color: #9fb3cd; font-style: italic; }
+    .ha-ppg { font-weight:700; }
+    .weighted { color:#6b7280; font-size:12px; margin-left:6px; }
   `]
 })
-export class FormGuideComponent {
+export class FormGuideComponent implements OnInit {
+  // Tooltip explaining weighting methodology (UI-only)
+  weightTip: string = 'Weighted metrics use recency-weighting and home/away context. Percentages are normalized to 0–100.';
   private api = inject(LeagueService);
   private seasonApi = inject(SeasonService);
+  private router: Router = inject(Router);
+  private route: ActivatedRoute = inject(ActivatedRoute);
 
   leagues: League[] = [];
   leagueId: number | null = null;
@@ -139,18 +211,79 @@ export class FormGuideComponent {
 
   loading = false;
   error: string | null = null;
+  weightedWarning: string | null = null;
+
+  private loadParams$ = new Subject<{ leagueId: number; seasonId: number; limit: number | 'all'; scope: 'overall'|'home'|'away' }>();
 
   constructor(){
     this.api.getLeagues().subscribe({ next: d => this.leagues = d ?? [], error: _ => this.error = 'Failed to load leagues' });
+    // hydrate from URL query params if provided
+    this.route.queryParamMap.subscribe(qp => {
+      const lid = qp.get('leagueId');
+      const sid = qp.get('seasonId');
+      const nextLeagueId = lid ? Number(lid) : this.leagueId;
+      const nextSeasonId = sid !== null ? Number(sid) : this.seasonId;
+      const leagueChanged = nextLeagueId !== this.leagueId;
+      const seasonChanged = nextSeasonId !== this.seasonId;
+      this.leagueId = nextLeagueId;
+      this.seasonId = nextSeasonId;
+      if (this.leagueId) {
+        if (leagueChanged) {
+          this.onLeagueChange(this.leagueId);
+        } else if (seasonChanged) {
+          // If only season changed via URL, apply it without triggering extra navigations
+          if (this.seasonId != null) {
+            this.onSeasonChange(this.seasonId);
+          }
+        }
+      }
+    });
   }
 
   private load(){
     if (!this.leagueId) return;
-    this.loading = true; this.error = null; // keep current rows to avoid flicker
-    this.api.getFormGuide(this.leagueId, this.limit, this.scope, this.seasonId).subscribe({
-      next: d => { this.rows = d; this.applySort(); this.loading = false; },
-      error: _ => { this.error = 'Failed to load form guide'; this.loading = false; }
-    })
+    if (this.seasonId == null) return; // wait until season is resolved
+    this.loading = true; this.error = null; this.weightedWarning = null; // keep current rows to avoid flicker
+    this.loadParams$.next({
+      leagueId: this.leagueId!,
+      seasonId: this.seasonId!,
+      limit: this.limit,
+      scope: this.scope
+    });
+  }
+
+  ngOnInit(): void {
+    // Set up a single subscription that reacts to param changes and makes exactly one HTTP call per change.
+    this.loadParams$
+      .pipe(
+        // Build a stable key for distinctUntilChanged
+        map(p => ({ ...p, key: `${p.leagueId}|${p.seasonId}|${p.limit}|${p.scope}` })), 
+        distinctUntilChanged((a, b) => a.key === b.key),
+        tap(p => console.debug('[FormGuide] load trigger', p)),
+        switchMap(p => {
+          return this.api.getFormGuide(p.leagueId, p.seasonId!, p.limit, p.scope)
+            .pipe(
+              tap(rows => console.debug('[FormGuide] response', { count: rows?.length ?? 0, params: p })),
+              catchError(err => {
+                if (err?.status === 400) {
+                  this.error = 'No data available for this season yet';
+                } else {
+                  this.error = 'Failed to load form guide';
+                }
+                // keep existing rows to avoid flicker, but stop loading
+                return of([] as FormGuideRowDTO[]);
+              }),
+              finalize(() => { this.loading = false; })
+            );
+        })
+      )
+      .subscribe(rows => {
+        if (rows && rows.length >= 0) {
+          this.rows = rows;
+          this.evaluateWeightedFields(rows);
+          this.applySort();
+        }
+      });
   }
 
   onLeagueChange(val: number | null){
@@ -160,6 +293,7 @@ export class FormGuideComponent {
     this.seasonId = null;
     this.seasons = [];
     if (this.leagueId) {
+      // Do not navigate yet with seasonId=null; wait until seasonId is resolved to avoid duplicate navigations.
       this.seasonApi.listSeasons(this.leagueId).subscribe({ next: s => {
         this.seasons = s ?? [];
         const today = new Date().toISOString().slice(0,10);
@@ -169,9 +303,17 @@ export class FormGuideComponent {
           this.seasons = [current, ...this.seasons.filter(x => x.id !== current.id)];
         }
         this.seasonId = current ? current.id : (this.seasons[0]?.id ?? null);
-        // Now that seasonId is set, load data for this default season
+        // Now that seasonId is set, update URL only if changed, then load.
+        const qp = this.route.snapshot.queryParamMap;
+        const currLeague = qp.get('leagueId');
+        const currSeason = qp.get('seasonId');
+        const nextLeague = String(this.leagueId);
+        const nextSeason = this.seasonId != null ? String(this.seasonId) : null;
+        if (currLeague !== nextLeague || currSeason !== nextSeason) {
+          this.router.navigate([], { queryParams: { leagueId: this.leagueId, seasonId: this.seasonId }, queryParamsHandling: 'merge', replaceUrl: true });
+        }
         this.load();
-      }, error: _ => { this.seasons = []; this.load(); } });
+      }, error: _ => { this.seasons = []; this.error = null; this.load(); } });
     }
   }
 
@@ -188,8 +330,17 @@ export class FormGuideComponent {
     if (this.leagueId) this.load();
   }
 
-  onSeasonChange(val: number | null){
+  onSeasonChange(val: number){
     this.seasonId = val;
+    // Persist in URL only if changed, and avoid piling up history entries
+    const qp = this.route.snapshot.queryParamMap;
+    const currLeague = qp.get('leagueId');
+    const currSeason = qp.get('seasonId');
+    const nextLeague = this.leagueId != null ? String(this.leagueId) : null;
+    const nextSeason = this.seasonId != null ? String(this.seasonId) : null;
+    if (currLeague !== nextLeague || currSeason !== nextSeason) {
+      this.router.navigate([], { queryParams: { leagueId: this.leagueId, seasonId: this.seasonId }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
     if (this.leagueId) this.load();
   }
 
@@ -209,6 +360,54 @@ export class FormGuideComponent {
     return this.sortDir === 'asc' ? '▲' : '▼';
   }
 
+  private evaluateWeightedFields(rows: FormGuideRowDTO[]) {
+    // Determine if weighted fields are present; if any are missing, show a warning but still display raw W/D/L and Pts
+    const missing = rows.some(r => !this.isNumber(r.ppg) || !this.isNumber(r.bttsPct) || !this.isNumber(r.over15Pct) || !this.isNumber(r.over25Pct) || !this.isNumber(r.over35Pct));
+    this.weightedWarning = missing ? 'Some weighted statistics are unavailable for this selection. Showing N/A where data is missing.' : null;
+  }
+
+  private pickSplitNumber(r: FormGuideRowDTO, homeVal?: number, awayVal?: number, overallVal?: number, side: 'home'|'away' = 'home'){
+    const hm = r.weightedHomeMatches ?? 0;
+    const am = r.weightedAwayMatches ?? 0;
+    if (side === 'home') {
+      if (this.isNumber(homeVal) && hm > 0) return homeVal as number;
+      if (this.isNumber(overallVal)) return overallVal as number;
+      return NaN;
+    } else {
+      if (this.isNumber(awayVal) && am > 0) return awayVal as number;
+      if (this.isNumber(overallVal)) return overallVal as number;
+      return NaN;
+    }
+  }
+
+  splitPpg(r: FormGuideRowDTO){
+    const h = this.pickSplitNumber(r, r.weightedHomePPG, r.weightedAwayPPG, r.ppg, 'home');
+    const a = this.pickSplitNumber(r, r.weightedHomePPG, r.weightedAwayPPG, r.ppg, 'away');
+    return {
+      home: this.isNumber(h) ? (h as number).toFixed(2) : 'N/A',
+      away: this.isNumber(a) ? (a as number).toFixed(2) : 'N/A'
+    };
+  }
+
+  splitPercent(
+    r: FormGuideRowDTO,
+    homeKey: keyof FormGuideRowDTO,
+    awayKey: keyof FormGuideRowDTO,
+    overallKey: keyof FormGuideRowDTO
+  ){
+    const hv = r[homeKey] as any as number | undefined;
+    const av = r[awayKey] as any as number | undefined;
+    const ov = r[overallKey] as any as number | undefined;
+    const h = this.pickSplitNumber(r, hv, av, ov, 'home');
+    const a = this.pickSplitNumber(r, hv, av, ov, 'away');
+    return {
+      home: this.isNumber(h) ? `${h}%` : 'N/A',
+      away: this.isNumber(a) ? `${a}%` : 'N/A',
+      homeRaw: this.isNumber(h) ? (h as number) : -1,
+      awayRaw: this.isNumber(a) ? (a as number) : -1,
+    };
+  }
+
   private applySort(){
     const col = this.sortCol;
     const dir = this.sortDir === 'asc' ? 1 : -1;
@@ -218,8 +417,8 @@ export class FormGuideComponent {
         case 'mp': return this.matchesPlayed(r);
         case 'w': return r.w; case 'd': return r.d; case 'l': return r.l;
         case 'gf': return r.gf; case 'ga': return r.ga; case 'gd': return r.gd;
-        case 'pts': return r.pts; case 'ppg': return r.ppg;
-        case 'bttsPct': return r.bttsPct; case 'over15Pct': return r.over15Pct; case 'over25Pct': return r.over25Pct; case 'over35Pct': return r.over35Pct;
+        case 'pts': return r.pts; case 'ppg': return this.numVal(r.ppg);
+        case 'bttsPct': return this.numVal(r.bttsPct); case 'over15Pct': return this.numVal(r.over15Pct); case 'over25Pct': return this.numVal(r.over25Pct); case 'over35Pct': return this.numVal(r.over35Pct);
         default: return 0;
       }
     };
@@ -276,13 +475,24 @@ export class FormGuideComponent {
     return '#ef444444';
   }
 
+  isNumber(v: any): v is number {
+    return typeof v === 'number' && !isNaN(v);
+  }
+
+  safePpg(r: FormGuideRowDTO){
+    return this.isNumber(r.ppg) ? (r.ppg as number).toFixed(2) : 'N/A';
+  }
+
+  private numVal(v: any){
+    return this.isNumber(v) ? v as number : Number.NEGATIVE_INFINITY;
+  }
+
   headerLeagueName(){
     const lg = this.leagues.find(l => l.id === this.leagueId);
     return lg ? `${lg.name}` : '';
   }
   headerSeasonName(){
-    if (!this.seasonId) return 'Combined (All Seasons)';
-    const s = this.seasons.find(x => x.id === this.seasonId);
+    const s = this.seasons.find(x => x.id === this.seasonId!);
     return s?.name || 'Season';
   }
 }

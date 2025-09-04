@@ -31,6 +31,9 @@ public class MatchAnalysisController {
         if (req.getLeagueId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "leagueId is required");
         }
+        if (req.getSeasonId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "seasonId is required");
+        }
         League league = leagueRepository.findById(req.getLeagueId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "League not found"));
 
@@ -64,15 +67,20 @@ public class MatchAnalysisController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "homeTeamId/awayTeamId or homeTeamName/awayTeamName are required");
         }
 
-        // Call deterministic analyzer with optional cache usage
-        return matchAnalysisService.analyzeDeterministic(
-                league.getId(),
-                homeId,
-                awayId,
-                league.getName(),
-                homeName.trim(),
-                awayName.trim(),
-                req.isRefresh()
-        );
+        try {
+            // Call deterministic analyzer with season scope
+            return matchAnalysisService.analyzeDeterministic(
+                    league.getId(),
+                    homeId,
+                    awayId,
+                    req.getSeasonId(),
+                    league.getName(),
+                    homeName.trim(),
+                    awayName.trim(),
+                    req.isRefresh()
+            );
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 }

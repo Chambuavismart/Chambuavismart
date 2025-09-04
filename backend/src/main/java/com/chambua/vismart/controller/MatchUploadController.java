@@ -1,5 +1,6 @@
 package com.chambua.vismart.controller;
 
+import com.chambua.vismart.model.MatchStatus;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.service.MatchUploadService;
@@ -35,16 +36,19 @@ public class MatchUploadController {
             @RequestParam(defaultValue = "true") boolean fullReplace,
             @RequestParam(defaultValue = "false") boolean incrementalUpdate,
             @RequestParam(defaultValue = "false") boolean fixtureMode,
+            @RequestParam(defaultValue = "true") boolean strict,
+            @RequestParam(defaultValue = "false") boolean dryRun,
+            @RequestParam(defaultValue = "false") boolean allowSeasonAutoCreate,
             @RequestParam("file") MultipartFile file
     ) {
         try {
-            var result = service.uploadCsv(leagueName, country, season, seasonId, file, fullReplace, incrementalUpdate, fixtureMode);
+            var result = service.uploadCsv(leagueName, country, season, seasonId, file, fullReplace, incrementalUpdate, fixtureMode, strict, dryRun, allowSeasonAutoCreate);
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
             long completedAllTime = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
+                    .map(l -> matchRepository.countByLeagueIdAndStatus(l.getId(), MatchStatus.PLAYED))
                     .orElse(0L);
             long completedUpToToday = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
+                    .map(l -> matchRepository.countByLeagueIdAndStatusAndDateLessThanEqual(l.getId(), MatchStatus.PLAYED, LocalDate.now()))
                     .orElse(0L);
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),
@@ -65,7 +69,7 @@ public class MatchUploadController {
         }
     }
 
-    public record TextUploadRequest(String leagueName, String country, String season, Long seasonId, String text, Boolean fullReplace, Boolean incrementalUpdate, Boolean fixtureMode) {}
+    public record TextUploadRequest(String leagueName, String country, String season, Long seasonId, String text, Boolean fullReplace, Boolean incrementalUpdate, Boolean fixtureMode, Boolean strict, Boolean dryRun, Boolean allowSeasonAutoCreate) {}
 
     // Minimal normalization mirroring service behavior
     private static String normalizeKey(String s) {
@@ -88,13 +92,13 @@ public class MatchUploadController {
         boolean fixtureMode = req.fixtureMode() != null && req.fixtureMode();
         try {
             boolean autoCreateTeams = fullReplace && !incrementalUpdate; // allow creating teams for new/full uploads
-            var result = service.uploadText(req.leagueName(), req.country(), req.season(), req.seasonId(), req.text(), fullReplace, incrementalUpdate, fixtureMode, autoCreateTeams);
+            var result = service.uploadText(req.leagueName(), req.country(), req.season(), req.seasonId(), req.text(), fullReplace, incrementalUpdate, fixtureMode, autoCreateTeams, req.strict() == null || req.strict(), req.dryRun() != null && req.dryRun(), req.allowSeasonAutoCreate() != null && req.allowSeasonAutoCreate());
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(req.leagueName()), normalizeKey(req.country()), normalizeSeason(req.season()));
             long completedAllTime = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
+                    .map(l -> matchRepository.countByLeagueIdAndStatus(l.getId(), MatchStatus.PLAYED))
                     .orElse(0L);
             long completedUpToToday = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
+                    .map(l -> matchRepository.countByLeagueIdAndStatusAndDateLessThanEqual(l.getId(), MatchStatus.PLAYED, LocalDate.now()))
                     .orElse(0L);
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),

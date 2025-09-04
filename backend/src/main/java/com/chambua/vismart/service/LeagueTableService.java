@@ -42,18 +42,63 @@ public class LeagueTableService {
      * Backward-compat: season string ignored in computation; kept to not break callers.
      */
     public List<LeagueTableEntryDTO> computeTable(Long leagueId, String season) {
-        return computeTableBySeasonId(leagueId, null);
+        if (leagueId == null) throw new IllegalArgumentException("leagueId is required");
+        String sql =
+                "SELECT t.id AS team_id, t.name AS team_name, " +
+                "       SUM(s.mp) AS mp, SUM(s.w) AS w, SUM(s.d) AS d, SUM(s.l) AS l, " +
+                "       SUM(s.gf) AS gf, SUM(s.ga) AS ga, SUM(s.gf) - SUM(s.ga) AS gd, SUM(s.pts) AS pts " +
+                "FROM ( " +
+                "  SELECT m.home_team_id AS team_id, 1 AS mp, " +
+                "         CASE WHEN m.home_goals > m.away_goals THEN 1 ELSE 0 END AS w, " +
+                "         CASE WHEN m.home_goals = m.away_goals THEN 1 ELSE 0 END AS d, " +
+                "         CASE WHEN m.home_goals < m.away_goals THEN 1 ELSE 0 END AS l, " +
+                "         m.home_goals AS gf, m.away_goals AS ga, " +
+                "         CASE WHEN m.home_goals > m.away_goals THEN 3 WHEN m.home_goals = m.away_goals THEN 1 ELSE 0 END AS pts " +
+                "  FROM matches m " +
+                "  WHERE m.league_id = ?1 " +
+                "    AND m.status = 'PLAYED' " +
+                "  UNION ALL " +
+                "  SELECT m.away_team_id AS team_id, 1 AS mp, " +
+                "         CASE WHEN m.away_goals > m.home_goals THEN 1 ELSE 0 END AS w, " +
+                "         CASE WHEN m.away_goals = m.home_goals THEN 1 ELSE 0 END AS d, " +
+                "         CASE WHEN m.away_goals < m.home_goals THEN 1 ELSE 0 END AS l, " +
+                "         m.away_goals AS gf, m.home_goals AS ga, " +
+                "         CASE WHEN m.away_goals > m.home_goals THEN 3 WHEN m.away_goals = m.home_goals THEN 1 ELSE 0 END AS pts " +
+                "  FROM matches m " +
+                "  WHERE m.league_id = ?1 " +
+                "    AND m.status = 'PLAYED' " +
+                ") s " +
+                "JOIN teams t ON t.id = s.team_id " +
+                "GROUP BY t.id, t.name " +
+                "ORDER BY pts DESC, gd DESC, gf DESC, t.name ASC";
+
+        var query = em.createNativeQuery(sql).setParameter(1, leagueId);
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+
+        List<LeagueTableEntryDTO> result = new ArrayList<>();
+        int pos = 1;
+        for (Object[] r : rows) {
+            Long teamId = ((Number) r[0]).longValue();
+            String teamName = (String) r[1];
+            int mp = ((Number) r[2]).intValue();
+            int w = ((Number) r[3]).intValue();
+            int d = ((Number) r[4]).intValue();
+            int l = ((Number) r[5]).intValue();
+            int gf = ((Number) r[6]).intValue();
+            int ga = ((Number) r[7]).intValue();
+            int gd = ((Number) r[8]).intValue();
+            int pts = ((Number) r[9]).intValue();
+
+            result.add(new LeagueTableEntryDTO(pos++, teamId, teamName, mp, w, d, l, gf, ga, gd, pts));
+        }
+        return result;
     }
 
-    /**
-     * Compute standings for a league, optionally filtered by seasonId.
-     * When seasonId is null, aggregates across all seasons for that league.
-     */
+    // Season-specific computation: strictly filter by seasonId; disallow null seasonId
     public List<LeagueTableEntryDTO> computeTableBySeasonId(Long leagueId, Long seasonId) {
         if (leagueId == null) throw new IllegalArgumentException("leagueId is required");
-
-        boolean filterBySeason = (seasonId != null);
-        String seasonClause = filterBySeason ? " AND m.season_id = ?2" : "";
+        if (seasonId == null) throw new IllegalArgumentException("seasonId is required");
 
         String sql =
                 "SELECT t.id AS team_id, t.name AS team_name, " +
@@ -67,8 +112,8 @@ public class LeagueTableService {
                 "         m.home_goals AS gf, m.away_goals AS ga, " +
                 "         CASE WHEN m.home_goals > m.away_goals THEN 3 WHEN m.home_goals = m.away_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
-                "  WHERE m.league_id = ?1 " + seasonClause +
-                "    AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL " +
+                "  WHERE m.league_id = ?1 AND m.season_id = ?2 " +
+                "    AND m.status = 'PLAYED' " +
                 "  UNION ALL " +
                 "  SELECT m.away_team_id AS team_id, 1 AS mp, " +
                 "         CASE WHEN m.away_goals > m.home_goals THEN 1 ELSE 0 END AS w, " +
@@ -77,29 +122,16 @@ public class LeagueTableService {
                 "         m.away_goals AS gf, m.home_goals AS ga, " +
                 "         CASE WHEN m.away_goals > m.home_goals THEN 3 WHEN m.away_goals = m.home_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
-                "  WHERE m.league_id = ?1 " + seasonClause +
-                "    AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL " +
+                "  WHERE m.league_id = ?1 AND m.season_id = ?2 " +
+                "    AND m.status = 'PLAYED' " +
                 ") s " +
                 "JOIN teams t ON t.id = s.team_id " +
                 "GROUP BY t.id, t.name " +
                 "ORDER BY pts DESC, gd DESC, gf DESC, t.name ASC";
 
-        // Debug logging: totals and distinct fixtures
-        try {
-            Number totalRows = (Number) em.createNativeQuery("SELECT COUNT(*) FROM matches WHERE league_id = ?1")
-                    .setParameter(1, leagueId).getSingleResult();
-            Number distinctFixtures = (Number) em.createNativeQuery(
-                    "SELECT COUNT(*) FROM (SELECT DISTINCT league_id, home_team_id, away_team_id, match_date FROM matches WHERE league_id = ?1) t")
-                    .setParameter(1, leagueId).getSingleResult();
-            Number teamsCount = (Number) em.createNativeQuery("SELECT COUNT(*) FROM teams WHERE league_id = ?1")
-                    .setParameter(1, leagueId).getSingleResult();
-            log.debug("LeagueTable compute: leagueId={}, seasonId={}, total_rows={}, distinct_fixtures={}, teams={}", leagueId, seasonId, totalRows, distinctFixtures, teamsCount);
-        } catch (Exception e) {
-            log.debug("LeagueTable compute: logging failed: {}", e.getMessage());
-        }
-
-        var query = em.createNativeQuery(sql).setParameter(1, leagueId);
-        if (filterBySeason) query.setParameter(2, seasonId);
+        var query = em.createNativeQuery(sql)
+                .setParameter(1, leagueId)
+                .setParameter(2, seasonId);
         @SuppressWarnings("unchecked")
         List<Object[]> rows = query.getResultList();
 
