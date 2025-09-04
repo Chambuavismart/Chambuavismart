@@ -142,6 +142,7 @@ Nublense
       <!-- Fixtures Upload Tab -->
       <div *ngIf="activeTab==='fixtures'" class="card">
         <h2>Fixtures Upload</h2>
+        <p class="hint">Do not include goals here. Use Match Upload when results are available.</p>
         <div class="grid">
           <label>
             League
@@ -373,8 +374,14 @@ export class MatchUploadComponent {
     if (!this.fixturesLeagueName || !this.fixturesCountry || !this.fixturesSeason){
       this.success = false; this.message = 'League details missing. Please re-select the league.'; return;
     }
-    this.api.uploadUnifiedText('FIXTURE', this.fixturesLeagueName, this.fixturesCountry, this.fixturesSeason, this.fixturesRawText, { leagueId: this.fixturesLeagueId, seasonId: null, autoDetectSeason: false }).subscribe({
-      next: res => {
+    const body = {
+      leagueId: this.fixturesLeagueId,
+      season: this.fixturesSeason,
+      fullReplace: false,
+      rawText: this.fixturesRawText
+    };
+    this.http.post('/api/fixtures/upload-text', body).subscribe({
+      next: (res: any) => {
         this.handleResult(res);
         if (res?.success){
           this.fixturesRawText = '';

@@ -87,7 +87,8 @@ public class MatchUploadController {
         boolean incrementalUpdate = req.incrementalUpdate() != null && req.incrementalUpdate();
         boolean fixtureMode = req.fixtureMode() != null && req.fixtureMode();
         try {
-            var result = service.uploadText(req.leagueName(), req.country(), req.season(), req.seasonId(), req.text(), fullReplace, incrementalUpdate, fixtureMode);
+            boolean autoCreateTeams = fullReplace && !incrementalUpdate; // allow creating teams for new/full uploads
+            var result = service.uploadText(req.leagueName(), req.country(), req.season(), req.seasonId(), req.text(), fullReplace, incrementalUpdate, fixtureMode, autoCreateTeams);
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(req.leagueName()), normalizeKey(req.country()), normalizeSeason(req.season()));
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))

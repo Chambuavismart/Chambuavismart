@@ -20,7 +20,7 @@ import { Season, SeasonService } from '../services/season.service';
         </select>
 
         <label class="label">Season</label>
-        <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)" [disabled]="seasons.length === 0">
+        <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
           <option [ngValue]="null">⚡ Combined (All Seasons)</option>
           <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
         </select>

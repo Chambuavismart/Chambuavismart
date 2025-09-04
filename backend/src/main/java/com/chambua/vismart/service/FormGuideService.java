@@ -7,6 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.chambua.vismart.repository.SeasonRepository;
+import com.chambua.vismart.model.Season;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -19,6 +21,12 @@ public class FormGuideService {
 
     @PersistenceContext
     private EntityManager em;
+
+    private final SeasonRepository seasonRepository;
+
+    public FormGuideService(SeasonRepository seasonRepository) {
+        this.seasonRepository = seasonRepository;
+    }
 
     public enum Scope { OVERALL, HOME, AWAY }
 
@@ -33,7 +41,21 @@ public class FormGuideService {
 
         boolean filterBySeason = (seasonId != null);
 
-        String seasonClause = filterBySeason ? " AND m.season_id = ?2" : "";
+        String seasonClause = "";
+        boolean hasDateBounds = false;
+        java.time.LocalDate start = null, end = null;
+        if (filterBySeason) {
+            seasonClause = " AND m.season_id = ?2";
+            Season s = seasonRepository.findById(seasonId).orElse(null);
+            if (s != null && (s.getStartDate() != null || s.getEndDate() != null)) {
+                hasDateBounds = true;
+                start = s.getStartDate();
+                end = s.getEndDate();
+                String startCond = (start != null) ? " AND m.match_date >= ?3" : "";
+                String endCond = (end != null) ? " AND m.match_date <= ?4" : "";
+                seasonClause = " AND (m.season_id = ?2 OR (m.season_id IS NULL" + startCond + endCond + "))";
+            }
+        }
 
         String baseHome =
                 "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga " +
@@ -55,7 +77,14 @@ public class FormGuideService {
 
         var q = em.createNativeQuery(sql)
                 .setParameter(1, leagueId);
-        if (filterBySeason) q.setParameter(2, seasonId);
+        if (filterBySeason) {
+            q.setParameter(2, seasonId);
+            if (hasDateBounds) {
+                int idx = 3;
+                if (start != null) { q.setParameter(idx++, java.sql.Date.valueOf(start)); }
+                if (end != null) { q.setParameter(idx, java.sql.Date.valueOf(end)); }
+            }
+        }
         @SuppressWarnings("unchecked")
         List<Object[]> rows = q.getResultList();
 

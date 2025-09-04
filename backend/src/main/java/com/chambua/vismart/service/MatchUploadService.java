@@ -94,8 +94,11 @@ public class MatchUploadService {
             if (dateIdx == null) missing.add("date");
             if (homeIdx == null) missing.add("homeTeam");
             if (awayIdx == null) missing.add("awayTeam");
-            if (hgIdx == null) missing.add("homeGoals");
-            if (agIdx == null) missing.add("awayGoals");
+            // Goals columns are required only for match-result uploads (not fixture mode)
+            if (!fixtureMode) {
+                if (hgIdx == null) missing.add("homeGoals");
+                if (agIdx == null) missing.add("awayGoals");
+            }
             if (!missing.isEmpty()) {
                 throw new IllegalArgumentException("CSV missing required columns (accepted aliases in brackets): " + missing +
                         " | date[date,match_date,matchdate,kickoff,played_at,playedat]; homeTeam[hometeam,home,home_team]; awayTeam[awayteam,away,away_team]; homeGoals[homegoals,fthg,home_score]; awayGoals[awaygoals,ftag,away_score]; optional round[round,matchweek,mw,gameweek,gw,matchday,week]");
@@ -124,7 +127,7 @@ public class MatchUploadService {
         }
 
         // 2) Validate
-        var vr = validationService.validate(items);
+        var vr = validationService.validate(items, fixtureMode);
         if (!vr.isValid()) {
             errors.addAll(vr.errorsAsStrings());
             warnLogs.addAll(vr.warningsAsStrings().stream().map(w -> new WarnLog(null, null, w)).toList());
@@ -143,8 +146,8 @@ public class MatchUploadService {
             int round = Optional.ofNullable(it.getRound()).orElse(1);
             String homeName = it.getHomeTeamName();
             String awayName = it.getAwayTeamName();
-            int homeGoals = Optional.ofNullable(it.getHomeGoals()).orElse(0);
-            int awayGoals = Optional.ofNullable(it.getAwayGoals()).orElse(0);
+            Integer homeGoals = fixtureMode ? it.getHomeGoals() : Optional.ofNullable(it.getHomeGoals()).orElse(0);
+            Integer awayGoals = fixtureMode ? it.getAwayGoals() : Optional.ofNullable(it.getAwayGoals()).orElse(0);
 
             if (incrementalUpdate) {
                 Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
@@ -182,6 +185,7 @@ public class MatchUploadService {
                                 target.setAwayGoals(awayGoals);
                                 changed = true;
                             }
+                            if (seasonEntity != null && (target.getSeason() == null || !seasonEntity.getId().equals(target.getSeason().getId()))) { target.setSeason(seasonEntity); changed = true; }
                             if (changed) {
                                 matchRepository.save(target);
                             }
@@ -194,7 +198,7 @@ public class MatchUploadService {
                 Team away = findOrCreateTeam(league, awayName);
                 String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
                 if (seenKeys.add(key)) {
-                    inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals);
+                    inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
                 }
             }
         }
@@ -203,7 +207,7 @@ public class MatchUploadService {
     }
 
     @Transactional
-    public UploadResult uploadText(String leagueName, String country, String season, Long seasonId, String text, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode) {
+    public UploadResult uploadText(String leagueName, String country, String season, Long seasonId, String text, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode, boolean autoCreateTeams) {
         List<String> errors = new ArrayList<>();
         List<UpdateLog> updatedLogs = new ArrayList<>();
         List<SkipLog> skippedLogs = new ArrayList<>();
@@ -216,6 +220,19 @@ public class MatchUploadService {
         Season seasonEntity = null;
         if (seasonId != null) {
             seasonEntity = seasonRepository.findById(seasonId).orElse(null);
+        }
+        // If seasonId wasn't provided or season not found, resolve/create Season entity by league + season name
+        if (seasonEntity == null) {
+            String normalizedSeason = normalizeSeason(season);
+            if (normalizedSeason != null && !normalizedSeason.isBlank()) {
+                seasonEntity = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), normalizedSeason)
+                        .orElseGet(() -> {
+                            Season s = new Season();
+                            s.setLeague(league);
+                            s.setName(normalizedSeason);
+                            return seasonRepository.save(s);
+                        });
+            }
         }
 
         // 1) Parse to items first
@@ -252,8 +269,13 @@ public class MatchUploadService {
                     if (scorePart.length != 2) throw new IllegalArgumentException("Score must be 'home-away'");
                     String hgStr = scorePart[0].trim();
                     String agStr = scorePart[1].trim();
-                    int homeGoals = (hgStr.isEmpty() || hgStr.equals("-") || hgStr.equals("–") || hgStr.equals("—")) ? 0 : Integer.parseInt(hgStr);
-                    int awayGoals = (agStr.isEmpty() || agStr.equals("-") || agStr.equals("–") || agStr.equals("—")) ? 0 : Integer.parseInt(agStr);
+                    Integer homeGoals = parseNullableInt(hgStr);
+                    Integer awayGoals = parseNullableInt(agStr);
+                    if (!fixtureMode) {
+                        // In result mode, default nulls to 0
+                        homeGoals = homeGoals == null ? 0 : homeGoals;
+                        awayGoals = awayGoals == null ? 0 : awayGoals;
+                    }
 
                     if (currentRound <= 0) {
                         errors.add("Round not specified for line: " + line);
@@ -303,9 +325,19 @@ public class MatchUploadService {
                                     }
                                 }
                             } else if (homeGoals == null) {
-                                if (isPureNumber(ln)) { homeGoals = Integer.parseInt(ln); }
+                                if (isPureNumber(ln)) {
+                                    homeGoals = Integer.parseInt(ln);
+                                } else if (ln.equals("-") || ln.equals("–") || ln.equals("—")) {
+                                    homeGoals = null; // placeholder for fixture
+                                }
                             } else if (awayGoals == null) {
-                                if (isPureNumber(ln)) { awayGoals = Integer.parseInt(ln); j++; steps++; break; }
+                                if (isPureNumber(ln)) {
+                                    awayGoals = Integer.parseInt(ln);
+                                    j++; steps++; break;
+                                } else if (ln.equals("-") || ln.equals("–") || ln.equals("—")) {
+                                    awayGoals = null;
+                                    j++; steps++; break;
+                                }
                             }
                         }
                         j++; steps++;
@@ -316,7 +348,7 @@ public class MatchUploadService {
                         i = j - 1;
                         continue;
                     }
-                    if (homeName == null || awayName == null || homeGoals == null || awayGoals == null) {
+                    if (homeName == null || awayName == null || (!fixtureMode && (homeGoals == null || awayGoals == null))) {
                         errors.add("Could not parse match block after date: " + line);
                         i = j - 1;
                         continue;
@@ -336,7 +368,7 @@ public class MatchUploadService {
         }
 
         // 2) Validate
-        var vr = validationService.validate(items);
+        var vr = validationService.validate(items, fixtureMode);
         if (!vr.isValid()) {
             errors.addAll(vr.errorsAsStrings());
             warnLogs.addAll(vr.warningsAsStrings().stream().map(w -> new WarnLog(null, null, w)).toList());
@@ -355,8 +387,8 @@ public class MatchUploadService {
             int round = Optional.ofNullable(it.getRound()).orElse(1);
             String homeName = it.getHomeTeamName();
             String awayName = it.getAwayTeamName();
-            int homeGoals = Optional.ofNullable(it.getHomeGoals()).orElse(0);
-            int awayGoals = Optional.ofNullable(it.getAwayGoals()).orElse(0);
+            Integer homeGoals = fixtureMode ? it.getHomeGoals() : Optional.ofNullable(it.getHomeGoals()).orElse(0);
+            Integer awayGoals = fixtureMode ? it.getAwayGoals() : Optional.ofNullable(it.getAwayGoals()).orElse(0);
 
             if (incrementalUpdate) {
                 Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
@@ -400,11 +432,37 @@ public class MatchUploadService {
                     }
                 }
             } else {
-                Team home = findOrCreateTeam(league, homeName);
-                Team away = findOrCreateTeam(league, awayName);
-                String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
-                if (seenKeys.add(key)) {
-                    inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals);
+                if (autoCreateTeams) {
+                    // For historical/old season uploads, accept newly promoted or previously untracked teams
+                    Team home = findOrCreateTeam(league, homeName);
+                    Team away = findOrCreateTeam(league, awayName);
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                    if (seenKeys.add(key)) {
+                        inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
+                    }
+                } else {
+                    // Strict team validation for Raw Text Upload: ensure teams already exist in this league
+                    Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
+                    Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
+                    boolean missing = false;
+                    if (homeOpt.isEmpty()) {
+                        warnLogs.add(new WarnLog(homeName, "", "Skipped unrecognized team entry: " + homeName));
+                        missing = true;
+                    }
+                    if (awayOpt.isEmpty()) {
+                        warnLogs.add(new WarnLog(awayName, "", "Skipped unrecognized team entry: " + awayName));
+                        missing = true;
+                    }
+                    if (missing) {
+                        // Skip saving this match since a team is unrecognized
+                        continue;
+                    }
+                    Team home = homeOpt.get();
+                    Team away = awayOpt.get();
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                    if (seenKeys.add(key)) {
+                        inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
+                    }
                 }
             }
         }
@@ -568,7 +626,7 @@ public class MatchUploadService {
      * If date is null (should not happen after validation), fallback to (league, round, home, away).
      * Returns 1 if a new row was inserted, 0 if an existing row was updated or nothing changed.
      */
-    private int upsertMatch(League league, Team home, Team away, LocalDate date, int round, Integer homeGoals, Integer awayGoals) {
+    private int upsertMatch(League league, Team home, Team away, LocalDate date, int round, Integer homeGoals, Integer awayGoals, Season season) {
         Integer hgToSave = homeGoals;
         Integer agToSave = awayGoals;
         // Do not convert 0-0 to null, as some deployments have NOT NULL constraints on goal columns.
@@ -583,6 +641,7 @@ public class MatchUploadService {
                         if (!Objects.equals(round, existing.getRound())) { existing.setRound(round); changed = true; }
                         if (!Objects.equals(fHg, existing.getHomeGoals())) { existing.setHomeGoals(fHg); changed = true; }
                         if (!Objects.equals(fAg, existing.getAwayGoals())) { existing.setAwayGoals(fAg); changed = true; }
+                        if (season != null && (existing.getSeason() == null || !season.getId().equals(existing.getSeason().getId()))) { existing.setSeason(season); changed = true; }
                         if (changed) { matchRepository.save(existing); }
                         return 0; // not a new insert
                     })
@@ -599,7 +658,9 @@ public class MatchUploadService {
                                     return 0; // updated existing
                                 })
                                 .orElseGet(() -> {
-                                    matchRepository.save(new Match(league, home, away, date, round, fHg, fAg));
+                                    Match m = new Match(league, home, away, date, round, fHg, fAg);
+                                    if (season != null) m.setSeason(season);
+                                    matchRepository.save(m);
                                     return 1; // inserted
                                 });
                     });
@@ -613,11 +674,14 @@ public class MatchUploadService {
                     boolean changed = false;
                     if (!Objects.equals(fHg2, existing.getHomeGoals())) { existing.setHomeGoals(fHg2); changed = true; }
                     if (!Objects.equals(fAg2, existing.getAwayGoals())) { existing.setAwayGoals(fAg2); changed = true; }
+                    if (season != null && (existing.getSeason() == null || !season.getId().equals(existing.getSeason().getId()))) { existing.setSeason(season); changed = true; }
                     if (changed) { matchRepository.save(existing); }
                     return 0; // not a new insert
                 })
                 .orElseGet(() -> {
-                    matchRepository.save(new Match(league, home, away, date, round, fHg2, fAg2));
+                    Match m = new Match(league, home, away, date, round, fHg2, fAg2);
+                    if (season != null) m.setSeason(season);
+                    matchRepository.save(m);
                     return 1; // inserted
                 });
     }

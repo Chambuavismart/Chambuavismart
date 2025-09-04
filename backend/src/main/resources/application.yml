@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: chambua-vismart
+  profiles:
+    default: dev
   datasource:
     url: jdbc:mysql://localhost:3306/chambua?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&createDatabaseIfNotExist=true
     username: root

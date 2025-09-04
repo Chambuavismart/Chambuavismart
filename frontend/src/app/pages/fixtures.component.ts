@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { NgFor, NgIf, AsyncPipe, DatePipe } from '@angular/common';
+import { NgFor, NgIf, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, NavigationEnd } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO } from '../services/fixtures.service';
@@ -7,7 +7,7 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
 @Component({
   selector: 'app-fixtures',
   standalone: true,
-  imports: [NgFor, NgIf, FormsModule, AsyncPipe, DatePipe],
+  imports: [NgFor, NgIf, FormsModule, DatePipe],
   styles: [`
     :host { display:block; color:#e6eef8; }
     .page { display:flex; gap:16px; }
@@ -44,8 +44,8 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
     <div class="mobile">
       <div class="toolbar">
         <label class="muted">League</label>
-        <select class="select" [(ngModel)]="selectedLeagueId" (change)="loadFixtures()">
-          <option *ngFor="let l of leagues" [value]="l.leagueId">{{ l.leagueName }} ({{ l.upcomingCount }})</option>
+        <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="loadFixtures()">
+          <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }} ({{ l.upcomingCount }})</option>
         </select>
         <label class="muted">Upcoming only</label>
         <input type="checkbox" [(ngModel)]="upcomingOnly" (change)="loadFixtures()"/>

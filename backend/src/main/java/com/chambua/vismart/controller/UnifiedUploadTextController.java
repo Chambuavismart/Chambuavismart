@@ -14,8 +14,9 @@ import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/uploads")
+@RequestMapping("/api/uploads-text")
 @CrossOrigin(origins = "*")
+@Deprecated
 public class UnifiedUploadTextController {
 
     private final MatchUploadService service;
@@ -54,15 +55,15 @@ public class UnifiedUploadTextController {
             }
 
             String seasonToUse = (req.autoDetectSeason() != null && req.autoDetectSeason()) ? tryDetectSeasonFromText(req.text(), req.season()) : req.season();
-            var result = service.uploadText(req.leagueName(), req.country(), seasonToUse, req.seasonId(), req.text(), fullReplace, incremental, fixtureMode);
+            boolean autoCreateTeams = (req.uploadType() == UploadType.HISTORICAL);
+                        var result = service.uploadText(req.leagueName(), req.country(), seasonToUse, req.seasonId(), req.text(), fullReplace, incremental, fixtureMode, autoCreateTeams);
 
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(req.leagueName()), normalizeKey(req.country()), normalizeSeason(req.season()));
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
                     .orElse(0L);
-            long completedUpToToday = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
-                    .orElse(0L);
+            // Treat any match with scores as completed regardless of its date (historical uploads)
+            long completedUpToToday = completedAllTime;
 
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),

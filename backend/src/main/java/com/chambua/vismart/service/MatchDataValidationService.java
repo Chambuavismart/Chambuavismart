@@ -42,7 +42,15 @@ public class MatchDataValidationService {
         }
     }
 
+    // Backward-compatible default: match mode (goals required)
     public ValidationResult validate(List<MatchIngestItem> items) {
+        return validate(items, false);
+    }
+
+    /**
+     * Validate ingest items. When fixtureMode is true, goals may be null (no "Missing goals" error).
+     */
+    public ValidationResult validate(List<MatchIngestItem> items, boolean fixtureMode) {
         List<ValidationIssue> issues = new ArrayList<>();
         if (items == null || items.isEmpty()) {
             issues.add(new ValidationIssue(ValidationIssue.Level.ERROR, "No matches to validate"));
@@ -60,10 +68,11 @@ public class MatchDataValidationService {
             if (!isBlank(it.getHomeTeamName()) && !isBlank(it.getAwayTeamName()) && it.getHomeTeamName().equalsIgnoreCase(it.getAwayTeamName())) {
                 issues.add(err("Fixture integrity: duplicate team entries (home equals away)", ctx));
             }
-            if (it.getHomeGoals() == null || it.getAwayGoals() == null) issues.add(err("Missing goals", ctx));
+            // Goals presence: required only for match uploads
+            if (!fixtureMode && (it.getHomeGoals() == null || it.getAwayGoals() == null)) issues.add(err("Missing goals", ctx));
+            // Non-negative validation applies when provided
             if (it.getHomeGoals() != null && it.getHomeGoals() < 0) issues.add(err("Negative home goals", ctx));
             if (it.getAwayGoals() != null && it.getAwayGoals() < 0) issues.add(err("Negative away goals", ctx));
-            // Correct result recognition is implicit if goals are non-negative; add check message consistency
             if (it.getHomeGoals() != null && it.getAwayGoals() != null) {
                 // No-op: any int pair maps deterministically to W/D/L
             }
@@ -95,7 +104,7 @@ public class MatchDataValidationService {
         long totalGF = items.stream().mapToInt(it -> Optional.ofNullable(it.getHomeGoals()).orElse(0)).sum()
                 + items.stream().mapToInt(it -> Optional.ofNullable(it.getAwayGoals()).orElse(0)).sum();
         long totalGA = totalGF; // For matches, sum of all teams' GF equals sum of all teams' GA automatically per match.
-        // However, assert per-team totals: sum over teams GF equals sum over teams GA
+        // However, assert per-team totals only over completed matches
         Map<String, long[]> teamStats = new HashMap<>(); // name -> [GF, GA, matches]
         for (MatchIngestItem it : items) {
             if (!isBlank(it.getHomeTeamName()) && it.getHomeGoals() != null && it.getAwayGoals() != null) {

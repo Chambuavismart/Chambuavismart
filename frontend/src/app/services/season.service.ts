@@ -5,8 +5,9 @@ import { Observable } from 'rxjs';
 export interface Season {
   id: number;
   name: string;
-  startDate?: string;
-  endDate?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  metadata?: string | null;
 }
 
 @Injectable({ providedIn: 'root' })

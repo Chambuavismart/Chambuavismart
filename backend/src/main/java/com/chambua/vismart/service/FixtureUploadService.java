@@ -5,8 +5,10 @@ import com.chambua.vismart.dto.UploadResultDTO;
 import com.chambua.vismart.model.Fixture;
 import com.chambua.vismart.model.FixtureStatus;
 import com.chambua.vismart.model.League;
+import com.chambua.vismart.model.Season;
 import com.chambua.vismart.repository.FixtureRepository;
 import com.chambua.vismart.repository.LeagueRepository;
+import com.chambua.vismart.repository.SeasonRepository;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,10 +27,22 @@ public class FixtureUploadService {
 
     private final LeagueRepository leagueRepository;
     private final FixtureRepository fixtureRepository;
+    private final SeasonRepository seasonRepository;
 
-    public FixtureUploadService(LeagueRepository leagueRepository, FixtureRepository fixtureRepository) {
+    public FixtureUploadService(LeagueRepository leagueRepository, FixtureRepository fixtureRepository, SeasonRepository seasonRepository) {
         this.leagueRepository = leagueRepository;
         this.fixtureRepository = fixtureRepository;
+        this.seasonRepository = seasonRepository;
+    }
+
+    private void ensureSeasonEntity(League league, String seasonName) {
+        if (league == null) return;
+        if (seasonName == null || seasonName.isBlank()) return;
+        var existing = seasonRepository.findByLeagueIdAndNameIgnoreCase(league.getId(), seasonName);
+        if (existing.isEmpty()) {
+            Season s = new Season(league, seasonName.trim(), null, null);
+            seasonRepository.save(s);
+        }
     }
 
     @Transactional
@@ -39,6 +53,7 @@ public class FixtureUploadService {
         League league = leagueRepository.findById(leagueId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "League not found"));
         String effectiveSeason = (season != null && !season.isBlank()) ? season.trim() : league.getSeason();
+        ensureSeasonEntity(league, effectiveSeason);
 
         long deleted = 0;
         if (fullReplace) {
@@ -85,6 +100,7 @@ public class FixtureUploadService {
 
         // If a season was provided and differs, we allow edit but do not change League entity here – only use for date year inference
         String season = (req.getSeason() != null && !req.getSeason().isBlank()) ? req.getSeason().trim() : league.getSeason();
+        ensureSeasonEntity(league, season);
 
         long deleted = 0;
         if (req.isFullReplace()) {
@@ -198,7 +214,12 @@ public class FixtureUploadService {
                 continue;
             }
 
-            // line didn't match anything
+            // Tolerate stray numeric or dash-only lines that may appear between blocks (often pasted scores)
+            if (line.matches("^-?\\d+$") || isDash(line)) {
+                i++;
+                continue;
+            }
+            // line didn't match anything meaningful
             errors.add("Unexpected line format at " + (i+1) + ": '" + line + "'");
             i++;
         }
@@ -289,14 +310,20 @@ public class FixtureUploadService {
     }
 
     private boolean matchesDateTime(String line){
-        return line.matches("^\\d{2}\\.\\d{2}\\.\\s+\\d{2}:\\d{2}$");
+        // Accept 1–2 digit day, 1–2 digit month, and 1–2 digit hour (e.g., "1.9. 9:00" or "01.09. 13:00")
+        String l = line == null ? "" : line.trim();
+        return l.matches("^\\d{1,2}\\.\\d{1,2}\\.\\s*\\d{1,2}:\\d{2}$");
     }
-    private boolean isDash(String s){ return s.equals("-") || s.equals(" -"); }
+    private boolean isDash(String s){
+        if (s == null) return false;
+        String t = s.trim();
+        return t.equals("-") || t.equals("–") || t.equals("—");
+    }
     private Integer parseScore(String s){
         if (s == null) return null;
-        s = s.trim();
-        if (s.equals("-") || s.isEmpty()) return null;
-        try { return Integer.parseInt(s); } catch (NumberFormatException ex){ return null; }
+        String t = s.trim();
+        if (t.isEmpty() || isDash(t)) return null;
+        try { return Integer.parseInt(t); } catch (NumberFormatException ex){ return null; }
     }
 
     private LocalDateTime parseDateTime(String dateLine, String season){

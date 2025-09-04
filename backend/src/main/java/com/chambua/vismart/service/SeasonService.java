@@ -24,8 +24,22 @@ public class SeasonService {
         this.leagueRepository = leagueRepository;
     }
 
+    @Transactional // override readOnly to allow auto-backfill when none exist
     public List<Season> listForLeague(Long leagueId) {
-        return seasonRepository.findByLeagueIdOrderByStartDateDesc(leagueId);
+        List<Season> seasons = seasonRepository.findByLeagueIdOrderByStartDateDesc(leagueId);
+        if (seasons == null || seasons.isEmpty()) {
+            // If no seasons exist for this league, create one from League.season so UI has a default selectable season
+            leagueRepository.findById(leagueId).ifPresent(league -> {
+                String name = league.getSeason();
+                if (name != null && !name.isBlank()) {
+                    Season s = new Season(league, name.trim(), null, null);
+                    seasonRepository.save(s);
+                }
+            });
+            // Re-read to return the newly created season if any
+            seasons = seasonRepository.findByLeagueIdOrderByStartDateDesc(leagueId);
+        }
+        return seasons;
     }
 
     public Optional<Season> findById(Long seasonId) {

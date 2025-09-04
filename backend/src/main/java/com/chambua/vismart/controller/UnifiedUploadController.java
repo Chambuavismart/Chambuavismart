@@ -64,9 +64,8 @@ public class UnifiedUploadController {
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
                     .orElse(0L);
-            long completedUpToToday = leagueOpt
-                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
-                    .orElse(0L);
+            // Treat any match with scores as completed regardless of its date (historical uploads)
+            long completedUpToToday = completedAllTime;
 
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),
@@ -80,6 +79,59 @@ public class UnifiedUploadController {
                     "completedUpToToday", completedUpToToday
             ));
         } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", ex.getMessage()
+            ));
+        }
+    }
+    
+    @PostMapping(path = "/matches", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> uploadMatchesJson(@RequestBody Map<String, Object> body) {
+        try {
+            // Extract fields from JSON
+            String uploadTypeStr = String.valueOf(body.getOrDefault("uploadType", "NEW_LEAGUE"));
+            UploadType uploadType = UploadType.valueOf(uploadTypeStr);
+            Long seasonId = body.get("seasonId") instanceof Number ? ((Number) body.get("seasonId")).longValue() : null;
+            String leagueName = (String) body.get("leagueName");
+            String country = (String) body.get("country");
+            String season = (String) body.get("season");
+            String text = (String) body.get("text");
+
+            boolean fullReplace = false;
+            boolean incremental = false;
+            boolean fixtureMode = false;
+            switch (uploadType) {
+                case NEW_LEAGUE -> fullReplace = true;
+                case FULL_REPLACE -> fullReplace = true;
+                case INCREMENTAL -> incremental = true;
+                case FIXTURE -> fixtureMode = true; // not typically used with raw text, but keep alignment
+                case HISTORICAL -> { /* defaults */ }
+            }
+            boolean autoCreateTeams = (uploadType == UploadType.NEW_LEAGUE)
+                    || (uploadType == UploadType.FULL_REPLACE)
+                    || (uploadType == UploadType.HISTORICAL);
+
+            var result = service.uploadText(leagueName, country, season, seasonId, text, fullReplace, incremental, fixtureMode, autoCreateTeams);
+
+            var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
+            long completedAllTime = leagueOpt
+                    .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
+                    .orElse(0L);
+            long completedUpToToday = completedAllTime; // treat all finished as completed for unified API
+
+            return ResponseEntity.ok(Map.of(
+                    "success", result.success(),
+                    "inserted", result.insertedCount(),
+                    "deleted", result.deletedCount(),
+                    "errors", result.errors(),
+                    "updated", result.updated(),
+                    "skipped", result.skipped(),
+                    "warnings", result.warnings(),
+                    "completed", completedAllTime,
+                    "completedUpToToday", completedUpToToday
+            ));
+        } catch (Exception ex) {
             return ResponseEntity.badRequest().body(Map.of(
                     "success", false,
                     "message", ex.getMessage()
