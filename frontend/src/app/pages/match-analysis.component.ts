@@ -3,8 +3,11 @@ import { NgIf, NgFor, AsyncPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO } from '../services/fixtures.service';
+import { LeagueService, League } from '../services/league.service';
 import { MatchAnalysisService, MatchAnalysisResponse } from '../services/match-analysis.service';
 import { Season, SeasonService } from '../services/season.service';
+import { of, forkJoin } from 'rxjs';
+import { map, catchError } from 'rxjs/operators';
 
 @Component({
   selector: 'app-match-analysis',
@@ -211,6 +214,7 @@ import { Season, SeasonService } from '../services/season.service';
 })
 export class MatchAnalysisComponent implements OnInit {
   private fixturesApi = inject(FixturesService);
+  private leaguesApi = inject(LeagueService);
   private analysisApi = inject(MatchAnalysisService);
   private seasonService = inject(SeasonService);
   private route = inject(ActivatedRoute);
@@ -236,7 +240,13 @@ export class MatchAnalysisComponent implements OnInit {
 
   ngOnInit(): void {
     this.showingCached = false;
-    this.fixturesApi.getLeagues().subscribe(ls => { this.leagues = ls; });
+    // Load all leagues (not only those with fixtures)
+    this.leaguesApi.getAll().subscribe((ls: League[]) => {
+      // Map to the DTO shape used by the templates
+      this.leagues = (ls || [])
+        .map(l => ({ leagueId: l.id, leagueName: l.name, upcomingCount: 0 }))
+        .sort((a, b) => a.leagueName.localeCompare(b.leagueName, undefined, { sensitivity: 'base' }));
+    });
 
     this.route.queryParamMap.subscribe(p => {
       const leagueIdStr = p.get('leagueId');
@@ -268,27 +278,58 @@ export class MatchAnalysisComponent implements OnInit {
     this.seasons = [];
     this.seasonId = null;
 
-    // Load teams from fixtures list (season-agnostic for now)
-    this.fixturesApi.getLeagueFixtures(this.selectedLeagueId).subscribe(res => {
-      const set = new Set<string>();
-      for (const f of res.fixtures) {
-        if (f.homeTeam) set.add(f.homeTeam.trim());
-        if (f.awayTeam) set.add(f.awayTeam.trim());
-      }
-      this.teamsForLeague = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-    });
-
-    // Load seasons and pick current by date
+    // Load seasons first so we can query team lists from season-scoped endpoints
     this.seasonService.listSeasons(this.selectedLeagueId).subscribe(list => {
       this.seasons = list ?? [];
       const today = new Date().toISOString().slice(0,10);
       const current = this.seasons.find(x => (!x.startDate || x.startDate <= today) && (!x.endDate || x.endDate >= today));
       this.seasonId = current ? current.id : (this.seasons[0]?.id ?? null);
+      // After resolving season, load teams using multiple sources merged (fixtures + form guide + league table)
+      this.loadTeamsForLeague();
+    }, _ => {
+      // Even if seasons fail, attempt to load teams from fixtures
+      this.loadTeamsForLeague();
+    });
+  }
+
+  private loadTeamsForLeague(){
+    if (!this.selectedLeagueId) { this.teamsForLeague = []; return; }
+    // 1) Teams from fixtures (season-agnostic)
+    const fixtures$ = this.fixturesApi.getLeagueFixtures(this.selectedLeagueId).pipe(
+      map(res => {
+        const set = new Set<string>();
+        for (const f of res.fixtures) {
+          if (f.homeTeam) set.add(f.homeTeam.trim());
+          if (f.awayTeam) set.add(f.awayTeam.trim());
+        }
+        return Array.from(set);
+      }),
+      catchError(_ => of([] as string[]))
+    );
+    // 2) Teams from form guide rows (season-scoped)
+    const guide$ = (this.seasonId ? this.leaguesApi.getFormGuide(this.selectedLeagueId, this.seasonId, 'all', 'overall').pipe(
+      map(rows => (rows || []).map(r => r.teamName?.trim()).filter(Boolean) as string[]),
+      catchError(_ => of([] as string[]))
+    ) : of([] as string[]));
+    // 3) Teams from league table (fallback if form guide not available)
+    const table$ = (this.seasonId ? this.leaguesApi.getLeagueTable(this.selectedLeagueId, this.seasonId).pipe(
+      map(rows => (rows || []).map(r => r.teamName?.trim()).filter(Boolean) as string[]),
+      catchError(_ => of([] as string[]))
+    ) : of([] as string[]));
+
+    forkJoin([fixtures$, guide$, table$]).subscribe(([fa, ga, ta]) => {
+      const set = new Set<string>();
+      for (const name of [...fa, ...ga, ...ta]) {
+        if (name && name.trim()) set.add(name.trim());
+      }
+      this.teamsForLeague = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     });
   }
 
   onSeasonChange(id: number | null) {
     this.seasonId = id;
+    // Refresh team list when season changes to ensure form-guide/table sources align
+    this.loadTeamsForLeague();
   }
 
   analyze() {

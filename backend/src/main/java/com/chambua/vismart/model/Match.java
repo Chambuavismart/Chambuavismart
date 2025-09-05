@@ -5,11 +5,11 @@ import java.time.LocalDate;
 
 @Entity
 @Table(name = "matches", indexes = {
-        @Index(name = "idx_matches_league_round", columnList = "league_id, round"),
+        @Index(name = "idx_matches_season_round", columnList = "season_id, round"),
         @Index(name = "idx_matches_date", columnList = "match_date"),
         @Index(name = "idx_matches_season_teams_date", columnList = "season_id, home_team_id, away_team_id, match_date")
 }, uniqueConstraints = {
-        @UniqueConstraint(name = "uk_match_league_round_home_away", columnNames = {"league_id", "round", "home_team_id", "away_team_id"}),
+        @UniqueConstraint(name = "uk_match_season_round_home_away", columnNames = {"season_id", "round", "home_team_id", "away_team_id"}),
         @UniqueConstraint(name = "uk_match_season_home_away_date", columnNames = {"season_id", "home_team_id", "away_team_id", "match_date"})
 })
 public class Match {
@@ -23,8 +23,8 @@ public class Match {
     private League league;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "season_id", nullable = true, foreignKey = @ForeignKey(name = "fk_match_season"))
-    private Season season; // now mandatory; database enforces NOT NULL
+    @JoinColumn(name = "season_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_season"))
+    private Season season; // mandatory; database enforces NOT NULL
 
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "home_team_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_home_team"))

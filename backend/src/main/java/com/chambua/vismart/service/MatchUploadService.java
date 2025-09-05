@@ -232,7 +232,14 @@ public class MatchUploadService {
                             }
                         }
                         if (target == null) {
-                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
+                            // No existing placeholder match found – create it from this incremental result
+                            int ins = upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
+                            // Find the newly created/updated row for logging (best-effort by date if provided)
+                            java.util.Optional<Match> created = (date != null)
+                                    ? matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamIdAndDate(league.getId(), home.getId(), away.getId(), date)
+                                    : matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId());
+                            Long mid = created.map(Match::getId).orElse(null);
+                            updatedLogs.add(new UpdateLog(mid, homeName, awayName, String.valueOf(homeGoals) + "-" + String.valueOf(awayGoals), ins > 0 ? "Created" : "Updated"));
                         } else {
                             if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
                                 warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));
@@ -529,7 +536,14 @@ public class MatchUploadService {
                             }
                         }
                         if (target == null) {
-                            skippedLogs.add(new SkipLog(homeName, awayName, "No matching fixture found"));
+                            // No existing placeholder match found – create it from this incremental result
+                            int ins = upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
+                            // Find the newly created/updated row for logging (best-effort by date if provided)
+                            java.util.Optional<Match> created = (date != null)
+                                    ? matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamIdAndDate(league.getId(), home.getId(), away.getId(), date)
+                                    : matchRepository.findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId());
+                            Long mid = created.map(Match::getId).orElse(null);
+                            updatedLogs.add(new UpdateLog(mid, homeName, awayName, String.valueOf(homeGoals) + "-" + String.valueOf(awayGoals), ins > 0 ? "Created" : "Updated"));
                         } else {
                             if (date != null && target.getDate() != null && !date.equals(target.getDate())) {
                                 warnLogs.add(new WarnLog(homeName, awayName, "Date mismatch"));

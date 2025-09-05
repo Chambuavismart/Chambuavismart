@@ -6,6 +6,7 @@ import { LeagueService, LeagueDto } from '../services/league.service';
 import { SeasonService, Season } from '../services/season.service';
 import { HttpClient } from '@angular/common/http';
 import { COUNTRIES } from '../shared/countries.constant';
+import { COUNTRY_LEAGUES } from '../shared/country-leagues.constant';
 
 @Component({
   selector: 'app-match-upload',
@@ -53,10 +54,26 @@ import { COUNTRIES } from '../shared/countries.constant';
             </label>
           </ng-container>
           <ng-template #newLeagueBlock>
-            <label>
-              League Name
-              <input [(ngModel)]="leagueName" placeholder="e.g., Premier League"/>
-            </label>
+            <!-- Country-dependent League selection with manual fallback -->
+            <div class="grid" style="grid-template-columns: 1fr; gap: 6px;">
+              <label>
+                League
+                <select [(ngModel)]="leagueSelect" [disabled]="!country" (ngModelChange)="onLeagueSelectChange()">
+                  <option value="">Select league...</option>
+                  <option *ngFor="let l of leaguesForCountry" [value]="l">{{ l }}</option>
+                </select>
+                <div class="hint" *ngIf="!country">Select a country first to choose a league.</div>
+                <div class="hint" *ngIf="country && leaguesForCountry.length===0">No preset leagues for {{country}}. Use manual input below.</div>
+              </label>
+              <label>
+                <input type="checkbox" [(ngModel)]="useManualLeague" (change)="onManualToggleChange()"/>
+                Can't find your league? Enter manually
+              </label>
+              <label *ngIf="useManualLeague">
+                League Name (manual)
+                <input [(ngModel)]="leagueManual" (ngModelChange)="onLeagueManualChange()" placeholder="Type league name..."/>
+              </label>
+            </div>
           </ng-template>
 
           <!-- Country handling -->
@@ -64,7 +81,7 @@ import { COUNTRIES } from '../shared/countries.constant';
             Country
             <div class="country-select">
               <input type="text" class="country-filter" [(ngModel)]="countryFilter" placeholder="Search country..." [disabled]="requiresExistingLeague"/>
-              <select [(ngModel)]="country" [disabled]="requiresExistingLeague">
+              <select [(ngModel)]="country" [disabled]="requiresExistingLeague" (ngModelChange)="onCountryChange()">
                 <option value="">Select country...</option>
                 <option *ngFor="let c of filteredCountries" [value]="c">{{c}}</option>
               </select>
@@ -75,7 +92,7 @@ import { COUNTRIES } from '../shared/countries.constant';
           <label>
             Season
             <ng-container *ngIf="requiresExistingLeague; else newLeagueSeasonSelect">
-              <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="true"/>
+              <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="uploadType==='INCREMENTAL'"/>
             </ng-container>
             <ng-template #newLeagueSeasonSelect>
               <select [(ngModel)]="season">
@@ -89,7 +106,7 @@ import { COUNTRIES } from '../shared/countries.constant';
           <div style="grid-column: 1 / -1;" class="hint">
             <ng-container [ngSwitch]="uploadType">
               <div *ngSwitchCase="'NEW_LEAGUE'">Creates a new league. All matches will be inserted under the provided season.</div>
-              <div *ngSwitchCase="'FULL_REPLACE'">Deletes existing matches for the selected league/season and uploads the provided data. Uploading to past seasons is disabled.</div>
+              <div *ngSwitchCase="'FULL_REPLACE'">Deletes existing matches for the selected league/season and uploads the provided data. You can manually change the season here to correct mistakes; a new season entry will be created if needed.</div>
               <div *ngSwitchCase="'INCREMENTAL'">Updates results for existing fixtures; safe to run multiple times. Uploading to past seasons is disabled.</div>
             </ng-container>
           </div>
@@ -245,6 +262,44 @@ export class MatchUploadComponent {
     return this.countries.filter(c => c.toLowerCase().includes(q));
   }
 
+  // League selection for NEW_LEAGUE mode
+  leagueSelect: string = '';
+  leagueManual: string = '';
+  useManualLeague: boolean = false;
+  get leaguesForCountry(): readonly string[] {
+    return this.country ? (COUNTRY_LEAGUES[this.country] || []) : [];
+  }
+  onCountryChange(){
+    // Reset league selection when country changes
+    this.leagueSelect = '';
+    // Keep manual if user prefers manual mode, but clear value to avoid stale binding
+    this.leagueManual = '';
+    // Update composed league name
+    this.syncLeagueNameFromInputs();
+  }
+  onLeagueSelectChange(){
+    // When selecting from dropdown, turn off manual mode if a value chosen
+    if (this.leagueSelect) this.useManualLeague = false;
+    this.syncLeagueNameFromInputs();
+  }
+  onLeagueManualChange(){
+    // When typing manually, prefer manual mode
+    if (this.leagueManual?.trim()) this.useManualLeague = true;
+    this.syncLeagueNameFromInputs();
+  }
+  onManualToggleChange(){
+    // If manual mode is turned off, clear manual value
+    if (!this.useManualLeague) this.leagueManual = '';
+    // If manual mode is turned on, clear select to avoid confusion
+    if (this.useManualLeague) this.leagueSelect = '';
+    this.syncLeagueNameFromInputs();
+  }
+  private syncLeagueNameFromInputs(){
+    if (this.requiresExistingLeague) return; // in these modes leagueName is set from selection API
+    const choice = this.useManualLeague ? this.leagueManual?.trim() : this.leagueSelect?.trim();
+    this.leagueName = (choice || '');
+  }
+
   // Fixtures-only toggle remains
   fullReplace = true; // for fixtures tab checkbox
 
@@ -321,6 +376,11 @@ export class MatchUploadComponent {
       this.season = '';
       this.seasons = [];
       this.seasonId = null;
+      // Reset league selection UX for new league mode
+      this.leagueSelect = '';
+      this.leagueManual = '';
+      this.useManualLeague = false;
+      this.leagueName = '';
     }
   }
 
@@ -342,7 +402,7 @@ export class MatchUploadComponent {
     if (!this.validateMeta()) return;
     if (!this.file) return;
     const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
-    this.api.uploadUnifiedCsv(this.uploadType, this.leagueName, this.country, this.season, this.file, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
+    this.api.uploadUnifiedCsv(this.uploadType, this.leagueName, this.country, this.season, this.file, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false, allowSeasonAutoCreate: this.uploadType==='FULL_REPLACE' }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -352,7 +412,7 @@ export class MatchUploadComponent {
     this.resetFeedback();
     if (!this.validateMeta()) return;
     const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
-    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
+    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false, allowSeasonAutoCreate: this.uploadType==='FULL_REPLACE' }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -456,10 +516,14 @@ export class MatchUploadComponent {
       return true;
     }
 
-    // NEW_LEAGUE requires all fields manually
-    if (!this.leagueName.trim() || !this.country.trim() || !this.season.trim()){
-      this.success = false; this.message = 'Please provide league name, country and season.'; return false;
+    // NEW_LEAGUE requires country, season, and a league (from dropdown or manual)
+    if (!this.country.trim()) { this.success = false; this.message = 'Please select a country.'; return false; }
+    if (!this.season.trim()) { this.success = false; this.message = 'Please select a season.'; return false; }
+    const chosen = (this.useManualLeague ? this.leagueManual?.trim() : this.leagueSelect?.trim()) || '';
+    if (!chosen) {
+      this.success = false; this.message = 'Please select a league or enter it manually.'; return false;
     }
+    this.leagueName = chosen; // ensure DTO binding uses the chosen league
     return true;
   }
 }

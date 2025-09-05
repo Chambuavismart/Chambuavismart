@@ -22,6 +22,11 @@ public class FormGuideService {
     @PersistenceContext
     private EntityManager em;
 
+    // Additional constructor for tests or manual wiring
+    public FormGuideService(EntityManager em) {
+        this.em = em;
+    }
+
 
     public enum Scope { OVERALL, HOME, AWAY }
 

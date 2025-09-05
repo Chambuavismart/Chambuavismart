@@ -69,21 +69,22 @@ class FormGuideServiceTest {
         League league = leagueRepository.save(new League("Limit League", "KE", "2024/2025"));
         Team a = teamRepository.save(new Team("A", league));
         Team b = teamRepository.save(new Team("B", league));
+        var season = seasonRepository.save(new Season(league, "2024/2025", LocalDate.now().minusMonths(1), LocalDate.now().plusMonths(1)));
         // Create 10 matches alternating for team A such that totals vary
         for (int i = 0; i < 10; i++) {
             // alternate home/away and scores to produce mix of W/D/L
             boolean home = (i % 2 == 0);
             int round = i + 1;
             LocalDate date = LocalDate.now().minusDays(10 - i);
+            Match m;
             if (home) {
-                matchRepository.save(new Match(league, a, b, date, round, (i % 3), (i % 2))); // varying goals
+                m = new Match(league, a, b, date, round, (i % 3), (i % 2)); // varying goals
             } else {
-                matchRepository.save(new Match(league, b, a, date, round, (i % 2), (i % 3))); // reverse
+                m = new Match(league, b, a, date, round, (i % 2), (i % 3)); // reverse
             }
+            m.setSeason(season);
+            matchRepository.save(m);
         }
-        var season = seasonRepository.save(new Season(league, "2024/2025", LocalDate.now().minusMonths(1), LocalDate.now().plusMonths(1)));
-        // Assign all existing matches to this season
-        matchRepository.findAll().forEach(m -> { if (m.getSeason() == null) { m.setSeason(season); matchRepository.save(m); } });
         List<FormGuideRowDTO> last3 = formGuideService.compute(league.getId(), season.getId(), 3, FormGuideService.Scope.OVERALL);
         List<FormGuideRowDTO> last10 = formGuideService.compute(league.getId(), season.getId(), 10, FormGuideService.Scope.OVERALL);
         FormGuideRowDTO a3 = last3.stream().filter(r -> r.getTeamName().equals("A")).findFirst().orElseThrow();

@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS matches (
   CONSTRAINT fk_match_season FOREIGN KEY (season_id) REFERENCES seasons(id),
   CONSTRAINT fk_match_home_team FOREIGN KEY (home_team_id) REFERENCES teams(id),
   CONSTRAINT fk_match_away_team FOREIGN KEY (away_team_id) REFERENCES teams(id),
-  CONSTRAINT uk_match_league_round_home_away UNIQUE (league_id, round, home_team_id, away_team_id)
+  CONSTRAINT uk_match_season_round_home_away UNIQUE (season_id, round, home_team_id, away_team_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE INDEX idx_matches_league_round ON matches(league_id, round);
+CREATE INDEX idx_matches_season_round ON matches(season_id, round);
 CREATE INDEX idx_matches_date ON matches(match_date);

@@ -1,13 +1,15 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { NgFor, NgIf, DatePipe } from '@angular/common';
+import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, NavigationEnd } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO } from '../services/fixtures.service';
+import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
+import { forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-fixtures',
   standalone: true,
-  imports: [NgFor, NgIf, FormsModule, DatePipe],
+  imports: [NgFor, NgIf, NgClass, FormsModule, DatePipe],
   styles: [`
     :host { display:block; color:#e6eef8; }
     .page { display:flex; gap:16px; }
@@ -20,6 +22,8 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
     .content { flex:1; }
     .grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; }
     .card { background:#0b1220; border:1px solid #1f2937; border-radius:16px; padding:12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+    .card.hl { border-color:#19b562; box-shadow: 0 0 0 2px rgba(25,181,98,0.25), 0 2px 12px rgba(25,181,98,0.25); }
+    .leader-flag { display:inline-block; background:#19b562; color:#04110a; font-size:11px; font-weight:800; padding:2px 6px; border-radius:6px; margin-bottom:6px; }
     .muted { color:#9fb3cd; }
     .teams { font-weight:700; }
     .status { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
@@ -79,7 +83,8 @@ import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, Fixture
         <ng-container *ngIf="!isLoading">
           <div *ngIf="fixtures?.length === 0" class="muted">No fixtures.</div>
           <div class="grid">
-            <div class="card" *ngFor="let f of fixtures" (click)="openAnalysis(f)" style="cursor:pointer;">
+            <div class="card" *ngFor="let f of fixtures" (click)="openAnalysis(f)" style="cursor:pointer;" [ngClass]="{ 'hl': isFixtureToday(f) && involvesLeader(f) }">
+              <div *ngIf="isFixtureToday(f) && involvesLeader(f)" class="leader-flag">Leader Match Today</div>
               <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
               <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
               <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
@@ -102,14 +107,18 @@ export class FixturesComponent implements OnInit, OnDestroy {
   }
   private api = inject(FixturesService);
   private router = inject(Router);
+  private leadersApi = inject(GlobalLeadersService);
 
   leagues: LeagueWithUpcomingDTO[] = [];
   selectedLeagueId: number | null = null;
   currentLeagueName: string | null = null;
   fixtures: FixtureDTO[] = [];
   expandedLeagueId: number | null = null;
-  upcomingOnly = false;
+  upcomingOnly = true;
   isLoading = false;
+
+  // cache of leader teams across categories; lowercase names for matching
+  private leaderTeams = new Set<string>();
 
   private refreshIntervalId: any = null;
   private routerEventsSub: any = null;
@@ -129,7 +138,8 @@ export class FixturesComponent implements OnInit, OnDestroy {
       if (ls.length && this.selectedLeagueId == null) {
         this.selectedLeagueId = ls[0].leagueId;
       }
-      // Always load fixtures after league resolution
+      // Preload leaders cache, then load fixtures
+      this.loadLeaders();
       this.loadFixtures();
     });
 
@@ -215,5 +225,37 @@ export class FixturesComponent implements OnInit, OnDestroy {
     const t = Date.parse(s);
     if (!isNaN(t)) return t;
     return new Date(iso).getTime();
+  }
+
+  // New: load leader teams across main categories to enable fixture highlighting
+  private loadLeaders() {
+    const categories = ['btts','over15','over25','wins','draws'];
+    const calls = categories.map(c => this.leadersApi.getLeaders(c, 5, 5, 'overall', 0));
+    forkJoin(calls).subscribe((lists: GlobalLeader[][]) => {
+      const names = new Set<string>();
+      for (const list of lists) {
+        for (const l of list) {
+          if (l?.teamName) names.add(l.teamName.toLowerCase());
+        }
+      }
+      this.leaderTeams = names;
+    }, _err => {
+      // Keep empty set on error
+      this.leaderTeams = new Set<string>();
+    });
+  }
+
+  isFixtureToday(f: { dateTime: string }): boolean {
+    const d = f?.dateTime ? new Date(f.dateTime) : null;
+    if (!d || isNaN(d.getTime())) return false;
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  }
+
+  involvesLeader(f: { homeTeam: string; awayTeam: string }): boolean {
+    const home = f?.homeTeam?.toLowerCase?.();
+    const away = f?.awayTeam?.toLowerCase?.();
+    if (!home || !away) return false;
+    return this.leaderTeams.has(home) || this.leaderTeams.has(away);
   }
 }

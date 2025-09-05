@@ -7,6 +7,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.chambua.vismart.repository.SeasonRepository;
@@ -28,8 +29,15 @@ public class LeagueTableService {
     @PersistenceContext
     private EntityManager em;
 
+    @Autowired
     public LeagueTableService(MatchRepository matchRepository) {
         this.matchRepository = matchRepository;
+    }
+
+    // Additional constructor for tests or manual wiring
+    public LeagueTableService(MatchRepository matchRepository, EntityManager em) {
+        this.matchRepository = matchRepository;
+        this.em = em;
     }
 
     /**
@@ -57,6 +65,7 @@ public class LeagueTableService {
                 "         CASE WHEN m.home_goals > m.away_goals THEN 3 WHEN m.home_goals = m.away_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 " +
+                "    AND m.match_date <= CURRENT_DATE " +
                 "    AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)) " +
                 "  UNION ALL " +
                 "  SELECT m.away_team_id AS team_id, 1 AS mp, " +
@@ -67,6 +76,7 @@ public class LeagueTableService {
                 "         CASE WHEN m.away_goals > m.home_goals THEN 3 WHEN m.away_goals = m.home_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 " +
+                "    AND m.match_date <= CURRENT_DATE " +
                 "    AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)) " +
                 ") s " +
                 "JOIN teams t ON t.id = s.team_id " +

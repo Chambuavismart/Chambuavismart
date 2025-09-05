@@ -1,12 +1,13 @@
 import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { RouterModule } from '@angular/router';
-import { NgFor, NgIf, DatePipe } from '@angular/common';
+import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
 import { FixturesService, LeagueFixturesResponse } from '../services/fixtures.service';
+import { GlobalLeadersContainerComponent } from '../components/global-leaders-container/global-leaders-container.component';
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [RouterModule, NgFor, NgIf, DatePipe],
+  imports: [RouterModule, NgFor, NgIf, NgClass, DatePipe, GlobalLeadersContainerComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.css']
 })

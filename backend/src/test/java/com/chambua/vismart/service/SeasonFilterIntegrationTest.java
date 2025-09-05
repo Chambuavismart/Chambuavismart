@@ -24,16 +24,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import({LeagueTableService.class, FormGuideService.class})
 class SeasonFilterIntegrationTest {
 
     @Autowired private LeagueRepository leagueRepository;
     @Autowired private TeamRepository teamRepository;
     @Autowired private MatchRepository matchRepository;
     @Autowired private SeasonRepository seasonRepository;
+    @Autowired private jakarta.persistence.EntityManager entityManager;
 
-    @Autowired private LeagueTableService leagueTableService;
-    @Autowired private FormGuideService formGuideService;
+    private LeagueTableService leagueTableService;
+    private FormGuideService formGuideService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        leagueTableService = new LeagueTableService(matchRepository, entityManager);
+        formGuideService = new FormGuideService(entityManager);
+    }
 
     @Test
     void leagueTable_filtersStrictlyBySeasonId_only() {

@@ -4,9 +4,11 @@ import com.chambua.vismart.dto.LeagueTableEntryDTO;
 import com.chambua.vismart.model.League;
 import com.chambua.vismart.model.Match;
 import com.chambua.vismart.model.Team;
+import com.chambua.vismart.model.Season;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.repository.TeamRepository;
+import com.chambua.vismart.repository.SeasonRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -20,13 +22,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @ActiveProfiles("test")
-@Import(LeagueTableService.class)
 class LeagueTableServiceTest {
 
     @Autowired private LeagueRepository leagueRepository;
     @Autowired private TeamRepository teamRepository;
     @Autowired private MatchRepository matchRepository;
-    @Autowired private LeagueTableService leagueTableService;
+    @Autowired private SeasonRepository seasonRepository;
+    @Autowired private jakarta.persistence.EntityManager entityManager;
+
+    private LeagueTableService leagueTableService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        leagueTableService = new LeagueTableService(matchRepository, entityManager);
+    }
 
     @Test
     void computesTableWithStandardRules() {
@@ -36,11 +45,11 @@ class LeagueTableServiceTest {
         Team c = teamRepository.save(new Team("C", league));
 
         // A 2-0 B, B 1-1 C, C 3-2 A
-        matchRepository.saveAll(List.of(
-                new Match(league, a, b, LocalDate.now(), 1, 2, 0),
-                new Match(league, b, c, LocalDate.now(), 2, 1, 1),
-                new Match(league, c, a, LocalDate.now(), 3, 3, 2)
-        ));
+        Season season = seasonRepository.save(new Season(league, "2024/2025", LocalDate.now().minusMonths(1), LocalDate.now().plusMonths(1)));
+        Match m1 = new Match(league, a, b, LocalDate.now(), 1, 2, 0); m1.setSeason(season);
+        Match m2 = new Match(league, b, c, LocalDate.now(), 2, 1, 1); m2.setSeason(season);
+        Match m3 = new Match(league, c, a, LocalDate.now(), 3, 3, 2); m3.setSeason(season);
+        matchRepository.saveAll(List.of(m1, m2, m3));
 
         List<LeagueTableEntryDTO> table = leagueTableService.computeTable(league.getId());
 
@@ -74,9 +83,10 @@ class LeagueTableServiceTest {
         Team b = teamRepository.save(new Team("B", league));
 
         // Past match A 1-0 B
-        Match past = new Match(league, a, b, LocalDate.now().minusDays(1), 1, 1, 0);
+        Season season = seasonRepository.save(new Season(league, "2024/2025", LocalDate.now().minusMonths(1), LocalDate.now().plusMonths(1)));
+        Match past = new Match(league, a, b, LocalDate.now().minusDays(1), 1, 1, 0); past.setSeason(season);
         // Future match should be ignored in standings until played
-        Match future = new Match(league, b, a, LocalDate.now().plusDays(3), 2, 2, 2);
+        Match future = new Match(league, b, a, LocalDate.now().plusDays(3), 2, 2, 2); future.setSeason(season);
 
         matchRepository.saveAll(List.of(past, future));
 

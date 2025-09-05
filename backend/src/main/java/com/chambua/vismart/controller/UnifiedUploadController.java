@@ -3,6 +3,7 @@ package com.chambua.vismart.controller;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.service.MatchUploadService;
+import com.chambua.vismart.service.FixtureRefreshService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,11 +26,13 @@ public class UnifiedUploadController {
     private final MatchUploadService service;
     private final LeagueRepository leagueRepository;
     private final MatchRepository matchRepository;
+    private final FixtureRefreshService fixtureRefreshService;
 
-    public UnifiedUploadController(MatchUploadService service, LeagueRepository leagueRepository, MatchRepository matchRepository) {
+    public UnifiedUploadController(MatchUploadService service, LeagueRepository leagueRepository, MatchRepository matchRepository, FixtureRefreshService fixtureRefreshService) {
         this.service = service;
         this.leagueRepository = leagueRepository;
         this.matchRepository = matchRepository;
+        this.fixtureRefreshService = fixtureRefreshService;
     }
 
     public enum UploadType { NEW_LEAGUE, FULL_REPLACE, INCREMENTAL, FIXTURE }
@@ -76,6 +79,14 @@ public class UnifiedUploadController {
             var result = service.uploadCsv(leagueName, country, seasonToUse, seasonId, file, fullReplace, incremental, fixtureMode, strict, dryRun, allowSeasonAutoCreate);
 
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
+
+            // After incremental results update, immediately sync fixtures for that league so "Awaiting" items become finished
+            if (incremental) {
+                leagueOpt.ifPresent(l -> {
+                    try { fixtureRefreshService.refreshLeague(l.getId()); } catch (Exception ignored) {}
+                });
+            }
+
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
                     .orElse(0L);
@@ -152,6 +163,14 @@ public class UnifiedUploadController {
             var result = service.uploadText(leagueName, country, season, seasonId, text, fullReplace, incremental, fixtureMode, autoCreateTeams, strict, dryRun, allowSeasonAutoCreate);
 
             var leagueOpt = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(normalizeKey(leagueName), normalizeKey(country), normalizeSeason(season));
+
+            // After incremental results update, immediately sync fixtures for that league so "Awaiting" items become finished
+            if (incremental) {
+                leagueOpt.ifPresent(l -> {
+                    try { fixtureRefreshService.refreshLeague(l.getId()); } catch (Exception ignored) {}
+                });
+            }
+
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(l.getId()))
                     .orElse(0L);
