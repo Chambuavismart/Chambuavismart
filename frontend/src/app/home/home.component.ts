@@ -1,8 +1,10 @@
 import { Component, inject, OnInit, OnDestroy } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
 import { FixturesService, LeagueFixturesResponse } from '../services/fixtures.service';
 import { GlobalLeadersContainerComponent } from '../components/global-leaders-container/global-leaders-container.component';
+import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
+import { forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-home',
@@ -13,6 +15,8 @@ import { GlobalLeadersContainerComponent } from '../components/global-leaders-co
 })
 export class HomeComponent implements OnInit, OnDestroy {
   private fixturesApi = inject(FixturesService);
+  private router = inject(Router);
+  private leadersApi = inject(GlobalLeadersService);
 
   today = new Date();
   showCalendar = false;
@@ -29,6 +33,10 @@ export class HomeComponent implements OnInit, OnDestroy {
   todayFixtures: LeagueFixturesResponse[] = [];
   todayLoading = false;
 
+  // Leaders cache for highlighting
+  private leaderTeams: Set<string> = new Set<string>();
+  private leadersByTeam: Map<string, GlobalLeader[]> = new Map<string, GlobalLeader[]>();
+
   private onFixturesRefresh = (_e?: any) => {
     // refresh today's fixtures and selected date view (if any)
     this.loadToday();
@@ -40,6 +48,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.todayIso = this.toIsoLocal(this.today);
+    this.loadLeaders();
     this.loadToday();
     window.addEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
   }
@@ -142,6 +151,31 @@ export class HomeComponent implements OnInit, OnDestroy {
     }
   }
 
+  // Load leaders for highlighting logic
+  private loadLeaders() {
+    const categories = ['btts','over15','over25','wins','draws'];
+    const calls = categories.map(c => this.leadersApi.getLeaders(c, 5, 5, 'overall', 0));
+    forkJoin(calls).subscribe((lists: GlobalLeader[][]) => {
+      const names = new Set<string>();
+      const byTeam = new Map<string, GlobalLeader[]>();
+      for (const list of lists) {
+        for (const l of list) {
+          if (!l?.teamName) continue;
+          const key = l.teamName.toLowerCase();
+          names.add(key);
+          const arr = byTeam.get(key) || [];
+          arr.push(l);
+          byTeam.set(key, arr);
+        }
+      }
+      this.leaderTeams = names;
+      this.leadersByTeam = byTeam;
+    }, _err => {
+      this.leaderTeams = new Set<string>();
+      this.leadersByTeam = new Map<string, GlobalLeader[]>();
+    });
+  }
+
   prevMonth() {
     const d = new Date(this.calendarYear, this.calendarMonth, 1);
     d.setMonth(d.getMonth() - 1);
@@ -232,5 +266,65 @@ export class HomeComponent implements OnInit, OnDestroy {
     // fallback
     const d = new Date(iso);
     return d.getTime();
+  }
+
+  // Leader helpers
+  private isFixtureToday(f: { dateTime: string }): boolean {
+    const d = f?.dateTime ? new Date(f.dateTime) : null;
+    if (!d || isNaN(d.getTime())) return false;
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  }
+
+  involvesLeader(f: { homeTeam: string; awayTeam: string }): boolean {
+    const home = f?.homeTeam?.toLowerCase?.();
+    const away = f?.awayTeam?.toLowerCase?.();
+    if (!home || !away) return false;
+    return this.leaderTeams.has(home) || this.leaderTeams.has(away);
+  }
+
+  leaderTooltip(f: any): string | null {
+    if (!f) return null;
+    const homeKey = f.homeTeam?.toLowerCase?.();
+    const awayKey = f.awayTeam?.toLowerCase?.();
+    const parts: string[] = [];
+    const fmt = (cat: string) => {
+      switch (cat) {
+        case 'btts': return 'BTTS';
+        case 'over15': return 'Over 1.5 Goals';
+        case 'over25': return 'Over 2.5 Goals';
+        case 'wins': return 'Wins';
+        case 'draws': return 'Draws';
+        default: return cat;
+      }
+    };
+    const build = (teamLabel: string, key: string | undefined) => {
+      if (!key) return;
+      const entries = this.leadersByTeam.get(key) || [];
+      if (!entries.length) return;
+      const details = entries
+        .sort((a: any, b: any) => (b.statPct - a.statPct))
+        .map((e: any) => `${fmt(e.category)}: ${Math.round(e.statPct)}% (${e.statCount}/${e.matchesPlayed})`)
+        .join('; ');
+      parts.push(`${teamLabel} leads in ${details}`);
+    };
+
+    build(f.homeTeam, homeKey);
+    if (awayKey !== homeKey) {
+      build(f.awayTeam, awayKey);
+    }
+
+    return parts.length ? parts.join(' • ') : null;
+  }
+
+  // Navigate to Match Analysis with preselected fixture via query params
+  goToAnalysis(league: { leagueId: number; leagueName: string }, f: any) {
+    if (!league?.leagueId || !f) return;
+    const qp: any = {
+      leagueId: league.leagueId,
+      homeTeamName: f?.homeTeam,
+      awayTeamName: f?.awayTeam
+    };
+    this.router.navigate(['/match-analysis'], { queryParams: qp });
   }
 }

@@ -71,7 +71,7 @@ public class FixtureController {
         }
         var fixtures = upcomingOnly ? fixtureService.getUpcomingFixturesByLeague(leagueId) : fixtureService.getFixturesByLeague(leagueId);
         var fixtureDtos = fixtures.stream().map(FixtureDTO::from).collect(Collectors.toList());
-        return new LeagueFixturesResponse(league.getId(), league.getName(), fixtureDtos);
+        return new LeagueFixturesResponse(league.getId(), league.getName(), league.getCountry(), fixtureDtos);
     }
 
     @GetMapping("/by-date")
@@ -94,20 +94,29 @@ public class FixtureController {
         Map<Long, List<Fixture>> grouped = fixtures.stream()
                 .collect(Collectors.groupingBy(f -> f.getLeague().getId()));
 
-        // fetch league names for collected ids
+        // fetch league names and countries for collected ids
         List<Long> ids = new ArrayList<>(grouped.keySet());
         List<League> leagues = leagueRepository.findAllById(ids);
         Map<Long, String> idToName = leagues.stream().collect(Collectors.toMap(League::getId, League::getName));
+        Map<Long, String> idToCountry = leagues.stream().collect(Collectors.toMap(League::getId, League::getCountry));
 
         List<LeagueFixturesResponse> out = new ArrayList<>();
         for (Map.Entry<Long, List<Fixture>> entry : grouped.entrySet()) {
             Long leagueId = entry.getKey();
             String leagueName = idToName.getOrDefault(leagueId, "League " + leagueId);
-            List<FixtureDTO> fds = entry.getValue().stream().map(FixtureDTO::from).collect(Collectors.toList());
-            out.add(new LeagueFixturesResponse(leagueId, leagueName, fds));
+            String leagueCountry = idToCountry.getOrDefault(leagueId, "");
+            // Map to DTOs and ensure fixtures are sorted by kickoff time ascending
+            List<FixtureDTO> fds = entry.getValue().stream()
+                    .map(FixtureDTO::from)
+                    .sorted(Comparator.comparing(FixtureDTO::getDateTime, Comparator.nullsLast(Comparator.naturalOrder())))
+                    .collect(Collectors.toList());
+            out.add(new LeagueFixturesResponse(leagueId, leagueName, leagueCountry, fds));
         }
-        // sort leagues by name for consistency
-        out.sort(Comparator.comparing(LeagueFixturesResponse::getLeagueName));
+        // Sort leagues by earliest kickoff among their fixtures (ascending). If a league has no fixtures, place it last.
+        out.sort(Comparator.comparing(
+                (LeagueFixturesResponse lfr) -> lfr.getFixtures() == null || lfr.getFixtures().isEmpty() ? null : lfr.getFixtures().get(0).getDateTime(),
+                Comparator.nullsLast(Comparator.naturalOrder())
+        ));
         return out;
     }
 

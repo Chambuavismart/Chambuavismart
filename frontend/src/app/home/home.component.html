@@ -70,9 +70,10 @@
       </p>
       <div *ngIf="!todayLoading && todayFixtures && todayFixtures.length" style="display:grid; grid-template-columns: 1fr; gap:12px;">
         <div *ngFor="let league of todayFixtures" style="border:1px solid #e5e7eb; border-radius:8px; background:#ffffff;">
-          <div style="padding:8px 12px; border-bottom:1px solid #e5e7eb; font-weight:800; color:#0b3a4a;">{{ league.leagueName }}</div>
+          <div style="padding:8px 12px; border-bottom:1px solid #e5e7eb; font-weight:800; color:#0b3a4a;">{{ league.leagueName }}<span *ngIf="league.leagueCountry"> — {{ league.leagueCountry }}</span></div>
           <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; padding:10px;">
-            <div *ngFor="let f of league.fixtures" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:10px;">
+            <div *ngFor="let f of league.fixtures" (click)="goToAnalysis(league, f)" [ngClass]="{ 'leader-hl': involvesLeader(f) }" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:10px; cursor:pointer;">
+              <div *ngIf="involvesLeader(f)" class="leader-flag" [attr.title]="leaderTooltip(f)" aria-label="Leader match details">Leader Match Today</div>
               <div style="color:#64748b; font-size:12px;">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
               <div style="font-weight:700; color:#0b3a4a;">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
               <div style="color:#64748b; margin: 4px 0 6px;">
@@ -98,7 +99,7 @@
       </div>
       <div *ngIf="!loadingPast && pastFixtures?.length" style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
         <div *ngFor="let league of pastFixtures" style="border:1px solid #e5e7eb; border-radius:8px; background:#ffffff;">
-          <div style="padding:8px 12px; border-bottom:1px solid #e5e7eb; font-weight:800; color:#0b3a4a;">{{ league.leagueName }}</div>
+          <div style="padding:8px 12px; border-bottom:1px solid #e5e7eb; font-weight:800; color:#0b3a4a;">{{ league.leagueName }}<span *ngIf="league.leagueCountry"> — {{ league.leagueCountry }}</span></div>
           <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; padding:10px;">
             <div *ngFor="let f of league.fixtures" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:10px;">
               <div style="color:#64748b; font-size:12px;">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>

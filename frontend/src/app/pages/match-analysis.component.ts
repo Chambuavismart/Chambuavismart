@@ -286,9 +286,16 @@ export class MatchAnalysisComponent implements OnInit {
       this.seasonId = current ? current.id : (this.seasons[0]?.id ?? null);
       // After resolving season, load teams using multiple sources merged (fixtures + form guide + league table)
       this.loadTeamsForLeague();
+      // If teams were pre-filled via query params, auto-run analysis now that seasonId is resolved
+      if (this.homeTeamName && this.awayTeamName) {
+        this.analyze();
+      }
     }, _ => {
       // Even if seasons fail, attempt to load teams from fixtures
       this.loadTeamsForLeague();
+      if (this.homeTeamName && this.awayTeamName) {
+        this.analyze();
+      }
     });
   }
 

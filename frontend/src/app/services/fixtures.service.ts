@@ -24,6 +24,7 @@ export interface LeagueWithUpcomingDTO {
 export interface LeagueFixturesResponse {
   leagueId: number;
   leagueName: string;
+  leagueCountry?: string;
   fixtures: FixtureDTO[];
 }
 

@@ -84,7 +84,7 @@ import { forkJoin } from 'rxjs';
           <div *ngIf="fixtures?.length === 0" class="muted">No fixtures.</div>
           <div class="grid">
             <div class="card" *ngFor="let f of fixtures" (click)="openAnalysis(f)" style="cursor:pointer;" [ngClass]="{ 'hl': isFixtureToday(f) && involvesLeader(f) }">
-              <div *ngIf="isFixtureToday(f) && involvesLeader(f)" class="leader-flag">Leader Match Today</div>
+              <div *ngIf="isFixtureToday(f) && involvesLeader(f)" class="leader-flag" [attr.title]="leaderTooltip(f)" aria-label="Leader match details">Leader Match Today</div>
               <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
               <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
               <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
@@ -119,6 +119,7 @@ export class FixturesComponent implements OnInit, OnDestroy {
 
   // cache of leader teams across categories; lowercase names for matching
   private leaderTeams = new Set<string>();
+  private leadersByTeam = new Map<string, GlobalLeader[]>();
 
   private refreshIntervalId: any = null;
   private routerEventsSub: any = null;
@@ -233,15 +234,23 @@ export class FixturesComponent implements OnInit, OnDestroy {
     const calls = categories.map(c => this.leadersApi.getLeaders(c, 5, 5, 'overall', 0));
     forkJoin(calls).subscribe((lists: GlobalLeader[][]) => {
       const names = new Set<string>();
+      const byTeam = new Map<string, GlobalLeader[]>();
       for (const list of lists) {
         for (const l of list) {
-          if (l?.teamName) names.add(l.teamName.toLowerCase());
+          if (!l?.teamName) continue;
+          const key = l.teamName.toLowerCase();
+          names.add(key);
+          const arr = byTeam.get(key) || [];
+          arr.push(l);
+          byTeam.set(key, arr);
         }
       }
       this.leaderTeams = names;
+      this.leadersByTeam = byTeam;
     }, _err => {
       // Keep empty set on error
       this.leaderTeams = new Set<string>();
+      this.leadersByTeam = new Map<string, GlobalLeader[]>();
     });
   }
 
@@ -257,5 +266,39 @@ export class FixturesComponent implements OnInit, OnDestroy {
     const away = f?.awayTeam?.toLowerCase?.();
     if (!home || !away) return false;
     return this.leaderTeams.has(home) || this.leaderTeams.has(away);
+  }
+
+  leaderTooltip(f: FixtureDTO): string | null {
+    if (!f) return null;
+    const homeKey = f.homeTeam?.toLowerCase?.();
+    const awayKey = f.awayTeam?.toLowerCase?.();
+    const parts: string[] = [];
+    const fmt = (cat: string) => {
+      switch (cat) {
+        case 'btts': return 'BTTS';
+        case 'over15': return 'Over 1.5 Goals';
+        case 'over25': return 'Over 2.5 Goals';
+        case 'wins': return 'Wins';
+        case 'draws': return 'Draws';
+        default: return cat;
+      }
+    };
+    const build = (teamLabel: string, key: string | undefined) => {
+      if (!key) return;
+      const entries = this.leadersByTeam.get(key) || [];
+      if (!entries.length) return;
+      const details = entries
+        .sort((a,b) => b.statPct - a.statPct)
+        .map(e => `${fmt(e.category)}: ${Math.round(e.statPct)}% (${e.statCount}/${e.matchesPlayed})`)
+        .join('; ');
+      parts.push(`${teamLabel} leads in ${details}`);
+    };
+
+    build(f.homeTeam, homeKey);
+    if (awayKey !== homeKey) {
+      build(f.awayTeam, awayKey);
+    }
+
+    return parts.length ? parts.join(' • ') : null;
   }
 }
