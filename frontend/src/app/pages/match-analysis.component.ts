@@ -298,7 +298,6 @@ export class MatchAnalysisComponent implements OnInit {
       return;
     }
     if (!this.seasonId) {
-      this.error = 'Please choose a season.';
       return;
     }
     const key = `${this.selectedLeagueId}|${this.seasonId}|${this.homeTeamName.trim().toLowerCase()}|${this.awayTeamName.trim().toLowerCase()}`;

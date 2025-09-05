@@ -148,3 +148,19 @@ Push to GitHub (example)
 - git add .
 - git commit -m "chore: scaffold backend and frontend"
 - git push -u origin develop
+
+
+
+Windows PowerShell terminal black lines in IntelliJ IDEA (PSReadLine outdated)
+If you see black lines/artifacts across the terminal in IntelliJ IDEA on Windows, it is likely due to an outdated PSReadLine module (e.g., 2.0.0). Fix it by updating PSReadLine for the current user and then reopening the terminal.
+
+Option A: Run the provided setup script
+- Right-click scripts/windows/Setup-PSReadLine.ps1 -> Run with PowerShell
+- Or from a terminal:
+  powershell -ExecutionPolicy Bypass -File .\scripts\windows\Setup-PSReadLine.ps1
+
+Option B: Run the manual command in a PowerShell terminal
+  Install-Module PSReadLine -MinimumVersion 2.0.3 -Scope CurrentUser -Force
+
+After installation, close and reopen the terminal (or open a new terminal tab in IntelliJ). For more details, see Microsoft’s guidance:
+https://learn.microsoft.com/windows/terminal/troubleshooting#black-lines-in-powershell-51-6x-70

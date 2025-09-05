@@ -22,9 +22,9 @@ public class Match {
     @JoinColumn(name = "league_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_league"))
     private League league;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = true)
-    @JoinColumn(name = "season_id", foreignKey = @ForeignKey(name = "fk_match_season"))
-    private Season season; // nullable during rollout
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "season_id", nullable = true, foreignKey = @ForeignKey(name = "fk_match_season"))
+    private Season season; // now mandatory; database enforces NOT NULL
 
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "home_team_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_home_team"))

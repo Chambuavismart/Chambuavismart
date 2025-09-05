@@ -13,6 +13,7 @@ import com.chambua.vismart.repository.SeasonRepository;
 import com.chambua.vismart.model.Season;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -56,7 +57,7 @@ public class LeagueTableService {
                 "         CASE WHEN m.home_goals > m.away_goals THEN 3 WHEN m.home_goals = m.away_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 " +
-                "    AND m.status = 'PLAYED' " +
+                "    AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)) " +
                 "  UNION ALL " +
                 "  SELECT m.away_team_id AS team_id, 1 AS mp, " +
                 "         CASE WHEN m.away_goals > m.home_goals THEN 1 ELSE 0 END AS w, " +
@@ -66,7 +67,7 @@ public class LeagueTableService {
                 "         CASE WHEN m.away_goals > m.home_goals THEN 3 WHEN m.away_goals = m.home_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 " +
-                "    AND m.status = 'PLAYED' " +
+                "    AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)) " +
                 ") s " +
                 "JOIN teams t ON t.id = s.team_id " +
                 "GROUP BY t.id, t.name " +
@@ -100,6 +101,7 @@ public class LeagueTableService {
         if (leagueId == null) throw new IllegalArgumentException("leagueId is required");
         if (seasonId == null) throw new IllegalArgumentException("seasonId is required");
 
+        // Strict season filter: do not merge NULL-season rows or use date bounds
         String sql =
                 "SELECT t.id AS team_id, t.name AS team_name, " +
                 "       SUM(s.mp) AS mp, SUM(s.w) AS w, SUM(s.d) AS d, SUM(s.l) AS l, " +
@@ -113,7 +115,7 @@ public class LeagueTableService {
                 "         CASE WHEN m.home_goals > m.away_goals THEN 3 WHEN m.home_goals = m.away_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 AND m.season_id = ?2 " +
-                "    AND m.status = 'PLAYED' " +
+                "    AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)) " +
                 "  UNION ALL " +
                 "  SELECT m.away_team_id AS team_id, 1 AS mp, " +
                 "         CASE WHEN m.away_goals > m.home_goals THEN 1 ELSE 0 END AS w, " +
@@ -123,7 +125,7 @@ public class LeagueTableService {
                 "         CASE WHEN m.away_goals > m.home_goals THEN 3 WHEN m.away_goals = m.home_goals THEN 1 ELSE 0 END AS pts " +
                 "  FROM matches m " +
                 "  WHERE m.league_id = ?1 AND m.season_id = ?2 " +
-                "    AND m.status = 'PLAYED' " +
+                "    AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)) " +
                 ") s " +
                 "JOIN teams t ON t.id = s.team_id " +
                 "GROUP BY t.id, t.name " +

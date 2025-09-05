@@ -66,8 +66,16 @@ public class UnifiedUploadTextController {
             long completedAllTime = leagueOpt
                     .map(l -> matchRepository.countByLeagueIdAndStatus(l.getId(), MatchStatus.PLAYED))
                     .orElse(0L);
-            // Treat any match with scores as completed regardless of its date (historical uploads)
-            long completedUpToToday = completedAllTime;
+            // Completed up to today (Kenya time via system default zone)
+            long completedUpToToday = leagueOpt
+                    .map(l -> matchRepository.countByLeagueIdAndStatusAndDateLessThanEqual(l.getId(), MatchStatus.PLAYED, LocalDate.now()))
+                    .orElse(0L);
+
+            // Server time diagnostics
+            java.time.ZoneId zoneId = java.time.ZoneId.systemDefault();
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(zoneId);
+            String serverTimeDisplay = now.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    + " (" + zoneId.getId() + ")";
 
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),
@@ -78,7 +86,8 @@ public class UnifiedUploadTextController {
                     "skipped", result.skipped(),
                     "warnings", result.warnings(),
                     "completed", completedAllTime,
-                    "completedUpToToday", completedUpToToday
+                    "completedUpToToday", completedUpToToday,
+                    "serverTime", serverTimeDisplay
             ));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of(

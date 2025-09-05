@@ -71,27 +71,26 @@ import { COUNTRIES } from '../shared/countries.constant';
             </div>
           </label>
 
-          <!-- Season text input is required for NEW_LEAGUE; for existing league types it is read-only (pre-filled) but can be overridden for FULL_REPLACE -->
+          <!-- Season is required. For existing leagues it is shown read-only (no uploading to old seasons). -->
           <label>
             Season
-            <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="uploadType==='INCREMENTAL'"/>
-          </label>
-
-          <!-- Season assignment (seasonId) available when a league is selected -->
-          <label>
-            Season (assign to)
-            <select [(ngModel)]="seasonId" [disabled]="!selectedLeague">
-              <option [ngValue]="null">Auto/current</option>
-              <option *ngFor="let s of seasons" [ngValue]="s.id">{{s.name}}</option>
-            </select>
+            <ng-container *ngIf="requiresExistingLeague; else newLeagueSeasonSelect">
+              <input [(ngModel)]="season" placeholder="e.g., 2024/2025" [readonly]="true"/>
+            </ng-container>
+            <ng-template #newLeagueSeasonSelect>
+              <select [(ngModel)]="season">
+                <option value="">Select season...</option>
+                <option *ngFor="let s of allowedSeasons" [value]="s">{{ s }}</option>
+              </select>
+            </ng-template>
           </label>
 
           <!-- Help text per type -->
           <div style="grid-column: 1 / -1;" class="hint">
             <ng-container [ngSwitch]="uploadType">
               <div *ngSwitchCase="'NEW_LEAGUE'">Creates a new league. All matches will be inserted under the provided season.</div>
-              <div *ngSwitchCase="'FULL_REPLACE'">Deletes existing matches for the selected league/season and uploads the provided data.</div>
-              <div *ngSwitchCase="'INCREMENTAL'">Updates results for existing fixtures; safe to run multiple times.</div>
+              <div *ngSwitchCase="'FULL_REPLACE'">Deletes existing matches for the selected league/season and uploads the provided data. Uploading to past seasons is disabled.</div>
+              <div *ngSwitchCase="'INCREMENTAL'">Updates results for existing fixtures; safe to run multiple times. Uploading to past seasons is disabled.</div>
             </ng-container>
           </div>
         </div>
@@ -272,6 +271,9 @@ export class MatchUploadComponent {
   seasons: Season[] = [];
   seasonId: number | null = null;
 
+  // Allowed seasons for new league uploads (dropdown)
+  allowedSeasons: string[] = ['2024/2025','2025/2026','2026/2027'];
+
   get requiresExistingLeague(): boolean {
     return this.uploadType === 'FULL_REPLACE' || this.uploadType === 'INCREMENTAL';
   }
@@ -329,11 +331,6 @@ export class MatchUploadComponent {
         this.season = details.season;
         this.leagueName = details.name; // keep API contract
       });
-      // load seasons for selected league
-      const lid = Number(this.selectedLeague);
-      if (!Number.isNaN(lid)) {
-        this.seasonApi.listSeasons(lid).subscribe({ next: s => this.seasons = s ?? [], error: _ => this.seasons = [] });
-      }
     } else {
       this.country = '';
       this.season = '';
@@ -345,7 +342,7 @@ export class MatchUploadComponent {
     if (!this.validateMeta()) return;
     if (!this.file) return;
     const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
-    this.api.uploadUnifiedCsv(this.uploadType, this.leagueName, this.country, this.season, this.file, { seasonId: this.seasonId, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
+    this.api.uploadUnifiedCsv(this.uploadType, this.leagueName, this.country, this.season, this.file, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -355,7 +352,7 @@ export class MatchUploadComponent {
     this.resetFeedback();
     if (!this.validateMeta()) return;
     const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
-    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: this.seasonId, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
+    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });

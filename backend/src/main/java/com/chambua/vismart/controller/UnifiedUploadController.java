@@ -83,6 +83,12 @@ public class UnifiedUploadController {
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
                     .orElse(0L);
 
+            // Server time diagnostics
+            java.time.ZoneId zoneId = java.time.ZoneId.systemDefault();
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(zoneId);
+            String serverTimeDisplay = now.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    + " (" + zoneId.getId() + ")";
+
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),
                     "inserted", result.insertedCount(),
@@ -92,7 +98,8 @@ public class UnifiedUploadController {
                     "skipped", result.skipped(),
                     "warnings", result.warnings(),
                     "completed", completedAllTime,
-                    "completedUpToToday", completedUpToToday
+                    "completedUpToToday", completedUpToToday,
+                    "serverTime", serverTimeDisplay
             ));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -152,6 +159,12 @@ public class UnifiedUploadController {
                     .map(l -> matchRepository.countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNullAndDateLessThanEqual(l.getId(), LocalDate.now()))
                     .orElse(0L);
 
+            // Server time diagnostics
+            java.time.ZoneId zoneId = java.time.ZoneId.systemDefault();
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(zoneId);
+            String serverTimeDisplay = now.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    + " (" + zoneId.getId() + ")";
+
             return ResponseEntity.ok(Map.of(
                     "success", result.success(),
                     "inserted", result.insertedCount(),
@@ -161,7 +174,8 @@ public class UnifiedUploadController {
                     "skipped", result.skipped(),
                     "warnings", result.warnings(),
                     "completed", completedAllTime,
-                    "completedUpToToday", completedUpToToday
+                    "completedUpToToday", completedUpToToday,
+                    "serverTime", serverTimeDisplay
             ));
         } catch (Exception ex) {
             return ResponseEntity.badRequest().body(Map.of(

@@ -16,6 +16,8 @@ public class FormGuideRowDTO {
     private int pts;
     private double ppg;
     private List<String> lastResults; // latest first, values: W/D/L
+    // Detailed strings for last results (e.g., "Won 2-1 vs Alianza") matching the same order as lastResults
+    private List<String> lastResultsDetails;
     private int bttsPct; // 0-100
     private int over15Pct; // 0-100
     private int over25Pct; // 0-100
@@ -80,6 +82,7 @@ public class FormGuideRowDTO {
     public int getPts() { return pts; }
     public double getPpg() { return ppg; }
     public List<String> getLastResults() { return lastResults; }
+    public List<String> getLastResultsDetails() { return lastResultsDetails; }
     public int getBttsPct() { return bttsPct; }
     public int getOver15Pct() { return over15Pct; }
     public int getOver25Pct() { return over25Pct; }
@@ -116,6 +119,7 @@ public class FormGuideRowDTO {
     public void setPts(int pts) { this.pts = pts; }
     public void setPpg(double ppg) { this.ppg = ppg; }
     public void setLastResults(List<String> lastResults) { this.lastResults = lastResults; }
+    public void setLastResultsDetails(List<String> lastResultsDetails) { this.lastResultsDetails = lastResultsDetails; }
     public void setBttsPct(int bttsPct) { this.bttsPct = bttsPct; }
     public void setOver15Pct(int over15Pct) { this.over15Pct = over15Pct; }
     public void setOver25Pct(int over25Pct) { this.over25Pct = over25Pct; }

@@ -56,6 +56,9 @@ public class FormGuideController {
         } catch (IllegalArgumentException ex) {
             // Map service validation errors to 400 instead of 500
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (Exception ex) {
+            log.error("[FormGuide][ERR] leagueId={}, seasonId={}, msg={}", leagueId, seasonId, ex.toString());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Form guide computation failed: " + ex.getMessage(), ex);
         }
     }
 }

@@ -45,6 +45,7 @@ export interface FormGuideRowDTO {
   pts: number; // raw points (unweighted)
   ppg: number; // recency-weighted PPG
   lastResults: string[];
+  lastResultsDetails?: string[];
   bttsPct: number; // recency-weighted BTTS%
   over15Pct: number; // recency-weighted Over 1.5%
   over25Pct: number; // recency-weighted Over 2.5%

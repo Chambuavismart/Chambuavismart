@@ -36,14 +36,15 @@ public class FormGuideService {
         if (limit <= 0) limit = 6;
         if (scope == null) scope = Scope.OVERALL;
 
+        // Strict filtering: do not include NULL season rows or merge by date bounds
         String baseHome =
-                "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home " +
-                "FROM matches m JOIN teams t ON t.id = m.home_team_id " +
-                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED'";
+                "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name " +
+                "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id " +
+                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
         String baseAway =
-                "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home " +
-                "FROM matches m JOIN teams t ON t.id = m.away_team_id " +
-                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED'";
+                "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name " +
+                "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id " +
+                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
 
         String sql;
         if (scope == Scope.HOME) {
@@ -63,15 +64,19 @@ public class FormGuideService {
         // Group rows by team for scope-driven main metrics
         Map<Long, List<Row>> byTeam = new LinkedHashMap<>();
         for (Object[] r : rows) {
-            java.sql.Date date = (java.sql.Date) r[0];
+            Object dateObj = r[0];
+            java.sql.Date date = (dateObj instanceof java.sql.Date)
+                    ? (java.sql.Date) dateObj
+                    : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
             Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
             Long teamId = ((Number) r[2]).longValue();
             String teamName = (String) r[3];
             int gf = ((Number) r[4]).intValue();
             int ga = ((Number) r[5]).intValue();
             boolean isHome = ((Number) r[6]).intValue() == 1;
+            String oppName = (String) r[7];
             byTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
-                    .add(new Row(teamId, teamName, date, round, gf, ga, isHome));
+                    .add(new Row(teamId, teamName, date, round, gf, ga, isHome, oppName));
         }
 
         // Also build full home and away maps regardless of requested scope, for weighted splits
@@ -82,14 +87,18 @@ public class FormGuideService {
         List<Object[]> homeRows = qHome.getResultList();
         Map<Long, List<Row>> homeByTeam = new LinkedHashMap<>();
         for (Object[] r : homeRows) {
-            java.sql.Date date = (java.sql.Date) r[0];
+            Object dateObj = r[0];
+            java.sql.Date date = (dateObj instanceof java.sql.Date)
+                    ? (java.sql.Date) dateObj
+                    : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
             Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
             Long teamId = ((Number) r[2]).longValue();
             String teamName = (String) r[3];
             int gf = ((Number) r[4]).intValue();
             int ga = ((Number) r[5]).intValue();
+            String oppName = (String) r[7];
             homeByTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
-                    .add(new Row(teamId, teamName, date, round, gf, ga, true));
+                    .add(new Row(teamId, teamName, date, round, gf, ga, true, oppName));
         }
         var qAway = em.createNativeQuery(baseAway + " ORDER BY 3, 1 DESC, 2 DESC")
                 .setParameter(1, leagueId)
@@ -98,14 +107,18 @@ public class FormGuideService {
         List<Object[]> awayRows = qAway.getResultList();
         Map<Long, List<Row>> awayByTeam = new LinkedHashMap<>();
         for (Object[] r : awayRows) {
-            java.sql.Date date = (java.sql.Date) r[0];
+            Object dateObj = r[0];
+            java.sql.Date date = (dateObj instanceof java.sql.Date)
+                    ? (java.sql.Date) dateObj
+                    : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
             Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
             Long teamId = ((Number) r[2]).longValue();
             String teamName = (String) r[3];
             int gf = ((Number) r[4]).intValue();
             int ga = ((Number) r[5]).intValue();
+            String oppName = (String) r[7];
             awayByTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
-                    .add(new Row(teamId, teamName, date, round, gf, ga, false));
+                    .add(new Row(teamId, teamName, date, round, gf, ga, false, oppName));
         }
 
         boolean entireLeague = (limit == Integer.MAX_VALUE);
@@ -131,6 +144,7 @@ public class FormGuideService {
             double wGa = 0.0;
 
             List<String> seq = new ArrayList<>(windowSize);
+            List<String> details = new ArrayList<>(windowSize);
 
             for (int i = 0; i < windowSize; i++) {
                 Row row = list.get(i);
@@ -142,9 +156,9 @@ public class FormGuideService {
                 // accumulate weighted goals for and against
                 wGf += row.gf * weight;
                 wGa += row.ga * weight;
-                if (row.gf > row.ga) { w++; pts += 3; seq.add("W"); wPts += 3 * weight; }
-                else if (row.gf == row.ga) { d++; pts += 1; seq.add("D"); wPts += 1 * weight; }
-                else { l++; seq.add("L"); /* 0 pts */ }
+                if (row.gf > row.ga) { w++; pts += 3; seq.add("W"); wPts += 3 * weight; details.add("Won " + row.gf + "-" + row.ga + (row.isHome ? " vs " : " at ") + row.oppName); }
+                else if (row.gf == row.ga) { d++; pts += 1; seq.add("D"); wPts += 1 * weight; details.add("Drew " + row.gf + "-" + row.ga + (row.isHome ? " vs " : " at ") + row.oppName); }
+                else { l++; seq.add("L"); /* 0 pts */ details.add("Lost " + row.gf + "-" + row.ga + (row.isHome ? " vs " : " at ") + row.oppName); }
 
                 boolean isBtts = (row.gf > 0 && row.ga > 0);
                 if (isBtts) { btts++; wBtts += weight; }
@@ -156,6 +170,7 @@ public class FormGuideService {
             // Cap the displayed form string to last 10 even for entire league
             if (entireLeague && seq.size() > 10) {
                 seq = new ArrayList<>(seq.subList(0, 10));
+                details = new ArrayList<>(details.subList(0, 10));
             }
 
             int mpWindow = windowSize;
@@ -171,6 +186,7 @@ public class FormGuideService {
 
             Row first = list.get(0);
             FormGuideRowDTO dto = new FormGuideRowDTO(first.teamId, first.teamName, mpWindow, totalMp, w, d, l, gf, ga, pts, round2(ppg), seq, bttsPct, over15Pct, over25Pct, over35Pct);
+            dto.setLastResultsDetails(details);
             // set weighted averages for goals per match
             if (sumWeights > 0.0) {
                 dto.setAvgGfWeighted(wGf / sumWeights);
@@ -204,7 +220,7 @@ public class FormGuideService {
 
         // Validation: sum of total MPs across teams should approximate total matches * factor
         try {
-            String dbg = "SELECT COUNT(*) FROM matches m WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED'";
+            String dbg = "SELECT COUNT(*) FROM matches m WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
             var dq = em.createNativeQuery(dbg)
                     .setParameter(1, leagueId)
                     .setParameter(2, seasonId);
@@ -237,8 +253,8 @@ public class FormGuideService {
     }
 
     private static class Row {
-        final Long teamId; final String teamName; final java.sql.Date date; final Integer round; final int gf; final int ga; final boolean isHome;
-        Row(Long teamId, String teamName, java.sql.Date date, Integer round, int gf, int ga, boolean isHome) { this.teamId = teamId; this.teamName = teamName; this.date = date; this.round = round; this.gf = gf; this.ga = ga; this.isHome = isHome; }
+        final Long teamId; final String teamName; final java.sql.Date date; final Integer round; final int gf; final int ga; final boolean isHome; final String oppName;
+        Row(Long teamId, String teamName, java.sql.Date date, Integer round, int gf, int ga, boolean isHome, String oppName) { this.teamId = teamId; this.teamName = teamName; this.date = date; this.round = round; this.gf = gf; this.ga = ga; this.isHome = isHome; this.oppName = oppName; }
         public java.sql.Date getDate() { return date; }
         public Integer getRound() { return round; }
     }

@@ -15,66 +15,78 @@ import { switchMap, distinctUntilChanged, map, tap, catchError, finalize } from 
     <div class="theme-container">
       <h1 class="page-title">Form Guide</h1>
 
-      <div class="panel" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-        <label class="label">League</label>
-        <select class="select" [ngModel]="leagueId" (ngModelChange)="onLeagueChange($event)">
-          <option [ngValue]="null">-- Choose a league --</option>
-          <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.name }} ({{ lg.country }} {{ lg.season }})</option>
-        </select>
+      <div class="panel toolbar" >
+        <div class="filters">
+          <label class="label">League</label>
+          <select class="select" [ngModel]="leagueId" (ngModelChange)="onLeagueChange($event)">
+            <option [ngValue]="null">-- Choose a league --</option>
+            <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.name }} ({{ lg.country }} {{ lg.season }})</option>
+          </select>
 
-        <label class="label">Season</label>
-        <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
-          <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
-        </select>
+          <label class="label">Season</label>
+          <select class="select" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
+            <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
+          </select>
 
-        <label class="label">Limit</label>
-        <select class="select" [ngModel]="limit" (ngModelChange)="onLimitChange($event)">
-          <option [ngValue]="3">3</option>
-          <option [ngValue]="5">5</option>
-          <option [ngValue]="6">6</option>
-          <option [ngValue]="10">10</option>
-          <option [ngValue]="'all'">Entire League</option>
-        </select>
-
-        <div class="tabs">
-          <button class="tab" [class.active]="scope==='overall'" (click)="setScope('overall')">Overall</button>
-          <button class="tab" [class.active]="scope==='home'" (click)="setScope('home')">Home</button>
-          <button class="tab" [class.active]="scope==='away'" (click)="setScope('away')">Away</button>
+          <div class="scope-tabs">
+            <span class="label">Scope</span>
+            <div class="tabs">
+              <button class="tab" [class.active]="scope==='overall'" (click)="setScope('overall')">Overall</button>
+              <button class="tab" [class.active]="scope==='home'" (click)="setScope('home')">Home</button>
+              <button class="tab" [class.active]="scope==='away'" (click)="setScope('away')">Away</button>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <label class="label" title="Number of matches considered for form and weighted metrics">Matches Limit</label>
+          <select class="select" [ngModel]="limit" (ngModelChange)="onLimitChange($event)" title="Choose how many recent matches to include">
+            <option [ngValue]="3">3</option>
+            <option [ngValue]="5">5</option>
+            <option [ngValue]="6">6</option>
+            <option [ngValue]="10">10</option>
+            <option [ngValue]="'all'">Entire League</option>
+          </select>
+          <button class="btn" (click)="exportCsv()" title="Download table as CSV">Export CSV</button>
         </div>
       </div>
 
       <div *ngIf="loading" class="muted">Loading...</div>
       <div *ngIf="error" class="banner">{{ error }}</div>
 
-      <div class="panel" *ngIf="!loading && rows?.length">
-        <div style="font-weight:700; margin-bottom:8px; color:#9fb3cd;">
+      <div class="panel data-panel" *ngIf="!loading && rows?.length">
+        <div class="panel-header">
           Form Guide – {{ headerLeagueName() }} ({{ headerSeasonName() }})
         </div>
         <div *ngIf="weightedWarning" class="banner warning">{{ weightedWarning }}</div>
-        <div style="overflow-x:auto;">
+        <div class="table-scroll">
           <table class="table rounded-table">
-            <thead>
+            <thead class="sticky">
+              <tr class="group-header">
+                <th rowspan="2" (click)="onSort('teamName')" class="sortable left">Team {{sortIcon('teamName')}}</th>
+                <th class="center" colspan="8">Results</th>
+                <th class="center" colspan="5">Form & Trends</th>
+                <th class="center" colspan="5">Home / Away Splits</th>
+              </tr>
               <tr>
-                <th (click)="onSort('teamName')" class="sortable">Team {{sortIcon('teamName')}}</th>
-                <th class="center sortable" (click)="onSort('mp')" title="MP shows all completed matches; last 10 results are displayed for readability">MP {{sortIcon('mp')}}</th>
-                <th class="center sortable" (click)="onSort('w')">W {{sortIcon('w')}}</th>
-                <th class="center sortable" (click)="onSort('d')">D {{sortIcon('d')}}</th>
-                <th class="center sortable" (click)="onSort('l')">L {{sortIcon('l')}}</th>
-                <th class="center sortable" (click)="onSort('gf')">GF {{sortIcon('gf')}}</th>
-                <th class="center sortable" (click)="onSort('ga')">GA {{sortIcon('ga')}}</th>
-                <th class="center sortable" (click)="onSort('gd')">GD {{sortIcon('gd')}}</th>
-                <th class="center sortable" (click)="onSort('pts')">Pts {{sortIcon('pts')}}</th>
+                <th class="center sortable" (click)="onSort('mp')" title="MP = Matches Played (completed)">MP {{sortIcon('mp')}}</th>
+                <th class="center sortable" (click)="onSort('w')" title="W = Wins">W {{sortIcon('w')}}</th>
+                <th class="center sortable" (click)="onSort('d')" title="D = Draws">D {{sortIcon('d')}}</th>
+                <th class="center sortable" (click)="onSort('l')" title="L = Losses">L {{sortIcon('l')}}</th>
+                <th class="center sortable" (click)="onSort('gf')" title="GF = Goals For">GF {{sortIcon('gf')}}</th>
+                <th class="center sortable" (click)="onSort('ga')" title="GA = Goals Against">GA {{sortIcon('ga')}}</th>
+                <th class="center sortable" (click)="onSort('gd')" title="GD = Goal Difference">GD {{sortIcon('gd')}}</th>
+                <th class="center sortable" (click)="onSort('pts')" title="Pts = Points">Pts {{sortIcon('pts')}}</th>
                 <th class="center sortable" (click)="onSort('ppg')" [title]="weightTip">Weighted PPG <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('ppg')}}</th>
-                <th class="center">{{ lastHeader() }}</th>
-                <th class="center sortable" (click)="onSort('bttsPct')" [title]="weightTip">Weighted BTTS % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('bttsPct')}}</th>
-                <th class="center sortable" (click)="onSort('over15Pct')" [title]="weightTip">Weighted Over 1.5 % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over15Pct')}}</th>
-                <th class="center sortable" (click)="onSort('over25Pct')" [title]="weightTip">Weighted Over 2.5 % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over25Pct')}}</th>
-                <th class="center sortable" (click)="onSort('over35Pct')" [title]="weightTip">Weighted Over 3.5 % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over35Pct')}}</th>
-                <th class="center" title="Home/Away recency-weighted PPG">PPG H/A</th>
-                <th class="center" title="Home/Away recency-weighted BTTS%">BTTS% H/A</th>
-                <th class="center" title="Home/Away recency-weighted Over 1.5%">O1.5% H/A</th>
-                <th class="center" title="Home/Away recency-weighted Over 2.5%">O2.5% H/A</th>
-                <th class="center" title="Home/Away recency-weighted Over 3.5%">O3.5% H/A</th>
+                <th class="center" [title]="'Last results (' + lastHeader() + ')'">{{ lastHeader() }}</th>
+                <th class="center sortable" (click)="onSort('bttsPct')" [title]="'Weighted BTTS % — ' + weightTip">BTTS % <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('bttsPct')}}</th>
+                <th class="center sortable" (click)="onSort('over15Pct')" [title]="'Weighted Over 1.5% — ' + weightTip">O1.5% <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over15Pct')}}</th>
+                <th class="center sortable" (click)="onSort('over25Pct')" [title]="'Weighted Over 2.5% — ' + weightTip">O2.5% <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over25Pct')}}</th>
+                <th class="center sortable" (click)="onSort('over35Pct')" [title]="'Weighted Over 3.5% — ' + weightTip">O3.5% <span class="weighted" [title]="weightTip">⚖</span> {{sortIcon('over35Pct')}}</th>
+                <th class="center" title="PPG (Home / Away)">PPG (Home / Away)</th>
+                <th class="center" title="BTTS% (Home / Away)">BTTS% H/A</th>
+                <th class="center" title="Over 1.5% (Home / Away)">O1.5% H/A</th>
+                <th class="center" title="Over 2.5% (Home / Away)">O2.5% H/A</th>
+                <th class="center" title="Over 3.5% (Home / Away)">O3.5% H/A</th>
               </tr>
             </thead>
             <ng-template #naTpl><span class="muted-na">N/A</span></ng-template>
@@ -96,27 +108,39 @@ import { switchMap, distinctUntilChanged, map, tap, catchError, finalize } from 
                 <td class="center">{{r.pts}}</td>
                 <td class="center" [title]="weightTip">{{ safePpg(r) }}</td>
                 <td class="center">
-                  <span *ngFor="let s of displayResults(r); let i = index" class="pill" [ngClass]="{
+                  <span *ngFor="let s of displayResults(r); let i = index" class="pill pill-lg" [ngClass]="{
                     'win': s==='W', 'draw': s==='D', 'loss': s==='L'
-                  }" [title]="s" aria-hidden="true">{{s}}</span>
+                  }" [title]="(r.lastResultsDetails && r.lastResultsDetails[i]) ? r.lastResultsDetails[i] : (s==='W' ? 'Win' : s==='D' ? 'Draw' : s==='L' ? 'Loss' : '')" aria-hidden="true">{{s}}</span>
                   <ng-container *ngIf="hasMore(r)">
                     <span class="pill" title="More results">+</span>
                   </ng-container>
                 </td>
-                <td class="center">
-                  <ng-container *ngIf="isNumber(r.bttsPct); else naTpl"><span class="percent" [style.background]="percentBg(r.bttsPct)" [title]="weightTip">{{r.bttsPct}}%</span></ng-container>
+                <td class="center stat">
+                  <ng-container *ngIf="isNumber(r.bttsPct); else naTpl">
+                    <span class="percent" [class.red]="r.bttsPct<40" [class.yellow]="r.bttsPct>=40 && r.bttsPct<70" [class.green]="r.bttsPct>=70" [title]="weightTip">{{r.bttsPct}}%</span>
+                    <div class="mini-bar"><div class="fill" [style.width]="r.bttsPct + '%'" [ngClass]="{red: r.bttsPct<40, yellow: r.bttsPct>=40 && r.bttsPct<70, green: r.bttsPct>=70}"></div></div>
+                  </ng-container>
+                </td>
+                <td class="center stat">
+                  <ng-container *ngIf="isNumber(r.over15Pct); else naTpl">
+                    <span class="percent" [class.red]="r.over15Pct<40" [class.yellow]="r.over15Pct>=40 && r.over15Pct<70" [class.green]="r.over15Pct>=70" [title]="weightTip">{{r.over15Pct}}%</span>
+                    <div class="mini-bar"><div class="fill" [style.width]="r.over15Pct + '%'" [ngClass]="{red: r.over15Pct<40, yellow: r.over15Pct>=40 && r.over15Pct<70, green: r.over15Pct>=70}"></div></div>
+                  </ng-container>
+                </td>
+                <td class="center stat">
+                  <ng-container *ngIf="isNumber(r.over25Pct); else naTpl">
+                    <span class="percent" [class.red]="r.over25Pct<40" [class.yellow]="r.over25Pct>=40 && r.over25Pct<70" [class.green]="r.over25Pct>=70" [title]="weightTip">{{r.over25Pct}}%</span>
+                    <div class="mini-bar"><div class="fill" [style.width]="r.over25Pct + '%'" [ngClass]="{red: r.over25Pct<40, yellow: r.over25Pct>=40 && r.over25Pct<70, green: r.over25Pct>=70}"></div></div>
+                  </ng-container>
+                </td>
+                <td class="center stat">
+                  <ng-container *ngIf="isNumber(r.over35Pct); else naTpl">
+                    <span class="percent" [class.red]="r.over35Pct<40" [class.yellow]="r.over35Pct>=40 && r.over35Pct<70" [class.green]="r.over35Pct>=70" [title]="weightTip">{{r.over35Pct}}%</span>
+                    <div class="mini-bar"><div class="fill" [style.width]="r.over35Pct + '%'" [ngClass]="{red: r.over35Pct<40, yellow: r.over35Pct>=40 && r.over35Pct<70, green: r.over35Pct>=70}"></div></div>
+                  </ng-container>
                 </td>
                 <td class="center">
-                  <ng-container *ngIf="isNumber(r.over15Pct); else naTpl"><span class="percent" [style.background]="percentBg(r.over15Pct)" [title]="weightTip">{{r.over15Pct}}%</span></ng-container>
-                </td>
-                <td class="center">
-                  <ng-container *ngIf="isNumber(r.over25Pct); else naTpl"><span class="percent" [style.background]="percentBg(r.over25Pct)" [title]="weightTip">{{r.over25Pct}}%</span></ng-container>
-                </td>
-                <td class="center">
-                  <ng-container *ngIf="isNumber(r.over35Pct); else naTpl"><span class="percent" [style.background]="percentBg(r.over35Pct)" [title]="weightTip">{{r.over35Pct}}%</span></ng-container>
-                </td>
-                <td class="center">
-                  {{ splitPpg(r).home }} / {{ splitPpg(r).away }}
+                  <span class="ha-ppg">{{ splitPpg(r).home }}</span> / <span class="muted">{{ splitPpg(r).away }}</span>
                 </td>
                 <td class="center">
                   <span class="percent" [style.background]="percentBg(splitPercent(r, 'weightedHomeBTTSPercent', 'weightedAwayBTTSPercent', 'bttsPct').homeRaw)" [title]="weightTip"
@@ -167,25 +191,106 @@ import { switchMap, distinctUntilChanged, map, tap, catchError, finalize } from 
           </table>
         </div>
       </div>
+
+      <div class="panel mobile-list" *ngIf="!loading && rows?.length">
+        <div *ngFor="let r of sortedRows" class="mobile-card">
+          <details>
+            <summary>
+              <div class="mobile-header">
+                <div class="name">{{ r.teamName }}</div>
+                <div class="form">
+                  <span *ngFor="let s of displayResults(r); let i = index" class="pill pill-lg" [ngClass]="{ 'win': s==='W', 'draw': s==='D', 'loss': s==='L' }" [title]="(r.lastResultsDetails && r.lastResultsDetails[i]) ? r.lastResultsDetails[i] : ''">{{s}}</span>
+                </div>
+                <div class="ppg">PPG: {{ safePpg(r) }}</div>
+              </div>
+            </summary>
+            <div class="mobile-body">
+              <div class="row"><span>MP</span><span>{{ matchesPlayed(r) }}</span></div>
+              <div class="row"><span>W-D-L</span><span>{{r.w}}-{{r.d}}-{{r.l}}</span></div>
+              <div class="row"><span>GF/GA</span><span>{{r.gf}}/{{r.ga}} (GD {{r.gd}})</span></div>
+              <div class="row"><span>Pts</span><span>{{r.pts}}</span></div>
+              <div class="row"><span>BTTS%</span><span>{{r.bttsPct}}%</span></div>
+              <div class="row"><span>O1.5/O2.5/O3.5</span><span>{{r.over15Pct}}% / {{r.over25Pct}}% / {{r.over35Pct}}%</span></div>
+              <div class="row"><span>PPG (H/A)</span><span>{{ splitPpg(r).home }} / {{ splitPpg(r).away }}</span></div>
+            </div>
+          </details>
+        </div>
+      </div>
     </div>
   `,
   styles: [`
+    :host { display:block; height: 100vh; }
+    .theme-container { height: 100%; max-width: 100%; padding: 8px 12px; }
+    .page-title { margin: 4px 0 8px; }
+    .toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .filters { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .actions { display:flex; align-items:center; gap:10px; }
+    .btn { padding:6px 12px; border-radius:8px; border:1px solid #1f2937; background:#0f172a; color:#cfe0f4; cursor:pointer; }
+    .btn:hover { background:#111827; }
+
+    .data-panel { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; }
+    .panel-header { font-weight:700; margin-bottom:4px; color:#9fb3cd; }
+    .table-scroll { flex:1 1 auto; min-height:0; overflow:auto; }
+
     .rounded-table { border-radius: 10px; overflow:hidden; }
-    .team { display:flex; align-items:center; gap:8px; }
-    .badge { font-size: 18px; }
-    .pill { display:inline-block; width: 18px; height: 18px; line-height: 18px; text-align:center; margin: 0 2px; border-radius: 4px; font-weight: 700; color:#04110a; }
+    .table { font-size: 12px; }
+    .table thead th, .table tbody td { padding:6px 8px; }
+    .table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .sticky { position: sticky; top: 0; background:#0b1220; z-index: 1; }
+    .group-header th { background:#0b1220; }
+
+    .team { display:flex; align-items:center; gap:6px; }
+    .badge { font-size: 16px; }
+    .pill { display:inline-block; width: 18px; height: 18px; line-height: 18px; text-align:center; margin: 0 1px; border-radius: 4px; font-weight: 700; color:#04110a; }
+    .pill-lg { width: 18px; height: 18px; line-height: 18px; font-size: 12px; }
     .pill.win { background:#19b562; }
     .pill.draw { background:#facc15; }
     .pill.loss { background:#ef4444; color: #fff; }
-    .tabs { display:flex; gap:6px; margin-left:auto; }
+
+    .tabs { display:flex; gap:6px; }
     .tab { padding:6px 10px; border-radius:8px; border:1px solid #1f2937; background:#0f172a; color:#cfe0f4; cursor:pointer; }
     .tab.active { background:#19b562; color:#04110a; border-color:#19b562; }
-    .percent { display:inline-block; padding:2px 6px; border-radius:6px; color:#04110a; font-weight:700; }
+
+    .percent { display:inline-block; padding:2px 6px; border-radius:6px; color:#04110a; font-weight:700; background:#eee; }
+    .percent.red { background:#ef4444; color:#fff; }
+    .percent.yellow { background:#facc15; color:#04110a; }
+    .percent.green { background:#19b562; color:#04110a; }
+    .mini-bar { width:70px; height:6px; background:#1f2937; border-radius:4px; margin:4px auto 0; overflow:hidden; }
+    .mini-bar .fill { height:100%; }
+    .mini-bar .fill.red { background:#ef4444; }
+    .mini-bar .fill.yellow { background:#facc15; }
+    .mini-bar .fill.green { background:#19b562; }
+
     .sortable { cursor: pointer; user-select: none; }
-    .banner.warning { background: #facc1533; color: #d97706; border: 1px solid #d97706; padding: 6px 10px; border-radius: 8px; margin-bottom: 8px; }
+    .banner.warning { background: #facc1533; color: #d97706; border: 1px solid #d97706; padding: 6px 10px; border-radius: 8px; margin-bottom: 4px; }
     .muted-na { color: #9fb3cd; font-style: italic; }
     .ha-ppg { font-weight:700; }
     .weighted { color:#6b7280; font-size:12px; margin-left:6px; }
+    .muted { color:#9fb3cd; }
+
+    /* Mobile cards */
+    .mobile-list .mobile-card { border:1px solid #1f2937; border-radius:10px; padding:10px; margin-bottom:10px; background:#0f172a; }
+    .mobile-header { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+    .mobile-header .name { font-weight:700; }
+    .mobile-header .form { flex:1; margin:0 8px; white-space:nowrap; overflow:hidden; }
+    .mobile-header .ppg { color:#9fb3cd; }
+    .mobile-body .row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dashed #1f2937; }
+    .mobile-body .row:last-child { border-bottom: none; }
+
+    /* Layout: keep page within viewport and let table area scroll */
+    .theme-container { display:flex; flex-direction:column; }
+    .panel.toolbar { flex: 0 0 auto; }
+
+    /* Mobile responsive: convert rows into accordion-like blocks */
+    @media (max-width: 800px) {
+      .table { display: none; }
+      .mobile-list { display:block; }
+      :host { height: auto; }
+      .theme-container { height: auto; }
+    }
+    @media (min-width: 801px) {
+      .mobile-list { display:none; }
+    }
   `]
 })
 export class FormGuideComponent implements OnInit {
@@ -469,8 +574,8 @@ export class FormGuideComponent implements OnInit {
   }
 
   percentBg(val: number){
-    // green to red gradient cutoff
-    if (val >= 66) return '#19b56244';
+    // traffic-light logic: 0–39 red, 40–69 yellow, 70–100 green
+    if (val >= 70) return '#19b56244';
     if (val >= 40) return '#facc1544';
     return '#ef444444';
   }
@@ -494,5 +599,48 @@ export class FormGuideComponent implements OnInit {
   headerSeasonName(){
     const s = this.seasons.find(x => x.id === this.seasonId!);
     return s?.name || 'Season';
+  }
+
+  exportCsv(){
+    const headers = ['Team','MP','W','D','L','GF','GA','GD','Pts','PPG','Last','BTTS%','Over1.5%','Over2.5%','Over3.5%','PPG_H','PPG_A'];
+    const lines = [headers.join(',')];
+    for (const r of this.sortedRows){
+      const last = (r.lastResults || []).slice(0, this.limit==='all' ? 10 : (this.limit as number)).join('');
+      const split = this.splitPpg(r);
+      const row = [
+        this.csvVal(r.teamName),
+        this.csvVal(String(this.matchesPlayed(r))),
+        this.csvVal(String(r.w)),
+        this.csvVal(String(r.d)),
+        this.csvVal(String(r.l)),
+        this.csvVal(String(r.gf)),
+        this.csvVal(String(r.ga)),
+        this.csvVal(String(r.gd)),
+        this.csvVal(String(r.pts)),
+        this.csvVal(this.safePpg(r)),
+        this.csvVal(last),
+        this.csvVal(this.isNumber(r.bttsPct) ? String(r.bttsPct) : ''),
+        this.csvVal(this.isNumber(r.over15Pct) ? String(r.over15Pct) : ''),
+        this.csvVal(this.isNumber(r.over25Pct) ? String(r.over25Pct) : ''),
+        this.csvVal(this.isNumber(r.over35Pct) ? String(r.over35Pct) : ''),
+        this.csvVal(String(split.home)),
+        this.csvVal(String(split.away))
+      ];
+      lines.push(row.join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `form_guide_${this.headerLeagueName()}_${this.headerSeasonName()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private csvVal(v: any){
+    const s = String(v ?? '');
+    const needsQuotes = s.includes(',') || s.includes('"') || s.includes('\n');
+    const escaped = s.replace(/"/g, '""');
+    return needsQuotes ? `"${escaped}"` : escaped;
   }
 }
