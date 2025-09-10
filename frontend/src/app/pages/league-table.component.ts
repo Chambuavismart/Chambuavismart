@@ -17,7 +17,7 @@ import { Season, SeasonService } from '../services/season.service';
         <label for="leagueSelect" class="label">League</label>
         <select id="leagueSelect" class="select" [ngModel]="selectedLeagueId" (ngModelChange)="onLeagueChange($event)">
           <option [ngValue]="null">-- Choose a league --</option>
-          <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.name }} ({{ lg.country }} {{ lg.season }})</option>
+          <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.country }} {{ lg.season }} – {{ lg.name }}</option>
         </select>
 
         <label *ngIf="selectedLeagueId" for="seasonSelect" class="label">Season</label>
@@ -94,7 +94,21 @@ export class LeagueTableComponent {
   constructor() {
     // Load leagues for dropdown
     this.leagueService.getLeagues().subscribe({
-      next: data => this.leagues = data ?? [],
+      next: data => {
+        const arr = (data ?? []).slice();
+        arr.sort((a,b) => {
+          const ca = (a.country || '').toLowerCase();
+          const cb = (b.country || '').toLowerCase();
+          if (ca < cb) return -1;
+          if (ca > cb) return 1;
+          const sa = (a.season || '').toLowerCase();
+          const sb = (b.season || '').toLowerCase();
+          if (sa < sb) return -1;
+          if (sa > sb) return 1;
+          return (a.name || '').localeCompare(b.name || '');
+        });
+        this.leagues = arr;
+      },
       error: _ => this.error = 'Failed to load leagues'
     });
 

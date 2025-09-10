@@ -201,16 +201,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   selectDate(iso: string) {
-    // allow only dates that have fixtures (past or future)
-    if (!this.availableDates.has(iso)) {
-      // Still surface a UX response: show empty state for clarity
-      this.selectedDate = iso;
-      this.pastFixtures = [];
-      this.loadingPast = false;
-      // eslint-disable-next-line no-console
-      console.debug('[HomeComponent] selectDate (no fixtures for)', iso);
-      return;
-    }
+    // Always allow selecting any date; backend will return fixtures or an empty list.
     this.selectedDate = iso;
     this.loadingPast = true;
     this.pastFixtures = [];

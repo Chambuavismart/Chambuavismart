@@ -21,7 +21,7 @@ export class GlobalLeadersService {
 
   constructor(private http: HttpClient) {}
 
-  getLeaders(category: string, limit = 5, minMatches = 5, scope: 'overall'|'home'|'away' = 'overall', lastN: number = 0): Observable<GlobalLeader[]> {
+  getLeaders(category: string, limit = 5, minMatches = 3, scope: 'overall'|'home'|'away' = 'overall', lastN: number = 0): Observable<GlobalLeader[]> {
     const key = `${category}:${limit}:${minMatches}:${scope}:${lastN}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
 

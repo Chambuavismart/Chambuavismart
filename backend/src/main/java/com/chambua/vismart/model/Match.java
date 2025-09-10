@@ -7,7 +7,8 @@ import java.time.LocalDate;
 @Table(name = "matches", indexes = {
         @Index(name = "idx_matches_season_round", columnList = "season_id, round"),
         @Index(name = "idx_matches_date", columnList = "match_date"),
-        @Index(name = "idx_matches_season_teams_date", columnList = "season_id, home_team_id, away_team_id, match_date")
+        @Index(name = "idx_matches_season_teams_date", columnList = "season_id, home_team_id, away_team_id, match_date"),
+        @Index(name = "idx_matches_source_and_date", columnList = "source_type, match_date")
 }, uniqueConstraints = {
         @UniqueConstraint(name = "uk_match_season_round_home_away", columnNames = {"season_id", "round", "home_team_id", "away_team_id"}),
         @UniqueConstraint(name = "uk_match_season_home_away_date", columnNames = {"season_id", "home_team_id", "away_team_id", "match_date"})
@@ -49,6 +50,18 @@ public class Match {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private MatchStatus status = MatchStatus.SCHEDULED;
+
+    // Archives additions
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_type", length = 32)
+    private SourceType sourceType = SourceType.CURRENT;
+
+    @Column(name = "checksum", length = 128)
+    private String checksum;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "import_run_id", foreignKey = @ForeignKey(name = "fk_matches_import_run"))
+    private ImportRun importRun;
 
     public Match() {}
 
@@ -97,4 +110,13 @@ public class Match {
 
     public MatchStatus getStatus() { return status; }
     public void setStatus(MatchStatus status) { this.status = status; }
+
+    public SourceType getSourceType() { return sourceType; }
+    public void setSourceType(SourceType sourceType) { this.sourceType = sourceType; }
+
+    public String getChecksum() { return checksum; }
+    public void setChecksum(String checksum) { this.checksum = checksum; }
+
+    public ImportRun getImportRun() { return importRun; }
+    public void setImportRun(ImportRun importRun) { this.importRun = importRun; }
 }

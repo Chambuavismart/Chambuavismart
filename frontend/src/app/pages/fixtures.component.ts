@@ -50,7 +50,7 @@ import { forkJoin } from 'rxjs';
       <div class="toolbar">
         <label class="muted">League</label>
         <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="loadFixtures()">
-          <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }} ({{ l.upcomingCount }})</option>
+          <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueCountry }} – {{ l.leagueName }} – {{ l.season }} ({{ l.upcomingCount }})</option>
         </select>
         <label class="muted">Upcoming only</label>
         <input type="checkbox" [(ngModel)]="upcomingOnly" (change)="loadFixtures()"/>
@@ -61,7 +61,7 @@ import { forkJoin } from 'rxjs';
       <aside class="sidebar">
         <div *ngFor="let l of leagues" class="league">
           <div class="league-header" (click)="toggleLeague(l.leagueId)">
-            <div style="font-weight:800; color:#19b562">{{ l.leagueName }}</div>
+            <div style="font-weight:800; color:#19b562">{{ l.leagueCountry }} – {{ l.leagueName }} – {{ l.season }}</div>
             <span class="badge">{{ l.upcomingCount }}</span>
           </div>
           <div *ngIf="expandedLeagueId === l.leagueId" style="padding:8px 4px;">

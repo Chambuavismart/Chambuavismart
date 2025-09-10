@@ -46,17 +46,21 @@
             <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:6px;">
               <button *ngFor="let d of daysGrid"
                       (click)="selectDate(d.iso)"
-                      [disabled]="!d.hasFixtures"
                       style="position:relative; height:36px; border:1px solid #e5e7eb; background:#ffffff; color:#0b3a4a; border-radius:6px; cursor:pointer;" [style.opacity]="d.inMonth ? 1 : 0.5">
                 <span>{{ d.day }}</span>
                 <span *ngIf="d.hasFixtures" style="position:absolute; left:50%; transform:translateX(-50%); bottom:4px; width:6px; height:6px; background:#1e6bd6; border-radius:50%;"></span>
               </button>
             </div>
-            <div style="margin-top:8px; font-size:12px; color:#64748b;">Only dates with fixtures are selectable.</div>
+            <div style="margin-top:8px; font-size:12px; color:#64748b;">Dates with a dot have fixtures. You can select any date.</div>
           </div>
         </div>
       </div>
       <div style="flex:1"></div>
+      <!-- Quick navigation tabs next to Form Guide -->
+      <nav style="display:flex; gap:8px; align-items:center;">
+        <a routerLink="/form-guide" class="btn tertiary" style="padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#0b3a4a; text-decoration:none; font-weight:700;">Form Guide</a>
+        <a routerLink="/quick-insights" class="btn tertiary" style="padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#0b3a4a; text-decoration:none; font-weight:700;">Quick Insights</a>
+      </nav>
     </div>
 
     <!-- Today's fixtures render -->

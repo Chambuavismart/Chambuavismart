@@ -49,7 +49,7 @@ import { COUNTRY_LEAGUES } from '../shared/country-leagues.constant';
               League
               <select [(ngModel)]="selectedLeague" (change)="onLeagueSelected()">
                 <option value="">Select league...</option>
-                <option *ngFor="let league of leagues" [value]="league.id">{{ league.name }}</option>
+                <option *ngFor="let league of leagues" [value]="league.id">{{ league.country }} • {{ league.name }} • {{ league.season }}</option>
               </select>
             </label>
           </ng-container>
@@ -159,7 +159,7 @@ Nublense
             League
             <select [(ngModel)]="fixturesLeagueId" (ngModelChange)="onFixturesLeagueChange()">
               <option [ngValue]="null">Select a league...</option>
-              <option *ngFor="let l of fixturesLeagues" [ngValue]="l.id">{{l.name}} ({{l.season}})</option>
+              <option *ngFor="let l of fixturesLeagues" [ngValue]="l.id">{{l.country}} {{l.season}} – {{l.name}}</option>
             </select>
           </label>
           <label style="grid-column: 1 / -1;">
@@ -304,7 +304,7 @@ export class MatchUploadComponent {
   fullReplace = true; // for fixtures tab checkbox
 
   // Existing leagues dataset
-  leagues: { id: number; name: string; }[] = [];
+  leagues: { id: number; name: string; country: string; season: string; }[] = [];
   selectedLeague: string = '';
 
   // Fixtures upload state
@@ -313,7 +313,7 @@ export class MatchUploadComponent {
   fixturesLeagueName: string = '';
   fixturesCountry: string = '';
   fixturesRawText: string = '';
-  fixturesLeagues: { id: number; name: string; season: string; }[] = [];
+  fixturesLeagues: { id: number; name: string; country: string; season: string; }[] = [];
 
   file?: File;
   text = '';
@@ -336,7 +336,19 @@ export class MatchUploadComponent {
   constructor(private api: MatchUploadService, private leagueApi: LeagueService, private seasonApi: SeasonService, private http: HttpClient) {
     // load leagues for fixtures tab
     this.leagueApi.getLeagues().subscribe(ls => {
-      this.fixturesLeagues = ls.map(l => ({ id: l.id, name: `${l.name} (${l.country})`, season: l.season }));
+      const arr = (ls ?? []).slice();
+      arr.sort((a,b) => {
+        const ca = (a.country || '').toLowerCase();
+        const cb = (b.country || '').toLowerCase();
+        if (ca < cb) return -1;
+        if (ca > cb) return 1;
+        const sa = (a.season || '').toLowerCase();
+        const sb = (b.season || '').toLowerCase();
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+      this.fixturesLeagues = arr.map(l => ({ id: l.id, name: l.name, country: l.country, season: l.season }));
     });
   }
 
@@ -366,7 +378,7 @@ export class MatchUploadComponent {
     // Load leagues when an existing-league-based type is selected
     if (this.requiresExistingLeague) {
       this.leagueApi.getAllLeagues().subscribe(data => {
-        this.leagues = (data || []).map(d => ({ id: d.id, name: d.name }));
+        this.leagues = (data || []).map(d => ({ id: d.id, name: d.name, country: d.country, season: d.season }));
       });
     } else {
       // Reset fields for new league upload

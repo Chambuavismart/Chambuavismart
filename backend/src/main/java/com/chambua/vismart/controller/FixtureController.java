@@ -56,7 +56,13 @@ public class FixtureController {
         List<League> leagues = leagueRepository.findAllById(leagueIds);
         leagues.sort(Comparator.comparing(League::getName));
         return leagues.stream()
-                .map(l -> new LeagueWithUpcomingDTO(l.getId(), l.getName(), upcomingMap.getOrDefault(l.getId(), 0L)))
+                .map(l -> new LeagueWithUpcomingDTO(
+                        l.getId(),
+                        l.getName(),
+                        l.getCountry(),
+                        l.getSeason(),
+                        upcomingMap.getOrDefault(l.getId(), 0L)
+                ))
                 .collect(Collectors.toList());
     }
 

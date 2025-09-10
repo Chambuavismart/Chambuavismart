@@ -29,6 +29,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
           <a routerLink="/fixtures" routerLinkActive="active">Fixtures</a>
           <a routerLink="/match-analysis" routerLinkActive="active">Match Analysis</a>
           <a routerLink="/form-guide" routerLinkActive="active">Form Guide</a>
+          <a routerLink="/quick-insights" routerLinkActive="active">Quick Insights</a>
           <a routerLink="/league" routerLinkActive="active">League Table</a>
           <a routerLink="/history" routerLinkActive="active">History</a>
           <a routerLink="/fixture-predictions" routerLinkActive="active">Fixture Predictions</a>
@@ -38,6 +39,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
           <a routerLink="/advice" routerLinkActive="active">Advice</a>
           <a routerLink="/wekelea-baskets" routerLinkActive="active">Wekelea Baskets</a>
           <a routerLink="/team-search" routerLinkActive="active">Team Search</a>
+          <a routerLink="/played-matches-summary" routerLinkActive="active">Played Matches</a>
         </div>
       </div>
     </nav>

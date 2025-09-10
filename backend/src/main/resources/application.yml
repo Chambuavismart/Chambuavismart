@@ -30,6 +30,10 @@ spring:
     out-of-order: false
     validate-on-migrate: true
 
+vismart:
+  archives:
+    imports-dir: data/imports/archives
+
 # Profiles
 ---
 spring:

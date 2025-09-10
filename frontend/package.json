@@ -11,6 +11,11 @@
     "test": "ng test",
     "lint": "ng lint"
   },
+  "engines": {
+    "node": ">=18.13.0 <19 || >=20.9.0 <21",
+    "npm": ">=9 <11"
+  },
+  "packageManager": "npm@10.9.2",
   "dependencies": {
     "@angular/animations": "17.3.8",
     "@angular/common": "17.3.8",
@@ -25,7 +30,7 @@
     "zone.js": "0.14.7"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "17.3.8",
+    "@angular-devkit/build-angular": "^17.3.8",
     "@angular/cli": "17.3.8",
     "@angular/compiler-cli": "17.3.8",
     "@types/jasmine": "5.1.5",

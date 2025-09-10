@@ -20,5 +20,6 @@ export const COUNTRIES: readonly string[] = [
   "South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Tajikistan",
   "Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu",
   "Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela",
-  "Vietnam","Yemen","Zambia","Zimbabwe"
+  "Vietnam","Yemen","Zambia","Zimbabwe",
+  "England"
 ] as const;

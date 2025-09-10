@@ -1,5 +1,5 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { NgIf, NgFor, AsyncPipe } from '@angular/common';
+import { NgIf, NgFor, NgStyle } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO } from '../services/fixtures.service';
@@ -12,7 +12,7 @@ import { map, catchError } from 'rxjs/operators';
 @Component({
   selector: 'app-match-analysis',
   standalone: true,
-  imports: [NgIf, NgFor, FormsModule, RouterLink],
+  imports: [NgIf, NgFor, NgStyle, FormsModule, RouterLink],
   styles: [`
     :host { display:block; color:#e6eef8; }
     .layout { display:flex; gap: 16px; }
@@ -27,7 +27,7 @@ import { map, catchError } from 'rxjs/operators';
     .bar.away { background:#0ea5e9; }
     .stats { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:12px; }
     .stat { text-align:center; }
-    .circle { width: 80px; height: 80px; border-radius: 50%; background: conic-gradient(#19b562 var(--p), #1f2937 0); display:grid; place-items:center; margin:0 auto; }
+    .circle { width: 80px; height: 80px; border-radius: 50%; background: conic-gradient(#19b562 var(--p, 0deg), #1f2937 0); display:grid; place-items:center; margin:0 auto; }
     .circle span { font-weight:800; }
     .advice { font-weight:800; font-size: 18px; color: #04110a; background:#19b562; padding:12px; border-radius:12px; text-align:center; }
 
@@ -62,6 +62,43 @@ import { map, catchError } from 'rxjs/operators';
       <button class="btn primary" (click)="analyze()">Analyze</button>
       <span style="flex:1"></span>
       <a routerLink="/fixtures" class="btn">Pick from Fixtures</a>
+    </div>
+
+    <!-- Head-to-head section placed directly below the top Analyze button -->
+    <div *ngIf="analysis" class="card" style="margin-top:8px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;">
+        <h3 style="font-weight:800; margin:0;">Head-to-head matches</h3>
+        <div class="muted" *ngIf="(analysis?.h2hSummary?.matches?.length || 0) > 0 || (analysis?.headToHeadMatches?.length || 0) > 0">Across seasons</div>
+      </div>
+      <ng-container *ngIf="(analysis?.h2hSummary?.matches?.length || 0) > 0; else rawH2H">
+        <div class="mt-2 space-y-2">
+          <div *ngFor="let h2h of analysis?.h2hSummary?.matches; trackBy: trackH2HCompact" class="flex items-center justify-between border-b pb-1">
+            <div class="text-sm text-gray-600 w-24">{{ h2h?.date }}</div>
+            <div class="text-sm flex-1 text-right pr-2">{{ h2h?.home }}</div>
+            <div class="text-sm w-8 text-center">{{ h2h?.score?.split('-')[0] }}</div>
+            <div class="text-sm w-8 text-center">-</div>
+            <div class="text-sm w-8 text-center">{{ h2h?.score?.split('-')[1] }}</div>
+            <div class="text-sm flex-1 pl-2">{{ h2h?.away }}</div>
+          </div>
+        </div>
+      </ng-container>
+      <ng-template #rawH2H>
+        <ng-container *ngIf="(analysis?.headToHeadMatches?.length || 0) > 0; else noH2HAnywhere">
+          <div class="mt-2 space-y-2">
+            <div *ngFor="let m of analysis?.headToHeadMatches; trackBy: trackH2HCompact" class="flex items-center justify-between border-b pb-1">
+              <div class="text-sm text-gray-600 w-24">{{ m?.date }}</div>
+              <div class="text-sm flex-1 text-right pr-2">{{ m?.homeTeam }}</div>
+              <div class="text-sm w-8 text-center">{{ m?.homeGoals }}</div>
+              <div class="text-sm w-8 text-center">-</div>
+              <div class="text-sm w-8 text-center">{{ m?.awayGoals }}</div>
+              <div class="text-sm flex-1 pl-2">{{ m?.awayTeam }}</div>
+            </div>
+          </div>
+        </ng-container>
+      </ng-template>
+      <ng-template #noH2HAnywhere>
+        <div class="muted">No prior head-to-head matches were found between {{ analysis?.homeTeam }} and {{ analysis?.awayTeam }} across available seasons.</div>
+      </ng-template>
     </div>
 
     <div class="layout">
@@ -140,7 +177,7 @@ import { map, catchError } from 'rxjs/operators';
           <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px;">
               <div style="font-weight:700;">Form vs H2H vs Blended</div>
-              <div class="muted" *ngIf="analysis?.h2hSummary; else noH2H">H2H window: last {{ analysis?.h2hSummary?.lastN }} matches</div>
+              <div class="muted" *ngIf="analysis?.h2hSummary; else noH2H" [title]="h2hTooltip()">H2H window: last {{ analysis?.h2hSummary?.lastN }} matches</div>
               <ng-template #noH2H><span class="muted">No prior H2H found – using team form only</span></ng-template>
             </div>
             <div style="overflow:auto;">
@@ -193,11 +230,23 @@ import { map, catchError } from 'rxjs/operators';
                 </tbody>
               </table>
             </div>
+
+            <!-- H2H last-N compact list -->
+            <div *ngIf="analysis?.h2hSummary?.matches?.length" style="margin-top:10px;">
+              <div class="muted" style="margin-bottom:6px;">Head-to-head recent matches</div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <div *ngFor="let m of analysis?.h2hSummary?.matches" style="display:flex; justify-content:space-between; border:1px solid #1f2937; border-radius:6px; padding:6px 8px;">
+                  <div style="color:#9fb3cd; min-width:95px;">{{ m.date }}</div>
+                  <div style="flex:1; text-align:center; font-weight:600;">{{ m.home }} <span style="color:#9fb3cd;">{{ m.score }}</span> {{ m.away }}</div>
+                </div>
+              </div>
+            </div>
           </div>
+
 
           <!-- Confidence & Advice -->
           <div class="card" style="display:flex; align-items:center; gap:16px;">
-            <div class="circle" [style.--p]="(safePct(analysis?.confidenceScore) * 3.6) + 'deg'">
+            <div class="circle" [ngStyle]="{'--p': (safePct(analysis?.confidenceScore) * 3.6) + 'deg'}">
               <span>{{ safePct(analysis?.confidenceScore) }}%</span>
             </div>
             <div style="flex:1">
@@ -213,6 +262,8 @@ import { map, catchError } from 'rxjs/operators';
   `
 })
 export class MatchAnalysisComponent implements OnInit {
+  trackH2H(index: number, item: any) { return index; }
+  trackH2HCompact(index: number, item: any) { return index; }
   private fixturesApi = inject(FixturesService);
   private leaguesApi = inject(LeagueService);
   private analysisApi = inject(MatchAnalysisService);
@@ -244,7 +295,7 @@ export class MatchAnalysisComponent implements OnInit {
     this.leaguesApi.getAll().subscribe((ls: League[]) => {
       // Map to the DTO shape used by the templates
       this.leagues = (ls || [])
-        .map(l => ({ leagueId: l.id, leagueName: l.name, upcomingCount: 0 }))
+        .map(l => ({ leagueId: l.id, leagueName: l.name, leagueCountry: l.country, season: l.season, upcomingCount: 0 }))
         .sort((a, b) => a.leagueName.localeCompare(b.leagueName, undefined, { sensitivity: 'base' }));
     });
 
@@ -383,6 +434,23 @@ export class MatchAnalysisComponent implements OnInit {
   }
 
   // Helpers to ensure graceful fallback display
+
+  // Build tooltip with the exact H2H matches used in the window
+  h2hTooltip(): string {
+    const hs = this.analysis?.h2hSummary;
+    let list = hs?.matches || [];
+    // Fallback: if compact matches are missing but detailed H2H exists, format from there
+    if (!list.length) {
+      const raw = this.analysis?.headToHeadMatches || [];
+      if (raw.length) {
+        const linesRaw = raw.map(m => `${m.date}: ${m.homeTeam} ${m.homeGoals}-${m.awayGoals} ${m.awayTeam}`);
+        return `H2H matches used (last ${raw.length}):\n` + linesRaw.join('\n');
+      }
+      return 'No head-to-head matches found in the selected window.';
+    }
+    const lines = list.map(m => `${m.date}: ${m.home} ${m.score} ${m.away}`);
+    return `H2H matches used (last ${hs?.lastN}):\n` + lines.join('\n');
+  }
   safePct(val: any): number {
     const n = Number(val);
     if (isNaN(n)) return 0;

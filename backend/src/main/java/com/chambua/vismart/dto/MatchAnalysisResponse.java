@@ -13,6 +13,8 @@ public class MatchAnalysisResponse {
     // Optional: expose unblended form stats and H2H summary for UI visualization
     private FormSummary formSummary; // may be null
     private H2HSummary h2hSummary;   // may be null
+    // New: flat list of raw H2H matches for UI (date, competition, teams, goals)
+    private java.util.List<HeadToHeadMatchDto> headToHeadMatches;
 
     public MatchAnalysisResponse() {}
 
@@ -52,6 +54,8 @@ public class MatchAnalysisResponse {
     public void setFormSummary(FormSummary formSummary) { this.formSummary = formSummary; }
     public H2HSummary getH2hSummary() { return h2hSummary; }
     public void setH2hSummary(H2HSummary h2hSummary) { this.h2hSummary = h2hSummary; }
+    public java.util.List<HeadToHeadMatchDto> getHeadToHeadMatches() { return headToHeadMatches; }
+    public void setHeadToHeadMatches(java.util.List<HeadToHeadMatchDto> headToHeadMatches) { this.headToHeadMatches = headToHeadMatches; }
 
     public static class WinProbabilities {
         private int homeWin;
@@ -110,6 +114,9 @@ public class MatchAnalysisResponse {
         private double ppgAway;
         private int bttsPct;
         private int over25Pct;
+        // New: expose the actual last N matches shown in the H2H window (for UI rendering)
+        // Minimal payload: date (ISO), home name, away name, score
+        private java.util.List<H2HMatchItem> matches;
         public H2HSummary() {}
         public H2HSummary(int lastN, double ppgHome, double ppgAway, int bttsPct, int over25Pct) {
             this.lastN = lastN; this.ppgHome = ppgHome; this.ppgAway = ppgAway; this.bttsPct = bttsPct; this.over25Pct = over25Pct;
@@ -124,5 +131,27 @@ public class MatchAnalysisResponse {
         public void setBttsPct(int bttsPct) { this.bttsPct = bttsPct; }
         public int getOver25Pct() { return over25Pct; }
         public void setOver25Pct(int over25Pct) { this.over25Pct = over25Pct; }
+        public java.util.List<H2HMatchItem> getMatches() { return matches; }
+        public void setMatches(java.util.List<H2HMatchItem> matches) { this.matches = matches; }
+    }
+
+    // Lightweight DTO for H2H match display
+    public static class H2HMatchItem {
+        private String date; // ISO yyyy-MM-dd
+        private String home;
+        private String away;
+        private String score; // e.g., "2-1"
+        public H2HMatchItem() {}
+        public H2HMatchItem(String date, String home, String away, String score) {
+            this.date = date; this.home = home; this.away = away; this.score = score;
+        }
+        public String getDate() { return date; }
+        public void setDate(String date) { this.date = date; }
+        public String getHome() { return home; }
+        public void setHome(String home) { this.home = home; }
+        public String getAway() { return away; }
+        public void setAway(String away) { this.away = away; }
+        public String getScore() { return score; }
+        public void setScore(String score) { this.score = score; }
     }
 }

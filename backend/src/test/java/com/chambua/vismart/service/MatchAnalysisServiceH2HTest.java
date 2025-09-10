@@ -8,6 +8,7 @@ import com.chambua.vismart.model.Season;
 import com.chambua.vismart.model.Team;
 import com.chambua.vismart.repository.MatchAnalysisResultRepository;
 import com.chambua.vismart.repository.MatchRepository;
+import com.chambua.vismart.repository.LeagueRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mockito;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -31,7 +33,8 @@ class MatchAnalysisServiceH2HTest {
     @Mock private FormGuideService formGuideService;
     @Mock private SeasonService seasonService;
     @Mock private MatchRepository matchRepository;
-        @Mock private LeagueTableService leagueTableService;
+    @Mock private LeagueTableService leagueTableService;
+    @Mock private LeagueRepository leagueRepository;
 
     private ObjectMapper objectMapper;
 
@@ -137,5 +140,57 @@ class MatchAnalysisServiceH2HTest {
 
         MatchAnalysisResponse resp = service.analyzeDeterministic(1L, 10L, 20L, "League", "Home", "Away", true);
         assertTrue(resp.getWinProbabilities().getAwayWin() > resp.getWinProbabilities().getHomeWin(), "Away should be boosted by H2H wins");
+    }
+
+    @Test
+    void crossSeason_familyIds_used_across_leagues() {
+        // Create service with leagueRepository
+        ObjectMapper om = new ObjectMapper();
+        MatchAnalysisService svc = new MatchAnalysisService(cacheRepo, om, formGuideService, seasonService, matchRepository, leagueTableService, null, null, leagueRepository);
+
+        // League family: same name/country, two seasons => ids 1 and 2
+        League league2024 = new League(); league2024.setId(1L); league2024.setName("EPL"); league2024.setCountry("England");
+        given(leagueRepository.findById(1L)).willReturn(Optional.of(league2024));
+        given(leagueRepository.findIdsByNameIgnoreCaseAndCountryIgnoreCase("EPL", "England")).willReturn(List.of(1L, 2L));
+
+        // Season for form
+        Season s = new Season(); s.setId(100L);
+        given(seasonService.findCurrentSeason(1L)).willReturn(Optional.of(s));
+        FormGuideRowDTO homeRow = basicRow(home.getId(), home.getName(), 1.5, 50, 50);
+        FormGuideRowDTO awayRow = basicRow(away.getId(), away.getName(), 1.5, 50, 50);
+        given(formGuideService.compute(eq(1L), eq(100L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
+                .willReturn(List.of(homeRow, awayRow));
+
+        // H2H across leagues list returns one match
+        Match past = played(LocalDate.now().minusDays(100), home, away, 2, 1, 10);
+        given(matchRepository.findHeadToHeadAcrossLeagues(eq(List.of(1L, 2L)), eq(10L), eq(20L))).willReturn(List.of(past));
+
+        MatchAnalysisResponse resp = svc.analyzeDeterministic(1L, 10L, 20L, "EPL", "Home", "Away", true);
+        assertNotNull(resp);
+        // Non-empty H2H should influence probabilities slightly but ensures path executed
+        assertEquals(100, resp.getWinProbabilities().getHomeWin() + resp.getWinProbabilities().getDraw() + resp.getWinProbabilities().getAwayWin());
+        Mockito.verify(matchRepository).findHeadToHeadAcrossLeagues(eq(List.of(1L, 2L)), eq(10L), eq(20L));
+    }
+
+    @Test
+    void crossSeason_no_leakage_to_unrelated_competitions() {
+        ObjectMapper om = new ObjectMapper();
+        MatchAnalysisService svc = new MatchAnalysisService(cacheRepo, om, formGuideService, seasonService, matchRepository, leagueTableService, null, null, leagueRepository);
+
+        League leagueA = new League(); leagueA.setId(5L); leagueA.setName("Serie A"); leagueA.setCountry("Italy");
+        given(leagueRepository.findById(5L)).willReturn(Optional.of(leagueA));
+        given(leagueRepository.findIdsByNameIgnoreCaseAndCountryIgnoreCase("Serie A", "Italy")).willReturn(List.of(5L, 6L));
+
+        Season s = new Season(); s.setId(200L);
+        given(seasonService.findCurrentSeason(5L)).willReturn(Optional.of(s));
+        given(formGuideService.compute(eq(5L), eq(200L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
+                .willReturn(List.of(basicRow(home.getId(), home.getName(), 1.2, 50, 50), basicRow(away.getId(), away.getName(), 1.1, 50, 50)));
+
+        // Repository returns empty for family ids; ensure we did not call with unrelated ID 999
+        given(matchRepository.findHeadToHeadAcrossLeagues(eq(List.of(5L, 6L)), eq(10L), eq(20L))).willReturn(List.of());
+
+        MatchAnalysisResponse resp = svc.analyzeDeterministic(5L, 10L, 20L, "Serie A", "Home", "Away", true);
+        assertNotNull(resp);
+        Mockito.verify(matchRepository).findHeadToHeadAcrossLeagues(eq(List.of(5L, 6L)), eq(10L), eq(20L));
     }
 }

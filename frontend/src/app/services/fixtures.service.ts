@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { getApiBase } from './api-base';
 
 export type FixtureStatus = 'UPCOMING' | 'LIVE' | 'FINISHED';
 
@@ -18,6 +19,8 @@ export interface FixtureDTO {
 export interface LeagueWithUpcomingDTO {
   leagueId: number;
   leagueName: string;
+  leagueCountry: string;
+  season: string;
   upcomingCount: number;
 }
 
@@ -31,7 +34,7 @@ export interface LeagueFixturesResponse {
 @Injectable({ providedIn: 'root' })
 export class FixturesService {
   private http = inject(HttpClient);
-  private baseUrl = '/api/fixtures';
+  private baseUrl = `${getApiBase()}/fixtures`;
 
   getLeagues(): Observable<LeagueWithUpcomingDTO[]> {
     const url = `${this.baseUrl}/leagues?_ts=${Date.now()}`;

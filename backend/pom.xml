@@ -54,6 +54,13 @@
             <artifactId>flyway-mysql</artifactId>
         </dependency>
 
+        <!-- CSV parsing -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>1.10.0</version>
+        </dependency>
+
         <!-- Optional: Enable basic testing, even if no tests currently exist -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

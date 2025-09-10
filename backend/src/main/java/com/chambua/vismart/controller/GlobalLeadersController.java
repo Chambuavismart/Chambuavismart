@@ -24,7 +24,7 @@ public class GlobalLeadersController {
     public ResponseEntity<List<GlobalLeaderDto>> get(
             @RequestParam(name = "category") String category,
             @RequestParam(name = "limit", defaultValue = "5") int limit,
-            @RequestParam(name = "minMatches", defaultValue = "5") int minMatches,
+            @RequestParam(name = "minMatches", defaultValue = "3") int minMatches,
             @RequestParam(name = "scope", defaultValue = "overall") String scope,
             @RequestParam(name = "lastN", defaultValue = "0") int lastN
     ) {

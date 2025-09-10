@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { getApiBase } from './api-base';
 import { Observable } from 'rxjs';
 
 // Core League entity (matches backend model)
@@ -71,7 +72,8 @@ export class LeagueService {
 
   // New generic: all leagues
   getAll(): Observable<League[]> {
-    return this.http.get<League[]>('/api/leagues');
+    const base = getApiBase();
+    return this.http.get<League[]>(`${base}/leagues`);
   }
 
   // Back-compat aliases used by various pages
@@ -80,7 +82,8 @@ export class LeagueService {
 
   // League detail by id
   getLeagueDetails(id: number | string): Observable<League> {
-    return this.http.get<League>(`/api/leagues/${id}`);
+    const base = getApiBase();
+    return this.http.get<League>(`${base}/leagues/${id}`);
     // Note: backend also exposes GET /api/league, but details endpoint is under /api/leagues/{id}
   }
 
@@ -95,13 +98,15 @@ export class LeagueService {
     params.set('seasonId', String(seasonId));
     params.set('limit', String(limit));
     params.set('scope', scope);
-    const url = `/api/form-guide/${leagueId}?${params.toString()}`;
+    const base = getApiBase();
+    const url = `${base}/form-guide/${leagueId}?${params.toString()}`;
     return this.http.get<FormGuideRowDTO[]>(url);
   }
 
   // League Table API (season-scoped)
   getLeagueTable(leagueId: number, seasonId: number): Observable<LeagueTableEntryDTO[]> {
-    const url = `/api/league/${leagueId}/table?seasonId=${seasonId}`;
+    const base = getApiBase();
+    const url = `${base}/league/${leagueId}/table?seasonId=${seasonId}`;
     return this.http.get<LeagueTableEntryDTO[]>(url);
   }
 }

@@ -15,7 +15,7 @@ export class GlobalLeadersWidgetComponent implements OnChanges {
   @Input() limit: number = 5;
   @Input() scope: 'overall'|'home'|'away' = 'overall';
   @Input() lastN: number = 0; // 0 = all
-  @Input() minMatches: number = 5;
+  @Input() minMatches: number = 3;
 
   leaders$!: Observable<GlobalLeader[]>;
 
