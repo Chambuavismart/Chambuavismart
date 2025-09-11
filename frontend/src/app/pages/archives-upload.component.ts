@@ -112,7 +112,14 @@ Nublense
 })
 export class ArchivesUploadComponent {
   countries: readonly string[] = COUNTRIES;
-  seasons: readonly string[] = ['2023/2024','2022/2023','2021/2022'];
+  seasons: readonly string[] = [];
+  private generateSeasons(startYear: number, endYear: number): string[] {
+    const arr: string[] = [];
+    for (let y = startYear; y <= endYear; y++) {
+      arr.push(`${y}/${y + 1}`);
+    }
+    return arr;
+  }
   leaguesForCountry: string[] = [];
   leagueSelect: string = '';
   useManualLeague: boolean = false;
@@ -131,6 +138,14 @@ export class ArchivesUploadComponent {
   rawType: 'NEW_LEAGUE' | 'FULL_REPLACE' = 'NEW_LEAGUE';
 
   onCountryChange(){
+    if (!this.rawCountry) {
+      this.seasons = [];
+    } else {
+      // Populate seasons from 2018/2019 upwards to 2025/2026 when a country is selected
+      this.seasons = this.generateSeasons(2018, 2025);
+    }
+    // Clear any previously selected season
+    this.rawSeason = '';
     // Update leagues list based on selected country
     const leagues = COUNTRY_LEAGUES[this.rawCountry] || [];
     this.leaguesForCountry = [...leagues];

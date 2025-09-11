@@ -1,6 +1,7 @@
 package com.chambua.vismart.dto;
 
 public class MatchAnalysisResponse {
+    private String insightsText; // Plain-text insights panel content
     private String homeTeam;
     private String awayTeam;
     private String league;
@@ -17,6 +18,9 @@ public class MatchAnalysisResponse {
     private java.util.List<HeadToHeadMatchDto> headToHeadMatches;
 
     public MatchAnalysisResponse() {}
+
+        public String getInsightsText() { return insightsText; }
+        public void setInsightsText(String insightsText) { this.insightsText = insightsText; }
 
     public MatchAnalysisResponse(String homeTeam, String awayTeam, String league, WinProbabilities winProbabilities,
                                  int bttsProbability, int over25Probability, ExpectedGoals expectedGoals,
@@ -117,6 +121,11 @@ public class MatchAnalysisResponse {
         // New: expose the actual last N matches shown in the H2H window (for UI rendering)
         // Minimal payload: date (ISO), home name, away name, score
         private java.util.List<H2HMatchItem> matches;
+        // New: GD summary for H2H context
+        private com.chambua.vismart.dto.GoalDifferentialSummary goalDifferential;
+        // New: last-5 form for each team in H2H context
+        private com.chambua.vismart.dto.FormSummary homeForm;
+        private com.chambua.vismart.dto.FormSummary awayForm;
         public H2HSummary() {}
         public H2HSummary(int lastN, double ppgHome, double ppgAway, int bttsPct, int over25Pct) {
             this.lastN = lastN; this.ppgHome = ppgHome; this.ppgAway = ppgAway; this.bttsPct = bttsPct; this.over25Pct = over25Pct;
@@ -133,6 +142,12 @@ public class MatchAnalysisResponse {
         public void setOver25Pct(int over25Pct) { this.over25Pct = over25Pct; }
         public java.util.List<H2HMatchItem> getMatches() { return matches; }
         public void setMatches(java.util.List<H2HMatchItem> matches) { this.matches = matches; }
+        public com.chambua.vismart.dto.GoalDifferentialSummary getGoalDifferential() { return goalDifferential; }
+        public void setGoalDifferential(com.chambua.vismart.dto.GoalDifferentialSummary goalDifferential) { this.goalDifferential = goalDifferential; }
+        public com.chambua.vismart.dto.FormSummary getHomeForm() { return homeForm; }
+        public void setHomeForm(com.chambua.vismart.dto.FormSummary homeForm) { this.homeForm = homeForm; }
+        public com.chambua.vismart.dto.FormSummary getAwayForm() { return awayForm; }
+        public void setAwayForm(com.chambua.vismart.dto.FormSummary awayForm) { this.awayForm = awayForm; }
     }
 
     // Lightweight DTO for H2H match display

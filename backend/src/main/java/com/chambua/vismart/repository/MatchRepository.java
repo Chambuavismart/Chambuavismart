@@ -11,6 +11,8 @@ import java.time.LocalDate;
 import java.util.List;
 
 public interface MatchRepository extends JpaRepository<Match, Long> {
+    @Query("select max(ir.finishedAt) from Match m join m.importRun ir where m.season.id = :seasonId and ir.finishedAt is not null")
+    java.time.Instant findLastImportFinishedAtBySeasonId(@Param("seasonId") Long seasonId);
     long deleteByLeague(League league);
     List<Match> findByLeagueId(Long leagueId);
 
@@ -53,6 +55,26 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     @Query("select m from Match m where m.league.id in :leagueIds and m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (((m.homeTeam.id in :homeIds and m.awayTeam.id in :awayIds) or (m.homeTeam.id in :awayIds and m.awayTeam.id in :homeIds))) order by m.date desc, m.round desc")
     List<Match> findHeadToHeadByTeamSetsAcrossLeagues(@Param("leagueIds") List<Long> leagueIds, @Param("homeIds") List<Long> homeIds, @Param("awayIds") List<Long> awayIds);
 
+    // Distinct played pairs for suggestions filtered by text in either team name
+    @Query("select distinct m.homeTeam.name, m.awayTeam.name from Match m where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and (lower(m.homeTeam.name) like lower(concat('%', :q, '%')) or lower(m.awayTeam.name) like lower(concat('%', :q, '%')))")
+    List<Object[]> findDistinctPlayedPairsByNameContains(@Param("q") String q);
+
+    // Played matches by exact team names with orientation respected
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and lower(m.homeTeam.name) = lower(:homeName) and lower(m.awayTeam.name) = lower(:awayName) order by m.date desc, m.round desc")
+    List<Match> findPlayedByExactNames(@Param("homeName") String homeName, @Param("awayName") String awayName);
+
+    // Fallback: Played matches by fuzzy team names (contains, case-insensitive), orientation respected
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and lower(m.homeTeam.name) like lower(concat('%', :homeName, '%')) and lower(m.awayTeam.name) like lower(concat('%', :awayName, '%')) order by m.date desc, m.round desc")
+    List<Match> findPlayedByFuzzyNames(@Param("homeName") String homeName, @Param("awayName") String awayName);
+
+    // H2H by team IDs (orientation respected)
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam where m.homeTeam.id = :homeId and m.awayTeam.id = :awayId and (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) order by m.date desc")
+    List<Match> findH2HByTeamIds(@Param("homeId") Long homeId, @Param("awayId") Long awayId);
+
+    // H2H across ALL leagues and seasons by SETS of team IDs per side (orientation respected)
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and ((m.homeTeam.id in :homeIds and m.awayTeam.id in :awayIds)) order by m.date desc, m.round desc")
+    List<Match> findH2HByTeamIdSetsAllLeagues(@Param("homeIds") List<Long> homeIds, @Param("awayIds") List<Long> awayIds);
+
     // Deprecated: goal-null inference; kept temporarily for backward compatibility in transitional code paths
     @Deprecated
     long countByLeagueIdAndHomeGoalsNotNullAndAwayGoalsNotNull(Long leagueId);
@@ -66,4 +88,48 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     // Global total of matches that have a non-null result (interpreted as status=PLAYED)
     @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED")
     long countByResultIsNotNull();
+
+    // Count played matches involving a given team (either home or away)
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId)")
+    long countPlayedByTeam(@Param("teamId") Long teamId);
+
+    // Count played matches by exact team name (case-insensitive), regardless of league/season or team id duplication
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName))")
+    long countPlayedByTeamName(@Param("teamName") String teamName);
+
+    // Wins for a given team name (case-insensitive) across all leagues/seasons
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and ((lower(m.homeTeam.name) = lower(:teamName) and m.homeGoals > m.awayGoals) or (lower(m.awayTeam.name) = lower(:teamName) and m.awayGoals > m.homeGoals))")
+    long countWinsByTeamName(@Param("teamName") String teamName);
+
+    // Draws for a given team name (case-insensitive) across all leagues/seasons
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName)) and m.homeGoals = m.awayGoals")
+    long countDrawsByTeamName(@Param("teamName") String teamName);
+
+    // Losses are total played involving team minus wins minus draws; having a direct query for completeness
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and ((lower(m.homeTeam.name) = lower(:teamName) and m.homeGoals < m.awayGoals) or (lower(m.awayTeam.name) = lower(:teamName) and m.awayGoals < m.homeGoals))")
+    long countLossesByTeamName(@Param("teamName") String teamName);
+
+    // BTTS (both teams to score) for a given team name (case-insensitive) across all leagues/seasons
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.homeGoals > 0 and m.awayGoals > 0 and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName))")
+    long countBttsByTeamName(@Param("teamName") String teamName);
+
+    // Over 2.5 goals for matches involving a given team name across all leagues/seasons
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (coalesce(m.homeGoals,0) + coalesce(m.awayGoals,0)) >= 3 and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName))")
+    long countOver25ByTeamName(@Param("teamName") String teamName);
+
+    // Last N played matches for a given team id across all leagues/seasons (most recent first)
+    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) order by m.date desc, m.round desc")
+    List<Match> findRecentPlayedByTeamId(@Param("teamId") Long teamId);
+
+    // Last N played matches for a given team name across all leagues/seasons (most recent first)
+    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName)) order by m.date desc, m.round desc")
+    List<Match> findRecentPlayedByTeamName(@Param("teamName") String teamName);
+
+    // Seasons in which a given team name has played, ordered by Season.startDate desc (nulls last), then season id desc
+    @Query("select s.id from Match m join m.season s where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName)) group by s.id, s.startDate order by s.startDate desc nulls last, s.id desc")
+    List<Long> findSeasonIdsForTeamNameOrdered(@Param("teamName") String teamName);
+
+    // Last played matches for a given team name within a specific season (most recent first)
+    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.season.id = :seasonId and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName)) order by m.date desc, m.round desc")
+    List<Match> findRecentPlayedByTeamNameAndSeason(@Param("teamName") String teamName, @Param("seasonId") Long seasonId);
 }

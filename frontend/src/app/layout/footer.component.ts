@@ -24,6 +24,8 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
         <a routerLink="/advice" routerLinkActive="active">Advice</a>
         <a routerLink="/wekelea-baskets" routerLinkActive="active">Wekelea Baskets</a>
         <a routerLink="/team-search" routerLinkActive="active">Team Search</a>
+        <a routerLink="/played-matches-summary" routerLinkActive="active">Played Matches</a>
+        <a routerLink="/admin" routerLinkActive="active">Admin</a>
       </div>
       <div class="copyright">ChambuaViSmart © {{ year }}</div>
     </nav>

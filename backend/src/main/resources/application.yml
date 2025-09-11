@@ -34,6 +34,11 @@ vismart:
   archives:
     imports-dir: data/imports/archives
 
+predictive:
+  h2h:
+    phase1:
+      enabled: true
+
 # Profiles
 ---
 spring:

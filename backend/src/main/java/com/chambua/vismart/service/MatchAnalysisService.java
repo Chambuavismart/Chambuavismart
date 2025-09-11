@@ -32,12 +32,17 @@ public class MatchAnalysisService {
     // Optional repositories for H2H fallback via aliases/duplicates
     private final TeamRepository teamRepository; // may be null via legacy constructor
     private final TeamAliasRepository teamAliasRepository; // may be null via legacy constructor
+    @Autowired(required = false)
+    private H2HService h2hService;
+    @Autowired(required = false)
+    private com.chambua.vismart.config.FeatureFlags featureFlags;
 
     public MatchAnalysisService(MatchAnalysisResultRepository cacheRepo, ObjectMapper objectMapper,
                                 FormGuideService formGuideService, SeasonService seasonService,
                                 com.chambua.vismart.repository.MatchRepository matchRepository,
                                 LeagueTableService leagueTableService) {
         this(cacheRepo, objectMapper, formGuideService, seasonService, matchRepository, leagueTableService, null, null, null);
+        this.h2hService = null;
     }
 
     @Autowired
@@ -453,9 +458,34 @@ public class MatchAnalysisService {
                 }
             } catch (Exception ignored) {}
             sum.setMatches(items);
+            // Attach GD/Form/Insights only if predictive phase1 flag is ON (default true)
+            boolean phase1 = (featureFlags == null) || featureFlags.isPredictiveH2HPhase1Enabled();
+            if (phase1) {
+                // Attach GD summary computed by H2HService (perspective: homeTeamName)
+                try {
+                    com.chambua.vismart.dto.GoalDifferentialSummary gd = h2hService != null ? h2hService.computeGoalDifferentialByNames(homeTeamName, awayTeamName) : null;
+                    if (gd != null) sum.setGoalDifferential(gd);
+                } catch (Exception ignoredGd) {}
+                // Attach last-5 form for each team across all available matches
+                try {
+                    sum.setHomeForm(computeFormLastFive(homeTeamId, homeTeamName));
+                } catch (Exception ignoredHomeForm) {}
+                try {
+                    sum.setAwayForm(computeFormLastFive(awayTeamId, awayTeamName));
+                } catch (Exception ignoredAwayForm) {}
+            }
             // Attach H2H summary whenever we have an H2H window; matches list can be empty and UI will fallback to detailed list
             try { sum.setLastN(h2hWindow); } catch (Exception ignoredConsistency) {}
             response.setH2hSummary(sum);
+            // Insights text combining GD, streaks, PPG trend
+            if (phase1) {
+                try {
+                    if (h2hService != null) {
+                        String insights = h2hService.generateInsightsText(homeTeamName, awayTeamName);
+                        response.setInsightsText(insights);
+                    }
+                } catch (Exception ignoredInsights) {}
+            }
             // Also populate flat HeadToHeadMatchDto list for UI detailed section
             try {
                 java.util.List<com.chambua.vismart.model.Match> h2hList2 = h2hUsed;
@@ -540,5 +570,83 @@ public class MatchAnalysisService {
 
     private static double round2(double v) {
         return Math.round(v * 100.0) / 100.0;
+    }
+
+    // --- Last-5 form computation ---
+    private com.chambua.vismart.dto.FormSummary computeFormLastFive(Long teamId, String teamName) {
+        java.util.List<com.chambua.vismart.model.Match> list = java.util.Collections.emptyList();
+        try {
+            if (teamId != null) {
+                // Determine latest season by teamId via recent matches' season (first match's season is latest due to ordering)
+                List<com.chambua.vismart.model.Match> recentAll = matchRepository.findRecentPlayedByTeamId(teamId);
+                Long latestSeasonId = null;
+                if (recentAll != null && !recentAll.isEmpty()) {
+                    com.chambua.vismart.model.Season s = recentAll.get(0).getSeason();
+                    if (s != null) latestSeasonId = s.getId();
+                }
+                if (latestSeasonId != null) {
+                    // Filter to that season using name-based method only if necessary; prefer id path by filtering in-memory
+                    list = new java.util.ArrayList<>();
+                    for (com.chambua.vismart.model.Match m : recentAll) {
+                        if (m.getSeason() != null && java.util.Objects.equals(m.getSeason().getId(), latestSeasonId)) {
+                            list.add(m);
+                        }
+                    }
+                } else {
+                    list = recentAll;
+                }
+            } else if (teamName != null && !teamName.isBlank()) {
+                // Use repository helpers to constrain to latest season by team name
+                String q = teamName.trim();
+                java.util.List<Long> seasonIds = matchRepository.findSeasonIdsForTeamNameOrdered(q);
+                if (seasonIds != null && !seasonIds.isEmpty()) {
+                    Long latestSeasonId = seasonIds.get(0);
+                    list = matchRepository.findRecentPlayedByTeamNameAndSeason(q, latestSeasonId);
+                } else {
+                    list = matchRepository.findRecentPlayedByTeamName(q);
+                }
+            }
+        } catch (Exception ignored) {}
+        if (list == null || list.isEmpty()) return new com.chambua.vismart.dto.FormSummary();
+        java.util.ArrayList<String> results = new java.util.ArrayList<>();
+        int wins = 0, draws = 0;
+        for (com.chambua.vismart.model.Match m : list) {
+            if (results.size() >= 5) break;
+            Integer hg = m.getHomeGoals();
+            Integer ag = m.getAwayGoals();
+            if (hg == null || ag == null) continue; // skip invalid
+            boolean isHome = (m.getHomeTeam() != null && m.getHomeTeam().getId() != null && teamId != null && m.getHomeTeam().getId().equals(teamId))
+                    || (teamId == null && m.getHomeTeam() != null && m.getHomeTeam().getName() != null && teamName != null && m.getHomeTeam().getName().equalsIgnoreCase(teamName));
+            int my = isHome ? hg : ag;
+            int opp = isHome ? ag : hg;
+            if (my > opp) { results.add("W"); wins++; }
+            else if (my == opp) { results.add("D"); draws++; }
+            else { results.add("L"); }
+        }
+        // current streak from most recent
+        String streak = "0";
+        if (!results.isEmpty()) {
+            String first = results.get(0);
+            int count = 1;
+            for (int i = 1; i < results.size(); i++) {
+                if (results.get(i).equals(first)) count++; else break;
+            }
+            streak = count + first;
+        }
+        int valid = results.size();
+        int winRate = (valid > 0) ? (int)Math.round((wins * 100.0) / valid) : 0;
+        int points = wins * 3 + draws;
+        com.chambua.vismart.dto.FormSummary fs = new com.chambua.vismart.dto.FormSummary(results, streak, winRate, points);
+                // build cumulative PPG series (most recent first)
+                java.util.ArrayList<Double> ppg = new java.util.ArrayList<>();
+                int cum = 0; int cnt = 0;
+                for (String r : results) {
+                    int pts = ("W".equalsIgnoreCase(r) ? 3 : ("D".equalsIgnoreCase(r) ? 1 : 0));
+                    cum += pts; cnt++;
+                    double p = cnt > 0 ? ((double) cum) / cnt : 0.0;
+                    ppg.add(Math.round(p * 10.0) / 10.0);
+                }
+                fs.setPpgSeries(ppg);
+                return fs;
     }
 }
