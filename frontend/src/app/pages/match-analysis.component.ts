@@ -6,6 +6,8 @@ import { FixturesService, LeagueWithUpcomingDTO } from '../services/fixtures.ser
 import { LeagueService, League } from '../services/league.service';
 import { MatchAnalysisService, MatchAnalysisResponse } from '../services/match-analysis.service';
 import { Season, SeasonService } from '../services/season.service';
+import { MatchService } from '../services/match.service';
+import { TeamService } from '../services/team.service';
 import { of, forkJoin } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 
@@ -269,6 +271,8 @@ export class MatchAnalysisComponent implements OnInit {
   private analysisApi = inject(MatchAnalysisService);
   private seasonService = inject(SeasonService);
   private route = inject(ActivatedRoute);
+  private matchApi = inject(MatchService);
+  private teamApi = inject(TeamService);
 
   // Tooltip explaining weighting methodology
   weightTip: string = 'Weighted metrics use recency-weighted form and home/away context to adjust raw rates. See methodology for details.';
@@ -331,10 +335,20 @@ export class MatchAnalysisComponent implements OnInit {
 
     // Load seasons first so we can query team lists from season-scoped endpoints
     this.seasonService.listSeasons(this.selectedLeagueId).subscribe(list => {
-      this.seasons = list ?? [];
+      this.seasons = (list ?? []).slice();
+      // Sort seasons by startDate desc (nulls last), then by id desc as tiebreaker
+      this.seasons.sort((a, b) => {
+        const ad = a.startDate ? a.startDate : '';
+        const bd = b.startDate ? b.startDate : '';
+        if (ad === bd) return (b.id ?? 0) - (a.id ?? 0);
+        // Newer date first
+        return ad < bd ? 1 : -1;
+      });
       const today = new Date().toISOString().slice(0,10);
       const current = this.seasons.find(x => (!x.startDate || x.startDate <= today) && (!x.endDate || x.endDate >= today));
+      // Prefer current; otherwise choose the latest by startDate (due to sort above)
       this.seasonId = current ? current.id : (this.seasons[0]?.id ?? null);
+      console.debug('[MatchAnalysis][onLeagueChange] leagueId=', this.selectedLeagueId, 'resolvedSeasonId=', this.seasonId, 'seasonName=', this.seasons.find(s=>s.id===this.seasonId)?.name);
       // After resolving season, load teams using multiple sources merged (fixtures + form guide + league table)
       this.loadTeamsForLeague();
       // If teams were pre-filled via query params, auto-run analysis now that seasonId is resolved
@@ -352,6 +366,7 @@ export class MatchAnalysisComponent implements OnInit {
 
   private loadTeamsForLeague(){
     if (!this.selectedLeagueId) { this.teamsForLeague = []; return; }
+    console.debug('[MatchAnalysis][loadTeamsForLeague][REQ] leagueId=', this.selectedLeagueId, 'seasonId=', this.seasonId);
     // 1) Teams from fixtures (season-agnostic)
     const fixtures$ = this.fixturesApi.getLeagueFixtures(this.selectedLeagueId).pipe(
       map(res => {
@@ -362,17 +377,17 @@ export class MatchAnalysisComponent implements OnInit {
         }
         return Array.from(set);
       }),
-      catchError(_ => of([] as string[]))
+      catchError(err => { console.debug('[MatchAnalysis][loadTeamsForLeague][fixtures][ERR]', err); return of([] as string[]); })
     );
     // 2) Teams from form guide rows (season-scoped)
     const guide$ = (this.seasonId ? this.leaguesApi.getFormGuide(this.selectedLeagueId, this.seasonId, 'all', 'overall').pipe(
       map(rows => (rows || []).map(r => r.teamName?.trim()).filter(Boolean) as string[]),
-      catchError(_ => of([] as string[]))
+      catchError(err => { console.debug('[MatchAnalysis][loadTeamsForLeague][formGuide][ERR]', err); return of([] as string[]); })
     ) : of([] as string[]));
     // 3) Teams from league table (fallback if form guide not available)
     const table$ = (this.seasonId ? this.leaguesApi.getLeagueTable(this.selectedLeagueId, this.seasonId).pipe(
       map(rows => (rows || []).map(r => r.teamName?.trim()).filter(Boolean) as string[]),
-      catchError(_ => of([] as string[]))
+      catchError(err => { console.debug('[MatchAnalysis][loadTeamsForLeague][table][ERR]', err); return of([] as string[]); })
     ) : of([] as string[]));
 
     forkJoin([fixtures$, guide$, table$]).subscribe(([fa, ga, ta]) => {
@@ -381,11 +396,13 @@ export class MatchAnalysisComponent implements OnInit {
         if (name && name.trim()) set.add(name.trim());
       }
       this.teamsForLeague = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      console.debug('[MatchAnalysis][loadTeamsForLeague][RESP] counts', { fixtures: fa.length, formGuide: ga.length, table: ta.length, merged: this.teamsForLeague.length });
     });
   }
 
   onSeasonChange(id: number | null) {
     this.seasonId = id;
+    console.debug('[MatchAnalysis][onSeasonChange] leagueId=', this.selectedLeagueId, 'seasonId=', this.seasonId, 'seasonName=', this.seasons.find(s=>s.id===this.seasonId)?.name);
     // Refresh team list when season changes to ensure form-guide/table sources align
     this.loadTeamsForLeague();
   }
@@ -408,6 +425,8 @@ export class MatchAnalysisComponent implements OnInit {
       this.analysis = cached;
     }
 
+    console.debug('[MatchAnalysis][analyze][REQ]', { leagueId: this.selectedLeagueId, seasonId: this.seasonId, home: this.homeTeamName, away: this.awayTeamName, usingCached: !!cached });
+    console.time('[MatchAnalysis][analyze]');
     this.loading = true;
     this.analysisApi.analyze({
       leagueId: this.selectedLeagueId,
@@ -416,12 +435,57 @@ export class MatchAnalysisComponent implements OnInit {
       awayTeamName: this.awayTeamName
     }).subscribe({
       next: (res) => {
+        console.timeEnd('[MatchAnalysis][analyze]');
+        const compactN = (res?.h2hSummary?.matches?.length || 0);
+        const flatN = (res?.headToHeadMatches?.length || 0);
+        console.debug('[MatchAnalysis][analyze][RESP]', { hasH2H: !!res?.h2hSummary, h2hN: res?.h2hSummary?.lastN, compactMatches: compactN, flatMatches: flatN, confidence: res?.confidenceScore });
         this.analysis = res;
         this.cache.set(key, res);
         this.loading = false;
         this.showingCached = false;
+
+        // Client-side safety net: if backend didn't include H2H arrays, fetch by IDs+season
+        if (compactN === 0 && flatN === 0 && this.selectedLeagueId && this.seasonId && this.homeTeamName && this.awayTeamName) {
+          console.debug('[MatchAnalysis][fallback][H2H][start]', { leagueId: this.selectedLeagueId, seasonId: this.seasonId, home: this.homeTeamName, away: this.awayTeamName });
+          forkJoin({
+            homeId: this.teamApi.getScopedTeamId(this.homeTeamName, this.selectedLeagueId),
+            awayId: this.teamApi.getScopedTeamId(this.awayTeamName, this.selectedLeagueId)
+          }).subscribe(({ homeId, awayId }) => {
+            if (!homeId || !awayId) {
+              console.warn('[MatchAnalysis][fallback][H2H] Could not resolve team IDs', { homeId, awayId });
+              return;
+            }
+            this.matchApi.getH2HMatchesByIds(homeId, awayId, this.seasonId!, 50).subscribe({
+              next: (list) => {
+                console.debug('[MatchAnalysis][fallback][H2H][RESP]', { count: list?.length || 0 });
+                const mapped = (list || []).map(m => {
+                  const parts = (m.result || '').split('-');
+                  const hg = parts.length >= 2 ? Number(parts[0]) : NaN;
+                  const ag = parts.length >= 2 ? Number(parts[1]) : NaN;
+                  return {
+                    date: m.date || '',
+                    competition: m.season || '',
+                    homeTeam: m.homeTeam || '',
+                    awayTeam: m.awayTeam || '',
+                    homeGoals: isNaN(hg) ? 0 : hg,
+                    awayGoals: isNaN(ag) ? 0 : ag,
+                  } as any;
+                });
+                if (this.analysis) {
+                  // Merge into analysis for UI rendering
+                  (this.analysis as any).headToHeadMatches = mapped;
+                }
+              },
+              error: (e) => {
+                console.warn('[MatchAnalysis][fallback][H2H][ERR]', e);
+              }
+            });
+          });
+        }
       },
       error: (err) => {
+        console.timeEnd('[MatchAnalysis][analyze]');
+        console.debug('[MatchAnalysis][analyze][ERR]', err);
         // keep showing cached if available; otherwise clear analysis
         if (!cached) {
           this.analysis = null;

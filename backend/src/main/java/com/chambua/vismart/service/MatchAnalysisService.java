@@ -72,9 +72,12 @@ public class MatchAnalysisService {
     }
 
     public MatchAnalysisResponse analyzeDeterministic(Long leagueId, Long homeTeamId, Long awayTeamId,
-                                                      Long seasonId,
-                                                      String leagueName, String homeTeamName, String awayTeamName,
-                                                      boolean refresh) {
+                                                     Long seasonId,
+                                                     String leagueName, String homeTeamName, String awayTeamName,
+                                                     boolean refresh) {
+        org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MatchAnalysisService.class);
+        long t0 = System.currentTimeMillis();
+        logger.info("[ANALYZE][REQ] leagueId={} seasonId={} homeId={} awayId={} home='{}' away='{}' refresh={}", leagueId, seasonId, homeTeamId, awayTeamId, homeTeamName, awayTeamName, refresh);
         // If we have IDs, no explicit season context, and not refreshing, try cache first
         if (!refresh && seasonId == null && leagueId != null && homeTeamId != null && awayTeamId != null) {
             Optional<MatchAnalysisResult> cached = cacheRepo.findByLeagueIdAndHomeTeamIdAndAwayTeamId(leagueId, homeTeamId, awayTeamId);
@@ -113,11 +116,13 @@ public class MatchAnalysisService {
             Long sid = (seasonId != null) ? seasonId : seasonService.findCurrentSeason(leagueId).map(Season::getId).orElse(null);
             if (sid != null) {
                 List<FormGuideRowDTO> rows = formGuideService.compute(leagueId, sid, DEFAULT_FORM_LIMIT, FormGuideService.Scope.OVERALL);
+                logger.info("[ANALYZE][FORM] leagueId={} seasonId={} rows={}", leagueId, sid, rows != null ? rows.size() : 0);
                 if (seasonId != null && (rows == null || rows.isEmpty())) {
                     throw new IllegalArgumentException("No matches found for selected season");
                 }
                 FormGuideRowDTO homeRow = findTeamRow(rows, homeTeamId, homeTeamName);
                 FormGuideRowDTO awayRow = findTeamRow(rows, awayTeamId, awayTeamName);
+                logger.info("[ANALYZE][FORM] homeRowFound={} awayRowFound={} homeId={} awayId={}", homeRow != null, awayRow != null, homeTeamId, awayTeamId);
 
                 // Determine PPG for each side with fallback to overall ppg if insufficient split matches
                 double homePpg = 0.0;
@@ -203,11 +208,18 @@ public class MatchAnalysisService {
                 // First attempt: if both IDs are available, query by strict pair across league family or within league
                 if (homeTeamId != null && awayTeamId != null) {
                     try {
-                        if (leagueIds != null && !leagueIds.isEmpty()) {
-                            h2h = matchRepository.findHeadToHeadAcrossLeagues(leagueIds, homeTeamId, awayTeamId);
-                        } else {
-                            // Fallback: same-league only
-                            h2h = matchRepository.findHeadToHead(leagueId, homeTeamId, awayTeamId);
+                        // Prefer strict season-scoped H2H when seasonId provided
+                        if (seasonId != null) {
+                            h2h = matchRepository.findHeadToHeadBySeason(leagueId, seasonId, homeTeamId, awayTeamId);
+                        }
+                        // If none found or no season provided, try within league family or same league
+                        if (h2h == null || h2h.isEmpty()) {
+                            if (leagueIds != null && !leagueIds.isEmpty()) {
+                                h2h = matchRepository.findHeadToHeadAcrossLeagues(leagueIds, homeTeamId, awayTeamId);
+                            } else {
+                                // Fallback: same-league only
+                                h2h = matchRepository.findHeadToHead(leagueId, homeTeamId, awayTeamId);
+                            }
                         }
                     } catch (Exception ignored2) { h2h = matchRepository.findHeadToHead(leagueId, homeTeamId, awayTeamId); }
                 }
@@ -271,6 +283,7 @@ public class MatchAnalysisService {
                 if (h2h != null && !h2h.isEmpty()) {
                     h2hUsed = h2h;
                     int window = Math.min(DEFAULT_H2H_LIMIT, h2h.size());
+                    logger.info("[ANALYZE][H2H] pairsFound={} usingWindow={}", h2h.size(), window);
                     double sumW = 0.0, wHome = 0.0, wDraw = 0.0, wAway = 0.0, wBtts = 0.0, wOv25 = 0.0, wOv15 = 0.0;
                     for (int i = 0; i < window; i++) {
                         var m = h2h.get(i); // already sorted desc by date
@@ -308,6 +321,7 @@ public class MatchAnalysisService {
 
                         // Blend factor alpha based on number of H2H considered (up to 50% influence at N matches)
                         double alpha = Math.min(0.5, (window / (double) DEFAULT_H2H_LIMIT) * 0.5);
+                        logger.info("[ANALYZE][H2H_BLEND] alpha={} form={{H:{},D:{},A:{}}} h2h={{H:{},D:{},A:{}}}", String.format("%.2f", alpha), home, draw, away, h2hHomePct, h2hDrawPct, h2hAwayPct);
                         // Blend W/D/L
                         double bHome = (1 - alpha) * home + alpha * h2hHomePct;
                         double bAway = (1 - alpha) * away + alpha * h2hAwayPct;
@@ -503,6 +517,58 @@ public class MatchAnalysisService {
                 }
                 response.setHeadToHeadMatches(raw);
             } catch (Exception ignored) {}
+
+            // Safety: ensure H2H arrays are present when we have source matches
+            try {
+                java.util.List<com.chambua.vismart.model.Match> src = h2hUsed;
+                int srcCount = (src != null) ? src.size() : 0;
+                if (srcCount > 0) {
+                    // Ensure flat list exists
+                    if (response.getHeadToHeadMatches() == null || response.getHeadToHeadMatches().isEmpty()) {
+                        java.util.List<com.chambua.vismart.dto.HeadToHeadMatchDto> raw2 = new java.util.ArrayList<>();
+                        for (com.chambua.vismart.model.Match m : src) {
+                            String comp = (m.getLeague() != null && m.getLeague().getName() != null) ? m.getLeague().getName() : "";
+                            String hn = m.getHomeTeam() != null ? m.getHomeTeam().getName() : "";
+                            String an = m.getAwayTeam() != null ? m.getAwayTeam().getName() : "";
+                            int hg = m.getHomeGoals() != null ? m.getHomeGoals() : 0;
+                            int ag = m.getAwayGoals() != null ? m.getAwayGoals() : 0;
+                            raw2.add(new com.chambua.vismart.dto.HeadToHeadMatchDto(m.getDate(), comp, hn, an, hg, ag));
+                        }
+                        response.setHeadToHeadMatches(raw2);
+                    }
+                    // Ensure compact list exists inside summary
+                    if (response.getH2hSummary() == null) {
+                        MatchAnalysisResponse.H2HSummary s2 = new MatchAnalysisResponse.H2HSummary(Math.min(h2hWindow, srcCount), round2(h2hPpgHome), round2(h2hPpgAway), h2hBttsPct, h2hOv25Pct);
+                        java.util.List<MatchAnalysisResponse.H2HMatchItem> items2 = new java.util.ArrayList<>();
+                        int window2 = Math.min(h2hWindow, srcCount);
+                        for (int i = 0; i < window2; i++) {
+                            var m = src.get(i);
+                            String date = (m.getDate() != null) ? m.getDate().toString() : "";
+                            String hn = m.getHomeTeam() != null ? m.getHomeTeam().getName() : "";
+                            String an = m.getAwayTeam() != null ? m.getAwayTeam().getName() : "";
+                            String score = (m.getHomeGoals() != null ? m.getHomeGoals() : 0) + "-" + (m.getAwayGoals() != null ? m.getAwayGoals() : 0);
+                            items2.add(new MatchAnalysisResponse.H2HMatchItem(date, hn, an, score));
+                        }
+                        s2.setMatches(items2);
+                        response.setH2hSummary(s2);
+                    } else if (response.getH2hSummary().getMatches() == null || response.getH2hSummary().getMatches().isEmpty()) {
+                        java.util.List<MatchAnalysisResponse.H2HMatchItem> items3 = new java.util.ArrayList<>();
+                        int window3 = Math.min(h2hWindow, srcCount);
+                        for (int i = 0; i < window3; i++) {
+                            var m = src.get(i);
+                            String date = (m.getDate() != null) ? m.getDate().toString() : "";
+                            String hn = m.getHomeTeam() != null ? m.getHomeTeam().getName() : "";
+                            String an = m.getAwayTeam() != null ? m.getAwayTeam().getName() : "";
+                            String score = (m.getHomeGoals() != null ? m.getHomeGoals() : 0) + "-" + (m.getAwayGoals() != null ? m.getAwayGoals() : 0);
+                            items3.add(new MatchAnalysisResponse.H2HMatchItem(date, hn, an, score));
+                        }
+                        response.getH2hSummary().setMatches(items3);
+                    }
+                }
+                int compactCount = (response.getH2hSummary() != null && response.getH2hSummary().getMatches() != null) ? response.getH2hSummary().getMatches().size() : 0;
+                int flatCount = (response.getHeadToHeadMatches() != null) ? response.getHeadToHeadMatches().size() : 0;
+                logger.info("[ANALYZE][H2H][OUT] h2hUsed={} compact={} flat={}", srcCount, compactCount, flatCount);
+            } catch (Exception ignored2) {}
         }
 
         // Save to cache only for non-season-specific calls if IDs are available
@@ -519,6 +585,7 @@ public class MatchAnalysisService {
             }
         }
 
+        logger.info("[ANALYZE][RESP] W/D/L={{H:{},D:{},A:{}}} BTTS={} O2.5={} xG={{H:{},A:{}}} conf={} ms={}", response.getWinProbabilities().getHomeWin(), response.getWinProbabilities().getDraw(), response.getWinProbabilities().getAwayWin(), response.getBttsProbability(), response.getOver25Probability(), String.format("%.2f", response.getExpectedGoals().getHome()), String.format("%.2f", response.getExpectedGoals().getAway()), response.getConfidenceScore(), (System.currentTimeMillis()-t0));
         return response;
     }
 
@@ -596,15 +663,23 @@ public class MatchAnalysisService {
                     list = recentAll;
                 }
             } else if (teamName != null && !teamName.isBlank()) {
-                // Use repository helpers to constrain to latest season by team name
+                // Use repository helpers to constrain to the most recent season that actually has matches for this team
                 String q = teamName.trim();
                 java.util.List<Long> seasonIds = matchRepository.findSeasonIdsForTeamNameOrdered(q);
+                java.util.List<com.chambua.vismart.model.Match> chosen = java.util.Collections.emptyList();
                 if (seasonIds != null && !seasonIds.isEmpty()) {
-                    Long latestSeasonId = seasonIds.get(0);
-                    list = matchRepository.findRecentPlayedByTeamNameAndSeason(q, latestSeasonId);
-                } else {
-                    list = matchRepository.findRecentPlayedByTeamName(q);
+                    for (Long sid : seasonIds) {
+                        if (sid == null) continue;
+                        try {
+                            java.util.List<com.chambua.vismart.model.Match> attempt = matchRepository.findRecentPlayedByTeamNameAndSeason(q, sid);
+                            if (attempt != null && !attempt.isEmpty()) { chosen = attempt; break; }
+                        } catch (Exception ignored2) {}
+                    }
                 }
+                if (chosen == null || chosen.isEmpty()) {
+                    chosen = matchRepository.findRecentPlayedByTeamName(q);
+                }
+                list = chosen;
             }
         } catch (Exception ignored) {}
         if (list == null || list.isEmpty()) return new com.chambua.vismart.dto.FormSummary();

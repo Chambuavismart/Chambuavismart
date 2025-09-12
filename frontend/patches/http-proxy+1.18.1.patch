@@ -1,0 +1,31 @@
+diff --git a/node_modules/http-proxy/lib/http-proxy/index.js b/node_modules/http-proxy/lib/http-proxy/index.js
+index 1111111..2222222 100644
+--- a/node_modules/http-proxy/lib/http-proxy/index.js
++++ b/node_modules/http-proxy/lib/http-proxy/index.js
+@@ -1,12 +1,12 @@
+ 'use strict';
+ 
+ var http   = require('http'),
+     https  = require('https'),
+     url    = require('url'),
+-    util   = require('util'),
+-    extend = require('util')._extend;
++    util   = require('util'),
++    extend = Object.assign;
+ 
+ /**
+  * Expose `HttpProxy`.
+  */
+ 
+ module.exports = {
+@@ -50,7 +50,7 @@ function ProxyServer (options) {
+   options = options || {};
+ 
+   this.webPasses = webPasses; // regular http pass
+   this.wsPasses  = wsPasses;  // websocket pass
+-  this.options = extend({}, options);
++  this.options = extend({}, options);
+   this.state = { web: {}, ws: {} };
+ }
+ 
+ require('util').inherits(ProxyServer, require('events').EventEmitter);

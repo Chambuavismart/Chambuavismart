@@ -16,6 +16,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
 
       <div class="kpi-card">
         <div class="kpi-title">Total Matches Played</div>
+        <div class="section-desc">Total number of matches in Chambuavismart, across all seasons, leagues, and competitions.</div>
         <div class="kpi-value" [class.loading]="loading">
           <ng-container *ngIf="!loading; else loadingTpl">{{ total | number }}</ng-container>
         </div>
@@ -24,6 +25,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
 
       <div class="search-card">
         <label class="label" for="teamSearch">Search Team (min 3 chars)</label>
+        <div class="section-desc">Find a team to view their overall Played Matches stats across the entire dataset.</div>
         <input id="teamSearch" type="text" [(ngModel)]="query" (input)="onQueryChange(query)" placeholder="Start typing team name…" />
         <ul class="suggestions" *ngIf="suggestions.length > 0 && !selectedTeam">
           <li *ngFor="let s of suggestions" (click)="selectTeam(s)">{{ s.name }}<span *ngIf="s.country"> ({{ s.country }})</span></li>
@@ -36,6 +38,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
           <div class="team-name">{{ selectedTeam.name }}</div>
           <button class="clear" (click)="clearSelection()">Clear</button>
         </div>
+        <div class="section-desc">Team-wide summary based on all played matches recorded in Chambuavismart.</div>
         <div class="stat-row">
           <div class="stat-label">Matches involved (from Played matches):</div>
           <div class="stat-value" [class.loading]="loadingTeamCount">
@@ -63,11 +66,14 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
       <!-- H2H Search -->
       <div class="search-card">
         <label class="label" for="h2hSearch">Search Head-to-Head (min 3 chars)</label>
+        <div class="section-desc">Compare two teams to analyze their head-to-head history. Pick the order to set home/away orientation.</div>
         <input id="h2hSearch" type="text" [(ngModel)]="h2hQuery" (input)="onH2HQueryChange(h2hQuery)" placeholder="Type team(s) name…" />
         <ul class="suggestions" *ngIf="h2hSuggestions.length > 0 && !h2hSelected">
           <li *ngFor="let s of h2hSuggestions">
             <div class="h2h-option" (click)="selectH2H(s.teamA, s.teamB)">{{ s.teamA }} vs {{ s.teamB }}</div>
             <div class="h2h-option" (click)="selectH2H(s.teamB, s.teamA)">{{ s.teamB }} vs {{ s.teamA }}</div>
+            <div class="hint" *ngIf="showTeamHint">Teams not found in this league. Try another spelling or league.</div>
+            <div class="hint" *ngIf="showDataHint">No matches in this season.</div>
           </li>
         </ul>
         <div class="hint" *ngIf="h2hQuery && h2hQuery.length < 3">Keep typing…</div>
@@ -80,6 +86,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
             <div class="team-name">{{ h2hHome }}</div>
             <button class="clear" (click)="clearH2H()">Clear H2H</button>
           </div>
+          <div class="section-desc">Summary of all played matches for {{ h2hHome }} across Chambuavismart (all seasons and leagues). These figures are not limited to this H2H pairing.</div>
           <div class="stat-row">
             <div class="stat-label">Matches involved:</div>
             <div class="stat-value" [class.loading]="loadingHomeCount">
@@ -89,6 +96,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
           </div>
           <div class="breakdown">
             <div class="breakdown-title">Results Breakdown</div>
+            <div class="section-desc">Win/Draw/Loss share across all played matches. BTTS counts games where both teams scored; Over 2.5 counts games with 3 or more total goals.</div>
             <div class="breakdown-row" [class.loading]="loadingHomeBreakdown" *ngIf="!loadingHomeBreakdown; else loadingHomeBdTpl">
               <div [ngClass]="h2hClass('wins')">Wins: {{ homeBreakdown?.wins ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.wins, homeBreakdown?.total) }}%</span></div>
               <div [ngClass]="h2hClass('draws')">Draws: {{ homeBreakdown?.draws ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.draws, homeBreakdown?.total) }}%</span></div>
@@ -117,6 +125,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
           </div>
           <div class="breakdown">
             <div class="breakdown-title">Results Breakdown</div>
+            <div class="section-desc">Win/Draw/Loss share across all played matches. BTTS counts games where both teams scored; Over 2.5 counts games with 3 or more total goals.</div>
             <div class="breakdown-row" [class.loading]="loadingAwayBreakdown" *ngIf="!loadingAwayBreakdown; else loadingAwayBdTpl">
               <div [ngClass]="h2hClass('wins', false)">Wins: {{ awayBreakdown?.wins ?? 0 }} <span class="pct">{{ pct2(awayBreakdown?.wins, awayBreakdown?.total) }}%</span></div>
               <div [ngClass]="h2hClass('draws', false)">Draws: {{ awayBreakdown?.draws ?? 0 }} <span class="pct">{{ pct2(awayBreakdown?.draws, awayBreakdown?.total) }}%</span></div>
@@ -136,12 +145,14 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
       <!-- Insights Panel -->
       <div class="info-card" *ngIf="h2hSelected && predictiveOn">
         <div class="info-title">Insights</div>
+        <div class="section-desc">Quick narrative summary of key H2H signals including goal differential, current streaks, and trends.</div>
         <div class="info-text">{{ buildInsightsText() }}</div>
       </div>
 
       <!-- H2H GD KPI Card -->
       <div class="kpi-card" *ngIf="h2hSelected && predictiveOn">
         <div class="kpi-title">H2H Goal Differential ({{ h2hHome }} perspective)</div>
+        <div class="section-desc">Aggregate and average goal difference across valid head-to-head matches, viewed from {{ h2hHome }}’s perspective.</div>
         <div class="kpi-value" [class.loading]="false">
           <span title="Aggregate GD across valid H2H matches">{{ formatSigned(gdAggregate) }}</span>
         </div>
@@ -154,20 +165,25 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
       <!-- Form & Streaks (Last 5) -->
       <div class="profiles-grid" *ngIf="h2hSelected && predictiveOn">
         <div class="profile-card">
-          <div class="breakdown-title">{{ h2hHome }} — Last 5</div>
+          <div class="breakdown-title">{{ h2hHome }} — Last 5 <span *ngIf="homeForm">({{ (homeForm?.recentResults?.length || 0) }} matches available)</span></div>
+          <div class="section-desc">Recent head-to-head form vs {{ h2hAway }} (up to 5 matches). Points use W=3, D=1, L=0.</div>
           <div class="breakdown-row" *ngIf="homeForm; else homeFormLoading">
-            <div class="form-badges">
-              <span *ngFor="let r of (homeForm?.recentResults || []); let i = index" [ngClass]="badgeClass(r)">{{ r }}</span>
+            <div class="form-badges compact">
+              <span class="compact-seq">
+                <ng-container *ngFor="let r of (homeForm?.recentResults || []); let i = index">
+                  <span [ngClass]="letterClass(r)">{{ r }}</span><span *ngIf="i < (homeForm?.recentResults?.length || 0) - 1"></span>
+                </ng-container>
+              </span>
             </div>
             <div class="sparkline" *ngIf="homeForm?.ppgSeries?.length">
               <div class="spark-bar" *ngFor="let v of homeForm?.ppgSeries" [style.height]="barHeight(v)" [title]="v.toFixed(1)"></div>
             </div>
             <div class="ppg-fallback" *ngIf="homeForm?.ppgSeries?.length">PPG Trend: {{ formatPpgTrend(homeForm?.ppgSeries || []) }}</div>
-            <div class="hint" *ngIf="(homeForm?.recentResults?.length || 0) < 5">Insufficient data.</div>
           </div>
           <ng-template #homeFormLoading>
             <div class="hint">Loading…</div>
           </ng-template>
+          <div class="hint" *ngIf="homeForm && (homeForm?.recentResults?.length || 0) === 0">No recent matches found</div>
           <div class="breakdown-row" *ngIf="homeForm">
             <div>Streak: <strong>{{ formatStreak(homeForm?.currentStreak) }}</strong></div>
             <div>Win rate: <strong>{{ homeForm?.winRate ?? 0 }}%</strong></div>
@@ -175,20 +191,25 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
           </div>
         </div>
         <div class="profile-card">
-          <div class="breakdown-title">{{ h2hAway }} — Last 5</div>
+          <div class="breakdown-title">{{ h2hAway }} — Last 5 <span *ngIf="awayForm">({{ (awayForm?.recentResults?.length || 0) }} matches available)</span></div>
+          <div class="section-desc">Recent head-to-head form vs {{ h2hHome }} (up to 5 matches). Points use W=3, D=1, L=0.</div>
           <div class="breakdown-row" *ngIf="awayForm; else awayFormLoading">
-            <div class="form-badges">
-              <span *ngFor="let r of (awayForm?.recentResults || []); let i = index" [ngClass]="badgeClass(r)">{{ r }}</span>
+            <div class="form-badges compact">
+              <span class="compact-seq">
+                <ng-container *ngFor="let r of (awayForm?.recentResults || []); let i = index">
+                  <span [ngClass]="letterClass(r)">{{ r }}</span><span *ngIf="i < (awayForm?.recentResults?.length || 0) - 1"></span>
+                </ng-container>
+              </span>
             </div>
             <div class="sparkline" *ngIf="awayForm?.ppgSeries?.length">
               <div class="spark-bar" *ngFor="let v of awayForm?.ppgSeries" [style.height]="barHeight(v)" [title]="v.toFixed(1)"></div>
             </div>
             <div class="ppg-fallback" *ngIf="awayForm?.ppgSeries?.length">PPG Trend: {{ formatPpgTrend(awayForm?.ppgSeries || []) }}</div>
-            <div class="hint" *ngIf="(awayForm?.recentResults?.length || 0) < 5">Insufficient data.</div>
           </div>
           <ng-template #awayFormLoading>
             <div class="hint">Loading…</div>
           </ng-template>
+          <div class="hint" *ngIf="awayForm && (awayForm?.recentResults?.length || 0) === 0">No recent matches found</div>
           <div class="breakdown-row" *ngIf="awayForm">
             <div>Streak: <strong>{{ formatStreak(awayForm?.currentStreak) }}</strong></div>
             <div>Win rate: <strong>{{ awayForm?.winRate ?? 0 }}%</strong></div>
@@ -197,9 +218,11 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
         </div>
       </div>
 
-      <!-- H2H Matches Table -->
+      <!-- H2H Matches Table (Chosen Orientation) -->
       <div class="profile-card" *ngIf="h2hSelected">
         <div class="breakdown-title">Head-to-Head Results History</div>
+        <div class="section-desc">Complete list of prior meetings between the selected teams. Table shows the matches in the chosen orientation (home vs away). The total below includes both orientations.</div>
+        <div class="hint" *ngIf="h2hAnyCount !== null">Total head-to-head matches between {{ h2hHome }} and {{ h2hAway }} (all orientations): <strong>{{ h2hAnyCount }}</strong></div>
         <table class="h2h-table" *ngIf="h2hMatches?.length; else noH2HMatches">
           <thead>
             <tr>
@@ -208,6 +231,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
               <th>Home Team</th>
               <th>Away Team</th>
               <th>Result</th>
+              <th>Season</th>
             </tr>
           </thead>
           <tbody>
@@ -217,11 +241,43 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
               <td [ngClass]="homeClass(m)">{{ m.homeTeam }}</td>
               <td [ngClass]="awayClass(m)">{{ m.awayTeam }}</td>
               <td>{{ m.result }}</td>
+              <td>{{ m.season || 'Archive' }}</td>
             </tr>
           </tbody>
         </table>
         <ng-template #noH2HMatches>
-          <div class="hint">No matches found. Check if team names match stored records, or try swapping orientation.</div>
+          <div class="hint">No prior head-to-head matches</div>
+        </ng-template>
+      </div>
+
+      <!-- H2H Matches Table (All Orientations) -->
+      <div class="profile-card" *ngIf="h2hSelected">
+        <div class="breakdown-title">Head-to-Head Results (All Orientations)</div>
+        <div class="section-desc">This table includes matches where either team was home or away, combining both orientations for a complete history.</div>
+        <table class="h2h-table" *ngIf="h2hMatchesAll?.length; else noH2HAll">
+          <thead>
+            <tr>
+              <th>Year</th>
+              <th>Date</th>
+              <th>Home Team</th>
+              <th>Away Team</th>
+              <th>Result</th>
+              <th>Season</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let m of h2hMatchesAll">
+              <td>{{ m.year }}</td>
+              <td>{{ m.date }}</td>
+              <td [ngClass]="homeClass(m)">{{ m.homeTeam }}</td>
+              <td [ngClass]="awayClass(m)">{{ m.awayTeam }}</td>
+              <td>{{ m.result }}</td>
+              <td>{{ m.season || 'Archive' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <ng-template #noH2HAll>
+          <div class="hint">No matches found across both orientations</div>
         </ng-template>
       </div>
 
@@ -239,6 +295,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
     .info-card { background:#051426; border:1px solid #1e3a5f; border-radius:12px; padding:16px; margin-top:16px; }
     .info-title { color:#93c5fd; font-weight:700; margin-bottom:6px; }
     .info-text { color:#cbd5e1; line-height:1.4; }
+    .section-desc { color:#9aa4b2; font-size:12px; margin:4px 0 8px; }
     .kpi-value { font-size: 40px; font-weight: 800; letter-spacing: .5px; color: #19b562; min-height: 48px; }
     .kpi-value.loading { color: #6b7280; }
     .label { display:block; color:#9fb6d4; margin-bottom:8px; }
@@ -263,6 +320,11 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
     .breakdown-row .pct { color:#9fb6d4; margin-left:6px; }
     .profiles-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .form-badges { display:flex; gap:8px; align-items:center; }
+    .form-badges.compact { gap:4px; }
+    .compact-seq { font-weight:800; letter-spacing:2px; font-size:16px; }
+    .letter-win { color:#10b981; }
+    .letter-draw { color:#f59e0b; }
+    .letter-loss { color:#ef4444; }
     .sparkline { display:flex; gap:4px; align-items:flex-end; min-height:16px; }
     .spark-bar { width:6px; background:#19b562; border-radius:2px; opacity:0.9; }
     .ppg-fallback { color:#9fb6d4; font-size:12px; }
@@ -307,8 +369,16 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   h2hHome = '';
   h2hAway = '';
   h2hMatches: H2HMatchDto[] = [];
+  h2hMatchesAll: H2HMatchDto[] = [];
+  h2hAnyCount: number | null = null;
   homeForm: FormSummaryDto | null = null;
   awayForm: FormSummaryDto | null = null;
+  // UI hints
+  showTeamHint = false;
+  showDataHint = false;
+  // league/season context (fallbacks for H2H form call)
+  leagueId: number = ((window as any).__LEAGUE_ID__ as number) || 1; // default EPL=1
+  seasonName: string = ((window as any).__SEASON_NAME__ as string) || '2025/2026';
   // GD summary (client-side computation for UI, oriented to h2hHome)
   gdAggregate: number | null = null;
   gdAverage: number | null = null;
@@ -365,12 +435,9 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         // If user already selected H2H and features just turned on, backfill
         if (this.h2hSelected && this.predictiveOn) {
           // Fetch forms if missing
-          if (!this.homeForm && this.h2hHome) {
-            this.matchService.getFormByTeamName(this.h2hHome).subscribe({ next: v => this.homeForm = v });
-          }
-          if (!this.awayForm && this.h2hAway) {
-            this.matchService.getFormByTeamName(this.h2hAway).subscribe({ next: v => this.awayForm = v });
-          }
+          // ID-only flow: no fallback name-based form fetching here.
+          if (!this.homeForm) { this.homeForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 }; }
+          if (!this.awayForm) { this.awayForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 }; }
           // Compute GD if not computed
           if (this.gdAggregate === null && this.h2hMatches?.length) {
             this.computeGDFromMatches();
@@ -443,6 +510,8 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.h2hHome = '';
     this.h2hAway = '';
     this.h2hMatches = [];
+    this.showTeamHint = false;
+    this.showDataHint = false;
     this.h2hQuery$.next(q || '');
   }
 
@@ -472,10 +541,69 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.gdInsufficient = valid < 3;
   }
 
-  selectH2H(home: string, away: string) {
+  async selectH2H(home: any, away: any) {
+    this.h2hAnyCount = null;
+    // Robustly extract team names from string or object inputs
+    const getTeamName = (t: any): string | null => {
+      if (!t) return null;
+      if (typeof t === 'string') return t.trim();
+      const tryProps = ['name', 'teamName', 'label', 'value', 'text'];
+      for (const p of tryProps) {
+        const v = (t as any)[p];
+        if (typeof v === 'string') return v.trim();
+      }
+      // Single-key object with string value
+      if (typeof t === 'object') {
+        const keys = Object.keys(t);
+        if (keys.length === 1) {
+          const v = (t as any)[keys[0]];
+          if (typeof v === 'string') return v.trim();
+        }
+      }
+      // Fallback: try to stringify and extract common fields
+      try {
+        const s = JSON.stringify(t);
+        const m = s.match(/"(?:name|teamName|label|value|text)"\s*:\s*"([^"]+)"/);
+        if (m && m[1]) return m[1].trim();
+      } catch (_) { /* ignore */ }
+      console.error('[PlayedMatches] Unexpected team structure:', JSON.stringify(t, null, 2));
+      return null;
+    };
+
+    // Precise raw log for diagnostics
+    try {
+      console.log('[PlayedMatches] Raw H2H input:', JSON.stringify({ home, away }));
+    } catch {
+      console.log('[PlayedMatches] Raw H2H input:', { home, away });
+    }
+
+    let homeName = getTeamName(home);
+    let awayName = getTeamName(away);
+
+    // Final coercion safeguard to avoid passing objects or "[object Object]" to services
+    const coerce = (v: any): string | null => {
+      if (typeof v === 'string') return v.trim();
+      try {
+        const s = String(v).trim();
+        if (!s || s.toLowerCase() === '[object object]') return null;
+        return s;
+      } catch {
+        return null;
+      }
+    };
+    homeName = coerce(homeName);
+    awayName = coerce(awayName);
+
+    if (!homeName || !awayName || homeName.length < 2 || awayName.length < 2) {
+      console.error('[PlayedMatches] Invalid team names from:', { home, away, homeName, awayName });
+      this.showTeamHint = true;
+      return;
+    }
+    console.log('[PlayedMatches] Extracted names for league', this.leagueId, ':', JSON.stringify({ homeName, awayName }, null, 2));
+
     this.h2hSelected = true;
-    this.h2hHome = home;
-    this.h2hAway = away;
+    this.h2hHome = homeName;
+    this.h2hAway = awayName;
     this.h2hSuggestions = [];
 
     // Load profiles for each side
@@ -483,40 +611,118 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.loadingHomeBreakdown = this.loadingAwayBreakdown = true;
     this.homeForm = null; this.awayForm = null;
 
-    this.matchService.getPlayedTotalByTeamName(home).subscribe({
+    this.matchService.getPlayedTotalByTeamName(homeName).subscribe({
       next: v => { this.homeCount = v ?? 0; this.loadingHomeCount = false; },
       error: () => { this.homeCount = 0; this.loadingHomeCount = false; }
     });
-    this.matchService.getResultsBreakdownByTeamName(home).subscribe({
+    this.matchService.getResultsBreakdownByTeamName(homeName).subscribe({
       next: b => { this.homeBreakdown = b; this.loadingHomeBreakdown = false; },
       error: () => { this.homeBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0 }; this.loadingHomeBreakdown = false; }
     });
 
-    this.matchService.getPlayedTotalByTeamName(away).subscribe({
+    this.matchService.getPlayedTotalByTeamName(awayName).subscribe({
       next: v => { this.awayCount = v ?? 0; this.loadingAwayCount = false; },
       error: () => { this.awayCount = 0; this.loadingAwayCount = false; }
     });
-    this.matchService.getResultsBreakdownByTeamName(away).subscribe({
+    this.matchService.getResultsBreakdownByTeamName(awayName).subscribe({
       next: b => { this.awayBreakdown = b; this.loadingAwayBreakdown = false; },
       error: () => { this.awayBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0 }; this.loadingAwayBreakdown = false; }
     });
 
     // Load last-5 form for each team (only if feature flag ON)
     if (this.predictiveOn) {
-      this.matchService.getFormByTeamName(home).subscribe({
-        next: f => { this.homeForm = f; },
-        error: () => { this.homeForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 }; }
-      });
-      this.matchService.getFormByTeamName(away).subscribe({
-        next: f => { this.awayForm = f; },
-        error: () => { this.awayForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 }; }
-      });
+      this.homeForm = null; this.awayForm = null;
+
+      // Resolve league/season context
+      let seasonId: number | null = (window as any).__SEASON_ID__ ?? null;
+      if (seasonId == null || typeof seasonId !== 'number') {
+        try {
+          const sid = await this.matchService.getSeasonId(this.leagueId, this.seasonName).toPromise();
+          if (typeof sid === 'number') seasonId = sid;
+        } catch (e) {
+          console.warn('[PlayedMatches] seasonId resolution failed', e);
+        }
+      }
+      if (seasonId == null || typeof seasonId !== 'number') {
+        console.warn('[PlayedMatches] No valid seasonId; skipping Last-5. Check league/season context.');
+        this.showDataHint = true;
+      } else {
+        // Resolve team IDs scoped to league
+        let homeId: number | null = null;
+        let awayId: number | null = null;
+        try {
+          homeId = await this.teamService.getScopedTeamId(homeName, this.leagueId).toPromise();
+          awayId = await this.teamService.getScopedTeamId(awayName, this.leagueId).toPromise();
+        } catch (e) {
+          console.warn('[PlayedMatches] league-scoped team id resolution failed', e);
+        }
+
+        if (typeof homeId === 'number' && typeof awayId === 'number') {
+          console.debug('[PlayedMatches] Resolved IDs', { homeId, awayId, seasonId });
+          console.debug('[PlayedMatches] calling getH2HFormByIds', { homeId, awayId, seasonId });
+          this.matchService.getH2HFormByIds(homeId, awayId, seasonId, 5).subscribe({
+            next: list => {
+              const safe = Array.isArray(list) ? list : [];
+              const toSummary = (team: any, teamLabel: string): FormSummaryDto => {
+                const seqStr: string = team?.last5?.streak || '0';
+                const recent: string[] = [];
+                const matches = team?.matches || [];
+                for (let i = 0; i < Math.min(5, matches.length); i++) {
+                  const m = matches[i];
+                  const rs = (m?.result || '').split('-');
+                  if (rs.length === 2) {
+                    const hg = parseInt(rs[0], 10); const ag = parseInt(rs[1], 10);
+                    if (!Number.isNaN(hg) && !Number.isNaN(ag)) {
+                      const my = (m?.homeTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0
+                        ? hg : ((m?.awayTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : hg);
+                      const opp = (m?.homeTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0
+                        ? ag : ((m?.awayTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ag);
+                      if (my > opp) recent.push('W'); else if (my === opp) recent.push('D'); else recent.push('L');
+                    }
+                  }
+                }
+                const winRate = team?.last5?.winRate ?? 0;
+                // Compute points precisely from recent results: W=3, D=1, L=0.
+                // Avoid using rounded PPG * count which can misestimate with partial data.
+                const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
+                return { recentResults: recent, currentStreak: seqStr, winRate: winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
+              };
+              const homeEntry = safe.find(t => Number(t?.teamId) === homeId) || safe.find(t => t?.teamName?.toLowerCase?.() === homeName.toLowerCase()) || null;
+              const awayEntry = safe.find(t => Number(t?.teamId) === awayId) || safe.find(t => t?.teamName?.toLowerCase?.() === awayName.toLowerCase()) || null;
+              this.homeForm = homeEntry ? toSummary(homeEntry, homeName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+              this.awayForm = awayEntry ? toSummary(awayEntry, awayName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+            },
+            error: (err) => {
+              console.error('[PlayedMatches] getH2HFormByIds failed', err);
+              this.homeForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+              this.awayForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+            }
+          });
+        } else {
+          console.warn('[PlayedMatches] Could not resolve team IDs in league for', { leagueId: this.leagueId, home: homeName, away: awayName });
+          this.showTeamHint = true;
+          this.homeForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+          this.awayForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+        }
+      }
     }
 
     // Load H2H matches respecting orientation
-    this.matchService.getH2HMatches(home, away).subscribe({
+    this.matchService.getH2HMatches(homeName, awayName).subscribe({
       next: list => { this.h2hMatches = list ?? []; if (this.predictiveOn) this.computeGDFromMatches(); },
       error: () => { this.h2hMatches = []; if (this.predictiveOn) this.computeGDFromMatches(); }
+    });
+
+    // Load total H2H count regardless of orientation
+    this.matchService.getH2HCountAnyOrientation(homeName, awayName).subscribe({
+      next: c => { this.h2hAnyCount = (typeof c === 'number') ? c : 0; },
+      error: () => { this.h2hAnyCount = 0; }
+    });
+
+    // Load H2H matches across both orientations
+    this.matchService.getH2HMatchesAnyOrientation(homeName, awayName).subscribe({
+      next: list => { this.h2hMatchesAll = list ?? []; },
+      error: () => { this.h2hMatchesAll = []; }
     });
   }
 
@@ -525,11 +731,15 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.h2hHome = '';
     this.h2hAway = '';
     this.h2hMatches = [];
+    this.h2hMatchesAll = [];
     this.homeForm = null;
     this.awayForm = null;
     this.gdAggregate = null;
     this.gdAverage = null;
     this.gdInsufficient = true;
+    this.showTeamHint = false;
+    this.showDataHint = false;
+    this.h2hAnyCount = null;
   }
 
   pct(v?: number | null): string {
@@ -616,6 +826,13 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     if (v === 'D') return 'badge badge-draw';
     if (v === 'L') return 'badge badge-loss';
     return 'badge';
+  }
+  letterClass(r: string | null | undefined): string {
+    const v = (r || '').toUpperCase();
+    if (v === 'W') return 'letter-win';
+    if (v === 'D') return 'letter-draw';
+    if (v === 'L') return 'letter-loss';
+    return '';
   }
   formatStreak(s: string | null | undefined): string {
     if (!s) return '—';
