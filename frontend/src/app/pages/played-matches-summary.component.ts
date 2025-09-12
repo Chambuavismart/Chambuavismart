@@ -4,7 +4,9 @@ import { MatchService, TeamBreakdownDto, H2HSuggestion, H2HMatchDto, FormSummary
 import { ConfigService, FlagsDto } from '../services/config.service';
 import { TeamService, TeamSuggestion } from '../services/team.service';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil } from 'rxjs';
+import { PoissonService, Predictions } from '../services/poisson.service';
 
 @Component({
   selector: 'app-played-matches-summary',
@@ -12,7 +14,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
   imports: [CommonModule, FormsModule],
   template: `
     <section class="container">
-      <h1>Played Matches</h1>
+      <h1>Fixtures Analysis</h1>
 
       <div class="kpi-card">
         <div class="kpi-title">Total Matches Played</div>
@@ -25,7 +27,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
 
       <div class="search-card">
         <label class="label" for="teamSearch">Search Team (min 3 chars)</label>
-        <div class="section-desc">Find a team to view their overall Played Matches stats across the entire dataset.</div>
+        <div class="section-desc">Find a team to view their overall Fixtures Analysis stats across the entire dataset.</div>
         <input id="teamSearch" type="text" [(ngModel)]="query" (input)="onQueryChange(query)" placeholder="Start typing team name…" />
         <ul class="suggestions" *ngIf="suggestions.length > 0 && !selectedTeam">
           <li *ngFor="let s of suggestions" (click)="selectTeam(s)">{{ s.name }}<span *ngIf="s.country"> ({{ s.country }})</span></li>
@@ -40,7 +42,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
         </div>
         <div class="section-desc">Team-wide summary based on all played matches recorded in Chambuavismart.</div>
         <div class="stat-row">
-          <div class="stat-label">Matches involved (from Played matches):</div>
+          <div class="stat-label">Matches involved (from Fixtures Analysis):</div>
           <div class="stat-value" [class.loading]="loadingTeamCount">
             <ng-container *ngIf="!loadingTeamCount; else loadingTpl2">{{ teamCount }}</ng-container>
             <ng-template #loadingTpl2>…</ng-template>
@@ -57,6 +59,9 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
             <div>BTTS: {{ breakdown?.btts ?? 0 }} <span class="pct">{{ pct(breakdown?.btts) }}%</span></div>
           </div>
           <div class="breakdown-row" [class.loading]="loadingBreakdown" *ngIf="!loadingBreakdown">
+            <div>Over 1.5: {{ breakdown?.over15 ?? 0 }} <span class="pct">{{ pct(breakdown?.over15) }}%</span></div>
+          </div>
+          <div class="breakdown-row" [class.loading]="loadingBreakdown" *ngIf="!loadingBreakdown">
             <div>Over 2.5: {{ breakdown?.over25 ?? 0 }} <span class="pct">{{ pct(breakdown?.over25) }}%</span></div>
           </div>
           <ng-template #loadingTpl3>Loading…</ng-template>
@@ -70,8 +75,8 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
         <input id="h2hSearch" type="text" [(ngModel)]="h2hQuery" (input)="onH2HQueryChange(h2hQuery)" placeholder="Type team(s) name…" />
         <ul class="suggestions" *ngIf="h2hSuggestions.length > 0 && !h2hSelected">
           <li *ngFor="let s of h2hSuggestions">
-            <div class="h2h-option" (click)="selectH2H(s.teamA, s.teamB)">{{ s.teamA }} vs {{ s.teamB }}</div>
-            <div class="h2h-option" (click)="selectH2H(s.teamB, s.teamA)">{{ s.teamB }} vs {{ s.teamA }}</div>
+            <div class="h2h-option" (click)="runHeadToHeadSearch(s.teamA, s.teamB)">{{ s.teamA }} vs {{ s.teamB }}</div>
+            <div class="h2h-option" (click)="runHeadToHeadSearch(s.teamB, s.teamA)">{{ s.teamB }} vs {{ s.teamA }}</div>
             <div class="hint" *ngIf="showTeamHint">Teams not found in this league. Try another spelling or league.</div>
             <div class="hint" *ngIf="showDataHint">No matches in this season.</div>
           </li>
@@ -106,6 +111,9 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
               <div [ngClass]="h2hClass('btts')">BTTS: {{ homeBreakdown?.btts ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.btts, homeBreakdown?.total) }}%</span></div>
             </div>
             <div class="breakdown-row" [class.loading]="loadingHomeBreakdown" *ngIf="!loadingHomeBreakdown">
+              <div [ngClass]="h2hClass('over15')">Over 1.5: {{ homeBreakdown?.over15 ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.over15, homeBreakdown?.total) }}%</span></div>
+            </div>
+            <div class="breakdown-row" [class.loading]="loadingHomeBreakdown" *ngIf="!loadingHomeBreakdown">
               <div [ngClass]="h2hClass('over25')">Over 2.5: {{ homeBreakdown?.over25 ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.over25, homeBreakdown?.total) }}%</span></div>
             </div>
             <ng-template #loadingHomeBdTpl>Loading…</ng-template>
@@ -133,6 +141,9 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
             </div>
             <div class="breakdown-row" [class.loading]="loadingAwayBreakdown" *ngIf="!loadingAwayBreakdown">
               <div [ngClass]="h2hClass('btts', false)">BTTS: {{ awayBreakdown?.btts ?? 0 }} <span class="pct">{{ pct2(awayBreakdown?.btts, awayBreakdown?.total) }}%</span></div>
+            </div>
+            <div class="breakdown-row" [class.loading]="loadingAwayBreakdown" *ngIf="!loadingAwayBreakdown">
+              <div [ngClass]="h2hClass('over15', false)">Over 1.5: {{ awayBreakdown?.over15 ?? 0 }} <span class="pct">{{ pct2(awayBreakdown?.over15, awayBreakdown?.total) }}%</span></div>
             </div>
             <div class="breakdown-row" [class.loading]="loadingAwayBreakdown" *ngIf="!loadingAwayBreakdown">
               <div [ngClass]="h2hClass('over25', false)">Over 2.5: {{ awayBreakdown?.over25 ?? 0 }} <span class="pct">{{ pct2(awayBreakdown?.over25, awayBreakdown?.total) }}%</span></div>
@@ -281,6 +292,48 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
         </ng-template>
       </div>
 
+      <!-- Analyse this fixture button and predictions -->
+      <div class="profile-card" *ngIf="h2hSelected">
+        <div class="profile-header">
+          <div class="breakdown-title">Analyse this fixture</div>
+          <div style="flex:1"></div>
+          <button
+            data-test="analyse-button"
+            class="clear"
+            [disabled]="!(h2hHome && h2hHome.length >= 3 && h2hAway && h2hAway.length >= 3)"
+            (click)="analyseFixture()"
+            title="Compute Poisson predictions for this H2H"
+          >Analyse this fixture</button>
+        </div>
+        <div class="section-desc">Computes win/draw/loss, BTTS, Over 1.5 and Over 2.5 probabilities using a Poisson model based on the head-to-head goal averages and each team's overall sample size.</div>
+
+        <ng-container *ngIf="predictions; else noPreds">
+          <div class="kpi-card" data-test="predictions-table">
+            <div class="kpi-title">Fixture Analysis Results</div>
+            <table class="h2h-table">
+              <thead>
+                <tr>
+                  <th>Outcome</th>
+                  <th>Probability</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>{{ h2hHome }} Win</td><td>{{ predictions?.teamAWin }}%</td></tr>
+                <tr><td>Draw</td><td>{{ predictions?.draw }}%</td></tr>
+                <tr><td>{{ h2hAway }} Win</td><td>{{ predictions?.teamBWin }}%</td></tr>
+                <tr><td>Both Teams To Score (BTTS)</td><td>{{ predictions?.btts }}%</td></tr>
+                <tr><td>Over 2.5 Goals</td><td>{{ predictions?.over25 }}%</td></tr>
+                <tr><td>Over 1.5 Goals</td><td>{{ predictions?.over15 }}%</td></tr>
+              </tbody>
+            </table>
+            <div class="hint">Expected goals used: λ({{ h2hHome }}) = {{ predictions?.lambdaA }}, λ({{ h2hAway }}) = {{ predictions?.lambdaB }}</div>
+          </div>
+        </ng-container>
+        <ng-template #noPreds>
+          <div class="hint">Select a valid H2H pair and click "Analyse this fixture" to see predictions.</div>
+        </ng-template>
+      </div>
+
     </section>
   `,
   styles: [`
@@ -345,6 +398,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   private matchService = inject(MatchService);
   private teamService = inject(TeamService);
   private configService = inject(ConfigService);
+  private route = inject(ActivatedRoute);
 
   total = 0;
   loading = true;
@@ -389,9 +443,29 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   homeBreakdown: TeamBreakdownDto | null = null; awayBreakdown: TeamBreakdownDto | null = null;
   loadingHomeBreakdown = false; loadingAwayBreakdown = false;
 
+  // Predictions via Poisson
+  predictions: Predictions | null = null;
+  private poisson = inject(PoissonService);
+
+  analyseFixture(): void {
+    if (!(this.h2hHome && this.h2hAway)) {
+      this.predictions = null;
+      return;
+    }
+    const teamA = { name: this.h2hHome, matchesInvolved: this.homeCount || (this.homeBreakdown as any)?.total || 1 };
+    const teamB = { name: this.h2hAway, matchesInvolved: this.awayCount || (this.awayBreakdown as any)?.total || 1 };
+    const h2hData = (this.h2hMatchesAll && this.h2hMatchesAll.length > 0) ? this.h2hMatchesAll : this.h2hMatches;
+    this.predictions = this.poisson.calculatePredictions(teamA, teamB, h2hData as any[], {});
+  }
+
   private destroy$ = new Subject<void>();
   private query$ = new Subject<string>();
   private h2hQuery$ = new Subject<string>();
+
+  // Deep-link buffering to avoid early execution before flags/data are ready
+  private _pendingHome: string | null = null;
+  private _pendingAway: string | null = null;
+  private _deepLinkHandled: boolean = false;
 
   // --- Insights composition (client-side for Played Matches tab) ---
   buildInsightsText(): string {
@@ -428,10 +502,21 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Track flags readiness to ensure deep-link triggers after predictive flag is known
+    let flagsReady = false;
+    const tryProcessDeepLink = () => {
+      if (!flagsReady) return;
+      if (this._pendingHome && this._pendingAway && !this._deepLinkHandled) {
+        this._deepLinkHandled = true;
+        this.runHeadToHeadSearch(this._pendingHome, this._pendingAway);
+      }
+    };
+
     // Load flags
     this.configService.getFlags().pipe(takeUntil(this.destroy$)).subscribe({
       next: (f) => {
         this.predictiveOn = !!f?.predictiveH2HPhase1Enabled;
+        flagsReady = true;
         // If user already selected H2H and features just turned on, backfill
         if (this.h2hSelected && this.predictiveOn) {
           // Fetch forms if missing
@@ -443,8 +528,10 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
             this.computeGDFromMatches();
           }
         }
+        // Process any pending deep-link now that flags are ready
+        tryProcessDeepLink();
       },
-      error: () => { this.predictiveOn = false; }
+      error: () => { this.predictiveOn = false; flagsReady = true; tryProcessDeepLink(); }
     });
 
     this.matchService.getTotalPlayedMatches().subscribe({
@@ -473,6 +560,20 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       .subscribe(list => {
         this.h2hSuggestions = list ?? [];
       });
+
+    // Auto-H2H from query params (e.g., ?h2hHome=Nantes&h2hAway=Lorient)
+    this.route.queryParams
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(params => {
+        const home = params?.['h2hHome'];
+        const away = params?.['h2hAway'];
+        if (home && away && typeof home === 'string' && typeof away === 'string') {
+          // Buffer params and process after flags are ready to avoid running before dataset/flags load
+          this._pendingHome = home;
+          this._pendingAway = away;
+          tryProcessDeepLink();
+        }
+      });
   }
 
   onQueryChange(q: string) {
@@ -495,7 +596,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     // Get breakdown across all matches played (all seasons)
     this.matchService.getResultsBreakdownByTeamName(s.name).subscribe({
       next: b => { this.breakdown = b; this.loadingBreakdown = false; },
-      error: () => { this.breakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0 }; this.loadingBreakdown = false; }
+      error: () => { this.breakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0, over15: 0 }; this.loadingBreakdown = false; }
     });
   }
 
@@ -539,6 +640,20 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.gdAggregate = valid > 0 ? agg : null;
     this.gdAverage = valid > 0 ? +(agg / valid).toFixed(2) : null;
     this.gdInsufficient = valid < 3;
+  }
+
+  // Unified wrapper to ensure both manual search and deep-link follow the same workflow
+  runHeadToHeadSearch(home: string, away: string) {
+    const h = (home ?? '').toString().trim();
+    const a = (away ?? '').toString().trim();
+    if (!h || !a) {
+      this.showTeamHint = true;
+      return;
+    }
+    // Pre-fill the query input so user sees what was auto-searched, preserving orientation
+    this.h2hQuery = `${h} vs ${a}`;
+    // Delegate to the internal worker which performs full fetching and calculations
+    this.selectH2H(h, a);
   }
 
   async selectH2H(home: any, away: any) {
@@ -617,7 +732,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     });
     this.matchService.getResultsBreakdownByTeamName(homeName).subscribe({
       next: b => { this.homeBreakdown = b; this.loadingHomeBreakdown = false; },
-      error: () => { this.homeBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0 }; this.loadingHomeBreakdown = false; }
+      error: () => { this.homeBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0, over15: 0 }; this.loadingHomeBreakdown = false; }
     });
 
     this.matchService.getPlayedTotalByTeamName(awayName).subscribe({
@@ -626,7 +741,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     });
     this.matchService.getResultsBreakdownByTeamName(awayName).subscribe({
       next: b => { this.awayBreakdown = b; this.loadingAwayBreakdown = false; },
-      error: () => { this.awayBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0 }; this.loadingAwayBreakdown = false; }
+      error: () => { this.awayBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0, over15: 0 }; this.loadingAwayBreakdown = false; }
     });
 
     // Load last-5 form for each team (only if feature flag ON)
@@ -789,7 +904,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   }
 
   // --- H2H percentage comparison helpers for coloring ---
-  private pctFor(b?: TeamBreakdownDto | null, key?: 'wins'|'draws'|'losses'|'btts'|'over25'): number {
+  private pctFor(b?: TeamBreakdownDto | null, key?: 'wins'|'draws'|'losses'|'btts'|'over25'|'over15'): number {
     if (!b || !key) return 0;
     const total = b.total ?? 0;
     const val = (b as any)[key] ?? 0;
@@ -797,7 +912,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     return Math.round((val / total) * 100);
   }
 
-  h2hClass(key: 'wins'|'draws'|'losses'|'btts'|'over25', isHome: boolean = true): string | undefined {
+  h2hClass(key: 'wins'|'draws'|'losses'|'btts'|'over25'|'over15', isHome: boolean = true): string | undefined {
     const hp = this.pctFor(this.homeBreakdown, key);
     const ap = this.pctFor(this.awayBreakdown, key);
     if (hp === ap) return 'stat-equal';

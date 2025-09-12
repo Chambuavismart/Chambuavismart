@@ -7,6 +7,7 @@ public class TeamResultsBreakdownResponse {
     private long losses;
     private long btts;
     private long over25;
+    private long over15;
 
     public TeamResultsBreakdownResponse() {}
 
@@ -25,13 +26,14 @@ public class TeamResultsBreakdownResponse {
         this.btts = btts;
     }
 
-    public TeamResultsBreakdownResponse(long total, long wins, long draws, long losses, long btts, long over25) {
+    public TeamResultsBreakdownResponse(long total, long wins, long draws, long losses, long btts, long over25, long over15) {
         this.total = total;
         this.wins = wins;
         this.draws = draws;
         this.losses = losses;
         this.btts = btts;
         this.over25 = over25;
+        this.over15 = over15;
     }
 
     public long getTotal() { return total; }
@@ -51,4 +53,7 @@ public class TeamResultsBreakdownResponse {
 
     public long getOver25() { return over25; }
     public void setOver25(long over25) { this.over25 = over25; }
+
+    public long getOver15() { return over15; }
+    public void setOver15(long over15) { this.over15 = over15; }
 }

@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { getApiBase } from './api-base';
 
-export interface TeamBreakdownDto { total: number; wins: number; draws: number; losses: number; btts: number; over25: number; }
+export interface TeamBreakdownDto { total: number; wins: number; draws: number; losses: number; btts: number; over25: number; over15: number; }
 export interface H2HSuggestion { teamA: string; teamB: string; }
 export interface H2HMatchDto { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; season: string | null; }
 export interface FormSummaryDto { recentResults: string[]; currentStreak: string; winRate: number; pointsEarned: number; ppgSeries?: number[]; }

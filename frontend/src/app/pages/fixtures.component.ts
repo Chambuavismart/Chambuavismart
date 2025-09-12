@@ -98,12 +98,13 @@ import { forkJoin } from 'rxjs';
 })
 export class FixturesComponent implements OnInit, OnDestroy {
   openAnalysis(f: FixtureDTO) {
-    const params = new URLSearchParams({
-      leagueId: String(this.selectedLeagueId ?? ''),
-      homeTeamName: f.homeTeam,
-      awayTeamName: f.awayTeam
+    // Navigate to Played Matches tab with pre-filled H2H teams, preserving orientation
+    this.router.navigate(['/played-matches-summary'], {
+      queryParams: {
+        h2hHome: f?.homeTeam ?? '',
+        h2hAway: f?.awayTeam ?? ''
+      }
     });
-    window.location.href = `/match-analysis?${params.toString()}`;
   }
   private api = inject(FixturesService);
   private router = inject(Router);

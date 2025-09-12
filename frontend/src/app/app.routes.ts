@@ -24,7 +24,7 @@ export const routes: Routes = [
   { path: 'btts-over25', canActivate: [authGuard], loadComponent: () => import('./pages/btts-over25.component').then(m => m.BttsOver25Component), title: 'BTTS & Over 2.5' },
   { path: 'wekelea-baskets', canActivate: [authGuard], loadComponent: () => import('./pages/wekelea-baskets.component').then(m => m.WekeleaBasketsComponent), title: 'Wekelea Baskets' },
   { path: 'team-search', canActivate: [authGuard], loadComponent: () => import('./pages/team-search.component').then(m => m.TeamSearchComponent), title: 'Team Search' },
-  { path: 'played-matches-summary', canActivate: [authGuard], loadComponent: () => import('./pages/played-matches-summary.component').then(m => m.PlayedMatchesSummaryComponent), title: 'Played Matches' },
+  { path: 'played-matches-summary', canActivate: [authGuard], loadComponent: () => import('./pages/played-matches-summary.component').then(m => m.PlayedMatchesSummaryComponent), title: 'Fixtures Analysis' },
   { path: 'fixtures', canActivate: [authGuard], component: FixturesComponent, title: 'Fixtures' },
   { path: 'teams', canActivate: [authGuard], component: TeamsComponent, title: 'Teams' },
   { path: 'matchup', canActivate: [authGuard], component: MatchupAnalyzerComponent, title: 'Matchup Analyzer' },

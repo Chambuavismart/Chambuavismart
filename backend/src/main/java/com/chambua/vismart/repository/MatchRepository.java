@@ -125,6 +125,10 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (coalesce(m.homeGoals,0) + coalesce(m.awayGoals,0)) >= 3 and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName))")
     long countOver25ByTeamName(@Param("teamName") String teamName);
 
+    // Over 1.5 goals for matches involving a given team name across all leagues/seasons
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (coalesce(m.homeGoals,0) + coalesce(m.awayGoals,0)) >= 2 and (lower(m.homeTeam.name) = lower(:teamName) or lower(m.awayTeam.name) = lower(:teamName))")
+    long countOver15ByTeamName(@Param("teamName") String teamName);
+
     // Last N played matches for a given team id across all leagues/seasons (most recent first)
     @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) order by m.date desc, m.round desc")
     List<Match> findRecentPlayedByTeamId(@Param("teamId") Long teamId);

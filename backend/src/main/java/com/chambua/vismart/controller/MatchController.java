@@ -63,7 +63,7 @@ public class MatchController {
 
     @GetMapping("/played/team/by-name/breakdown")
     public TeamResultsBreakdownResponse getResultsBreakdownByTeamName(@RequestParam("name") String name) {
-        if (name == null || name.trim().isEmpty()) return new TeamResultsBreakdownResponse(0,0,0,0,0,0);
+        if (name == null || name.trim().isEmpty()) return new TeamResultsBreakdownResponse(0,0,0,0,0,0,0);
         String q = name.trim();
         long total = matchRepository.countPlayedByTeamName(q);
         long wins = matchRepository.countWinsByTeamName(q);
@@ -71,12 +71,13 @@ public class MatchController {
         long losses = matchRepository.countLossesByTeamName(q);
         long btts = matchRepository.countBttsByTeamName(q);
         long over25 = matchRepository.countOver25ByTeamName(q);
+        long over15 = matchRepository.countOver15ByTeamName(q);
         // Safety: ensure consistency even if data anomalies
         if (losses + wins + draws != total) {
             long computedLosses = Math.max(0, total - wins - draws);
             losses = computedLosses;
         }
-        return new TeamResultsBreakdownResponse(total, wins, draws, losses, btts, over25);
+        return new TeamResultsBreakdownResponse(total, wins, draws, losses, btts, over25, over15);
     }
 
     // --- H2H suggestions: only pairs that actually played ---
