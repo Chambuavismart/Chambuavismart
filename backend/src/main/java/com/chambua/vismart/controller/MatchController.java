@@ -7,6 +7,11 @@ import com.chambua.vismart.service.H2HService;
 import com.chambua.vismart.service.FormGuideService;
 import com.chambua.vismart.repository.SeasonRepository;
 import com.chambua.vismart.dto.FormGuideRowDTO;
+import com.chambua.vismart.dto.AnalysisRequest;
+import com.chambua.vismart.service.LaTeXService;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.format.DateTimeFormatter;
@@ -22,19 +27,21 @@ public class MatchController {
     private final com.chambua.vismart.config.FeatureFlags featureFlags;
     private final FormGuideService formGuideService;
     private final SeasonRepository seasonRepository;
+    private final LaTeXService laTeXService;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags, FormGuideService formGuideService, SeasonRepository seasonRepository) {
+    public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags, FormGuideService formGuideService, SeasonRepository seasonRepository, LaTeXService laTeXService) {
         this.matchRepository = matchRepository;
         this.h2hService = h2hService;
         this.featureFlags = featureFlags;
         this.formGuideService = formGuideService;
         this.seasonRepository = seasonRepository;
+        this.laTeXService = laTeXService;
     }
 
     // Backward-compatible constructor for existing tests (H2H form endpoint will be unavailable)
     public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags) {
-        this(matchRepository, h2hService, featureFlags, null, null);
+        this(matchRepository, h2hService, featureFlags, null, null, null);
     }
 
     @GetMapping("/played/total")
@@ -348,19 +355,33 @@ public class MatchController {
             return out;
         }
 
-        // Backward-compatible: resolve by names within provided leagueId+seasonName, then use IDs thereafter
-        if (homeName == null || homeName.isBlank() || awayName == null || awayName.isBlank() || leagueId == null || seasonName == null || seasonName.isBlank()) {
+        // Backward-compatible: resolve by names within provided leagueId+seasonName (or latest season if seasonName missing), then use IDs thereafter
+        if (homeName == null || homeName.isBlank() || awayName == null || awayName.isBlank() || leagueId == null) {
             return List.of();
         }
         String hn = homeName.trim();
         String an = awayName.trim();
-        logger.info("[H2H_FORM][REQ_NAME] leagueId={}, seasonName='{}', limit={}, home='{}', away='{}'", leagueId, seasonName, lim, hn, an);
-        Long sid = seasonRepository.findByLeagueIdAndNameIgnoreCase(leagueId, seasonName)
-                .map(s -> s.getId())
-                .orElse(null);
+        String sname = (seasonName == null ? "" : seasonName.trim());
+        logger.info("[H2H_FORM][REQ_NAME] leagueId={}, seasonName='{}', limit={}, home='{}', away='{}'", leagueId, sname, lim, hn, an);
+        Long sid = null;
+        if (!sname.isBlank()) {
+            sid = seasonRepository.findByLeagueIdAndNameIgnoreCase(leagueId, sname)
+                    .map(s -> s.getId())
+                    .orElse(null);
+            if (sid == null) {
+                logger.warn("[H2H_FORM][REQ_NAME] Season '{}' not found for leagueId={}; attempting latest season fallback.", sname, leagueId);
+            }
+        }
         if (sid == null) {
-            logger.warn("[H2H_FORM][STRICT_NO_SEASON] Requested season '{}' not found for leagueId={}; no fallback will be applied.", seasonName, leagueId);
-            return List.of();
+            sid = seasonRepository.findTopByLeagueIdOrderByStartDateDesc(leagueId)
+                    .map(s -> s.getId())
+                    .orElse(null);
+            if (sid == null) {
+                logger.warn("[H2H_FORM][REQ_NAME] No seasons available for leagueId={}; aborting name-based form fetch.", leagueId);
+                return List.of();
+            } else {
+                logger.info("[H2H_FORM][REQ_NAME][FallbackLatest] leagueId={}, seasonId={}.", leagueId, sid);
+            }
         }
         List<FormGuideRowDTO> rows = formGuideService.compute(leagueId, sid, lim, FormGuideService.Scope.OVERALL);
         FormGuideRowDTO homeRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().equalsIgnoreCase(hn)).findFirst().orElse(null);
@@ -435,5 +456,134 @@ public class MatchController {
         return sb.toString();
     }
 
+    // --- Diagnostics: Verify Correct Scores (server-side Poisson grid 0..10) ---
+    @GetMapping("/verify-correct-scores")
+    public List<Map<String, Object>> verifyCorrectScores(
+            @RequestParam("homeTeamId") Long homeTeamId,
+            @RequestParam("awayTeamId") Long awayTeamId,
+            @RequestParam(value = "leagueId", required = false) Long leagueId) {
+        try {
+            if (homeTeamId == null || awayTeamId == null) return List.of();
+            List<Match> matches;
+            if (leagueId != null) {
+                matches = matchRepository.findHeadToHead(leagueId, homeTeamId, awayTeamId);
+            } else {
+                List<Match> a = matchRepository.findH2HByTeamIds(homeTeamId, awayTeamId);
+                List<Match> b = matchRepository.findH2HByTeamIds(awayTeamId, homeTeamId);
+                matches = new ArrayList<>();
+                if (a != null) matches.addAll(a);
+                if (b != null) matches.addAll(b);
+            }
+            if (matches == null) matches = List.of();
+
+            // Compute per-team average goals using orientation-aware mapping
+            int aCount = 0, bCount = 0;
+            double aFor = 0, bFor = 0;
+            for (Match m : matches) {
+                Integer hg = m.getHomeGoals();
+                Integer ag = m.getAwayGoals();
+                if (hg == null || ag == null) continue;
+                if (m.getHomeTeam() != null && m.getHomeTeam().getId() != null && m.getHomeTeam().getId().equals(homeTeamId)) {
+                    aFor += hg; aCount++;
+                } else if (m.getAwayTeam() != null && m.getAwayTeam().getId() != null && m.getAwayTeam().getId().equals(homeTeamId)) {
+                    aFor += ag; aCount++;
+                }
+                if (m.getHomeTeam() != null && m.getHomeTeam().getId() != null && m.getHomeTeam().getId().equals(awayTeamId)) {
+                    bFor += hg; bCount++;
+                } else if (m.getAwayTeam() != null && m.getAwayTeam().getId() != null && m.getAwayTeam().getId().equals(awayTeamId)) {
+                    bFor += ag; bCount++;
+                }
+            }
+            double leagueAvg = 1.4d;
+            boolean aFallback = aCount < 3;
+            boolean bFallback = bCount < 3;
+            double aAvg = aFallback ? leagueAvg : (aCount > 0 ? (aFor / aCount) : leagueAvg);
+            double bAvg = bFallback ? leagueAvg : (bCount > 0 ? (bFor / bCount) : leagueAvg);
+
+            // Apply home/away modifiers like frontend
+            double lambdaA = aAvg * 1.15d;
+            double lambdaB = bAvg * 0.95d;
+
+            // Build 0..10 grid
+            int MAX = 10;
+            double[] cacheA = new double[MAX + 1];
+            double[] cacheB = new double[MAX + 1];
+            for (int i = 0; i <= MAX; i++) cacheA[i] = poisson(lambdaA, i);
+            for (int j = 0; j <= MAX; j++) cacheB[j] = poisson(lambdaB, j);
+
+            List<double[]> raw = new ArrayList<>(); // [h, a, p]
+            double total = 0.0d;
+            for (int h = 0; h <= MAX; h++) {
+                for (int a = 0; a <= MAX; a++) {
+                    double p = cacheA[h] * cacheB[a];
+                    total += p;
+                    raw.add(new double[]{h, a, p});
+                }
+            }
+            if (total <= 0) return List.of();
+            // Normalize, sort desc
+            raw.sort((u, v) -> Double.compare(v[2], u[2]));
+
+            List<Map<String, Object>> top = new ArrayList<>();
+            int limit = Math.min(3, raw.size());
+            for (int i = 0; i < limit; i++) {
+                double[] r = raw.get(i);
+                String score = ((int) r[0]) + "-" + ((int) r[1]);
+                double prob = (r[2] / total) * 100.0d;
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("score", score);
+                item.put("probability", Math.round(prob * 10.0d) / 10.0d);
+                top.add(item);
+            }
+            // Compute Over 3.5 using same grid normalization: 1 - P(total <= 3)
+            double sumLe3 = 0.0d;
+            for (double[] cell : raw) {
+                int h = (int) cell[0];
+                int a = (int) cell[1];
+                if (h + a <= 3) sumLe3 += cell[2];
+            }
+            double over35 = (total > 0.0d) ? (1.0d - (sumLe3 / total)) : 0.0d;
+            Map<String, Object> extra = new LinkedHashMap<>();
+            extra.put("over35", Math.round(over35 * 1000.0d) / 10.0d);
+            top.add(extra);
+            return top;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private double poisson(double lambda, int k) {
+        return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+    }
+    private double factorial(int n) {
+        if (n <= 1) return 1.0d;
+        double f = 1.0d;
+        for (int i = 2; i <= n; i++) f *= i;
+        return f;
+    }
+
     public record H2HFormTeamResponse(String teamId, String teamName, Map<String, Object> last5, List<Map<String, Object>> matches) {}
+
+    // --- PDF generation endpoint ---
+    @PostMapping("/generate-analysis-pdf")
+    public ResponseEntity<byte[]> generateAnalysisPdf(@RequestBody AnalysisRequest request) {
+        try {
+            byte[] pdf = laTeXService.generateAnalysisPdf(request);
+            String home = request.getTeamA()!=null? request.getTeamA().getName() : "TeamA";
+            String away = request.getTeamB()!=null? request.getTeamB().getName() : "TeamB";
+            String filename = String.format("analysis-%s-vs-%s.pdf",
+                    (home!=null? home.replaceAll("[^A-Za-z0-9]+","_") : "A"),
+                    (away!=null? away.replaceAll("[^A-Za-z0-9]+","_") : "B"));
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename);
+            return ResponseEntity.ok().headers(headers).body(pdf);
+        } catch (Exception ex) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=analysis.pdf");
+            byte[] fallback = ("PDF generation error: " + ex.getMessage()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            return ResponseEntity.status(500).headers(headers).body(fallback);
+        }
+    }
 }

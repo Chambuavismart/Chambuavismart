@@ -4,6 +4,7 @@ import com.chambua.vismart.model.Match;
 import com.chambua.vismart.model.Team;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.repository.TeamRepository;
+import com.chambua.vismart.util.TeamNameNormalizer;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -56,6 +57,7 @@ public class H2HService {
         if (input == null) return List.of();
         String name = input.trim();
         if (name.isEmpty()) return List.of();
+        // Use default overload that handles normalization internally for better testability
         return teamRepository.findAllByNameOrAliasIgnoreCase(name)
                 .stream()
                 .map(Team::getId)
@@ -68,6 +70,7 @@ public class H2HService {
         String name = input.trim();
         if (name.isEmpty()) return null;
         // Fetch all candidates by exact name or alias (case-insensitive)
+        // Use default overload that handles normalization internally for better testability
         List<Team> candidates = teamRepository.findAllByNameOrAliasIgnoreCase(name);
         if (candidates == null || candidates.isEmpty()) return null;
         // Prefer exact name matches over alias-only matches

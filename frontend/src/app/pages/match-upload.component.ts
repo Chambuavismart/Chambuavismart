@@ -7,6 +7,7 @@ import { SeasonService, Season } from '../services/season.service';
 import { HttpClient } from '@angular/common/http';
 import { COUNTRIES } from '../shared/countries.constant';
 import { COUNTRY_LEAGUES } from '../shared/country-leagues.constant';
+import { LeagueContextService } from '../services/league-context.service';
 
 @Component({
   selector: 'app-match-upload',
@@ -333,7 +334,7 @@ export class MatchUploadComponent {
     return this.uploadType === 'FULL_REPLACE' || this.uploadType === 'INCREMENTAL';
   }
 
-  constructor(private api: MatchUploadService, private leagueApi: LeagueService, private seasonApi: SeasonService, private http: HttpClient) {
+  constructor(private api: MatchUploadService, private leagueApi: LeagueService, private seasonApi: SeasonService, private http: HttpClient, private leagueContext: LeagueContextService) {
     // load leagues for fixtures tab
     this.leagueApi.getLeagues().subscribe(ls => {
       const arr = (ls ?? []).slice();
@@ -398,6 +399,8 @@ export class MatchUploadComponent {
 
   onLeagueSelected(){
     if (this.selectedLeague) {
+      const lid = Number(this.selectedLeague);
+      if (!Number.isNaN(lid) && lid > 0) this.leagueContext.setCurrentLeagueId(lid);
       this.leagueApi.getLeagueDetails(this.selectedLeague).subscribe(details => {
         this.country = details.country;
         this.season = details.season;
@@ -482,6 +485,25 @@ export class MatchUploadComponent {
       // Summarize strict out-of-window errors when present
       const out = this.errors.filter(e => /out-of-window|outside season window/i.test(e)).length;
       this.message = out > 0 ? `${out} matches rejected because they are outside season window (strict mode).` : (res?.message || 'Upload failed.');
+    }
+
+    // If upload succeeded, set the active league in context.
+    if (this.success) {
+      // Prefer returned leagueId if backend provides it
+      const returnedLeagueId = (res && (res.leagueId || res.leagueID || res.league_id)) ? Number(res.leagueId || res.leagueID || res.league_id) : null;
+      if (returnedLeagueId && !Number.isNaN(returnedLeagueId) && returnedLeagueId > 0) {
+        this.leagueContext.setCurrentLeagueId(returnedLeagueId);
+      } else if (this.requiresExistingLeague && this.selectedLeague) {
+        const lid = Number(this.selectedLeague);
+        if (!Number.isNaN(lid) && lid > 0) this.leagueContext.setCurrentLeagueId(lid);
+      } else {
+        // NEW_LEAGUE path: attempt to resolve the newly created league id by querying leagues and matching name/country/season
+        this.leagueApi.getLeagues().subscribe((ls) => {
+          const key = (s: string) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          const match = (ls || []).find(l => key(l.name) === key(this.leagueName) && key(l.country) === key(this.country) && key(l.season) === key(this.season));
+          if (match?.id) this.leagueContext.setCurrentLeagueId(match.id);
+        });
+      }
     }
 
     // Emit a fixtures refresh event if incremental updates occurred

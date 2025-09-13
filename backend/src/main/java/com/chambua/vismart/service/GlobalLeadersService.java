@@ -33,15 +33,19 @@ public class GlobalLeadersService {
 
     public List<GlobalLeaderDto> getLeaders(String category, int limit, int minMatches) {
         // Backward-compatible: default to overall scope and no last-N limit
-        return getLeaders(category, limit, minMatches, "overall", 0);
+        return getLeaders(category, limit, minMatches, "overall", 0, null);
     }
 
     public List<GlobalLeaderDto> getLeaders(String category, int limit, int minMatches, String scope, int lastN) {
+        return getLeaders(category, limit, minMatches, scope, lastN, null);
+    }
+
+    public List<GlobalLeaderDto> getLeaders(String category, int limit, int minMatches, String scope, int lastN, Long leagueId) {
         String cat = normalizeCategory(category);
         String sc = normalizeScope(scope);
         int ln = Math.max(0, lastN); // 0 means "all"
 
-        String cacheKey = cat + ":" + limit + ":" + minMatches + ":" + sc + ":" + ln;
+        String cacheKey = cat + ":" + limit + ":" + minMatches + ":" + sc + ":" + ln + ":" + (leagueId == null ? "all" : leagueId);
         CacheEntry ce = cache.get(cacheKey);
         if (ce != null && ce.expiresAt.isAfter(Instant.now())) {
             return ce.data;
@@ -69,6 +73,7 @@ public class GlobalLeadersService {
                 "  select l.id as league_id, max(s2.id) as latest_season_id\n" +
                 "  from leagues l\n" +
                 "  join seasons s2 on s2.league_id = l.id\n" +
+                "  where (:leagueId is null or l.id = :leagueId)\n" +
                 "  group by l.id\n" +
                 "), team_matches as (\n" +
                 "  select t.id as team_id, t.name as team_name, m.id as match_id, m.match_date, m.round,\n" +
@@ -103,6 +108,7 @@ public class GlobalLeadersService {
         params.addValue("limit", limit);
         params.addValue("scope", sc);
         params.addValue("lastN", ln);
+        params.addValue("leagueId", leagueId);
 
         List<GlobalLeaderDto> rows = jdbc.query(sql, params, (rs, rowNum) -> new GlobalLeaderDto(
                 rs.getLong("team_id"),
@@ -137,13 +143,13 @@ public class GlobalLeadersService {
                         "from teams t \n" +
                         "join matches m on (m.home_team_id = t.id or m.away_team_id = t.id) \n" +
                         "join seasons s on m.season_id = s.id \n" +
-                        "join (select l.id as league_id, max(s2.id) as latest_season_id from leagues l join seasons s2 on s2.league_id = l.id group by l.id) ls on ls.league_id = s.league_id and ls.latest_season_id = s.id \n" +
+                        "join (select l.id as league_id, max(s2.id) as latest_season_id from leagues l join seasons s2 on s2.league_id = l.id where (:leagueId is null or l.id = :leagueId) group by l.id) ls on ls.league_id = s.league_id and ls.latest_season_id = s.id \n" +
                         "where m.status = 'PLAYED' \n" +
                         "  and ((:scope = 'overall') or (:scope = 'home' and m.home_team_id = t.id) or (:scope = 'away' and m.away_team_id = t.id)) \n" +
                         "  and (:lastN = 0 or ( \n" +
                         "       select count(*) from matches m2 \n" +
                         "       join seasons s2 on m2.season_id = s2.id \n" +
-                        "       join (select l3.id as league_id, max(s3.id) as latest_season_id from leagues l3 join seasons s3 on s3.league_id = l3.id group by l3.id) ls2 on ls2.league_id = s2.league_id and ls2.latest_season_id = s2.id \n" +
+                        "       join (select l3.id as league_id, max(s3.id) as latest_season_id from leagues l3 join seasons s3 on s3.league_id = l3.id where (:leagueId is null or l3.id = :leagueId) group by l3.id) ls2 on ls2.league_id = s2.league_id and ls2.latest_season_id = s2.id \n" +
                         "       where (m2.home_team_id = t.id or m2.away_team_id = t.id) and m2.status = 'PLAYED' \n" +
                         "         and ((:scope = 'overall') or (:scope = 'home' and m2.home_team_id = t.id) or (:scope = 'away' and m2.away_team_id = t.id)) \n" +
                         "         and (m2.match_date > m.match_date or (m2.match_date = m.match_date and (coalesce(m2.round,0) > coalesce(m.round,0) or (coalesce(m2.round,0) = coalesce(m.round,0) and m2.id > m.id)))) \n" +

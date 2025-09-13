@@ -61,6 +61,23 @@
             <version>1.10.0</version>
         </dependency>
 
+        <!-- iText 8 modules for programmatic PDF fallback -->
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>kernel</artifactId>
+            <version>8.0.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>layout</artifactId>
+            <version>8.0.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>io</artifactId>
+            <version>8.0.5</version>
+        </dependency>
+
         <!-- Optional: Enable basic testing, even if no tests currently exist -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

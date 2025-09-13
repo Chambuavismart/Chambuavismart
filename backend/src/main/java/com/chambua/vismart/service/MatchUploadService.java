@@ -8,8 +8,11 @@ import com.chambua.vismart.model.Team;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
 import com.chambua.vismart.repository.TeamRepository;
+import com.chambua.vismart.util.TeamNameNormalizer;
 import com.chambua.vismart.repository.SeasonRepository;
 import com.chambua.vismart.model.Season;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -26,6 +29,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class MatchUploadService {
+
+    private static final Logger log = LoggerFactory.getLogger(MatchUploadService.class);
 
     private final LeagueRepository leagueRepository;
     private final TeamRepository teamRepository;
@@ -577,8 +582,10 @@ public class MatchUploadService {
                     }
                 } else {
                     // Strict team validation for Raw Text Upload: ensure teams already exist in this league
-                    Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
-                    Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
+                    String homeNorm = TeamNameNormalizer.normalize(homeName.trim());
+                    String awayNorm = TeamNameNormalizer.normalize(awayName.trim());
+                    Optional<Team> homeOpt = teamRepository.findByNormalizedNameAndLeagueId(homeNorm, league.getId());
+                    Optional<Team> awayOpt = teamRepository.findByNormalizedNameAndLeagueId(awayNorm, league.getId());
                     boolean missing = false;
                     if (homeOpt.isEmpty()) {
                         warnLogs.add(new WarnLog(homeName, "", "Skipped unrecognized team entry: " + homeName));
@@ -665,10 +672,15 @@ public class MatchUploadService {
     }
 
     private Team findOrCreateTeam(League league, String name) {
-        String n = opt(name);
-        if (n.isEmpty()) throw new IllegalArgumentException("Team name is required");
-        return teamRepository.findByLeagueAndNameIgnoreCase(league, n)
-                .orElseGet(() -> teamRepository.save(new Team(n, league)));
+        String raw = opt(name);
+        if (raw.isEmpty()) throw new IllegalArgumentException("Team name is required");
+        String normalized = TeamNameNormalizer.normalize(raw);
+        log.info("Resolving team (leagueId={}): raw='{}', normalized='{}'", league.getId(), raw, normalized);
+        return teamRepository.findByNormalizedNameAndLeagueId(normalized, league.getId())
+                .orElseGet(() -> {
+                    log.info("Creating new team in league {} with name: raw='{}', normalized='{}'", league.getId(), raw, normalized);
+                    return teamRepository.save(new Team(raw, league));
+                });
     }
 
     private static String[] normalizeHeader(String header) {

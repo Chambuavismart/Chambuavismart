@@ -6,6 +6,7 @@ import { TeamService, TeamSuggestion } from '../services/team.service';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil } from 'rxjs';
+import { LeagueContextService } from '../services/league-context.service';
 import { PoissonService, Predictions } from '../services/poisson.service';
 
 @Component({
@@ -304,6 +305,13 @@ import { PoissonService, Predictions } from '../services/poisson.service';
             (click)="analyseFixture()"
             title="Compute Poisson predictions for this H2H"
           >Analyse this fixture</button>
+          <button
+            *ngIf="predictions"
+            class="clear"
+            style="margin-left:8px;background:#2563eb;"
+            (click)="downloadAsPDF()"
+            title="Download analysis as PDF with watermark"
+          >Download as PDF</button>
         </div>
         <div class="section-desc">Computes win/draw/loss, BTTS, Over 1.5 and Over 2.5 probabilities using a Poisson model based on the head-to-head goal averages and each team's overall sample size.</div>
 
@@ -323,10 +331,32 @@ import { PoissonService, Predictions } from '../services/poisson.service';
                 <tr><td>{{ h2hAway }} Win</td><td>{{ predictions?.teamBWin }}%</td></tr>
                 <tr><td>Both Teams To Score (BTTS)</td><td>{{ predictions?.btts }}%</td></tr>
                 <tr><td>Over 2.5 Goals</td><td>{{ predictions?.over25 }}%</td></tr>
+                <tr><td>Over 3.5 Goals</td><td>{{ predictions?.over35 | number:'1.0-0' }}%</td></tr>
                 <tr><td>Over 1.5 Goals</td><td>{{ predictions?.over15 }}%</td></tr>
               </tbody>
             </table>
             <div class="hint">Expected goals used: λ({{ h2hHome }}) = {{ predictions?.lambdaA }}, λ({{ h2hAway }}) = {{ predictions?.lambdaB }}</div>
+            <div *ngIf="predictions?.isLimitedData" class="alert alert-warning" style="margin-top:8px; color:#f59e0b;">Limited H2H data; scores based on league averages.</div>
+
+            <div class="kpi-title" style="margin-top:12px;">Most Probable Correct Scores</div>
+            <table class="h2h-table" *ngIf="predictions?.correctScores?.length">
+              <thead>
+                <tr>
+                  <th>Score</th>
+                  <th>Probability</th>
+                  <th style="width:50%"> </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let cs of getCorrectScoresWithDisplay()">
+                  <td>{{ cs.score }}</td>
+                  <td>{{ cs.displayProb | number:'1.1-1' }}%</td>
+                  <td>
+                    <div class="bar" [style.width.%]="barWidth(cs.displayProb)"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </ng-container>
         <ng-template #noPreds>
@@ -390,6 +420,7 @@ import { PoissonService, Predictions } from '../services/poisson.service';
     .win { color: #10b981; font-weight: 700; } /* green */
     .loss { color: #ef4444; font-weight: 700; } /* red */
     .draw { color: #f59e0b; font-weight: 700; } /* orange */
+    .bar { height:5px; background:#007bff; border-radius:2px; }
     :host { display: block; }
     body { background: #0a0f1a; }
   `]
@@ -422,6 +453,8 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   h2hSelected = false;
   h2hHome = '';
   h2hAway = '';
+  h2hHomeId: number | null = null;
+  h2hAwayId: number | null = null;
   h2hMatches: H2HMatchDto[] = [];
   h2hMatchesAll: H2HMatchDto[] = [];
   h2hAnyCount: number | null = null;
@@ -431,7 +464,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   showTeamHint = false;
   showDataHint = false;
   // league/season context (fallbacks for H2H form call)
-  leagueId: number = ((window as any).__LEAGUE_ID__ as number) || 1; // default EPL=1
+  leagueId: number | null = null;
   seasonName: string = ((window as any).__SEASON_NAME__ as string) || '2025/2026';
   // GD summary (client-side computation for UI, oriented to h2hHome)
   gdAggregate: number | null = null;
@@ -446,16 +479,41 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   // Predictions via Poisson
   predictions: Predictions | null = null;
   private poisson = inject(PoissonService);
+    private leagueContext = inject(LeagueContextService);
+
+  // Expose Math if needed in template calculations
+  Math = Math;
+
+  getCorrectScoresWithDisplay(): Array<{ score: string; probability: number; displayProb: number }> {
+    const cs = this.predictions?.correctScores || [];
+    if (!cs || cs.length === 0) return [] as any;
+    const sum = cs.reduce((s, c) => s + (c?.probability || 0), 0);
+    const cap = 25;
+    const scale = sum > 0 ? Math.min(1, cap / sum) : 1;
+    return cs.map(c => ({ score: c.score, probability: c.probability, displayProb: +(c.probability * scale).toFixed(1) }));
+  }
+
+  barWidth(p: number): number {
+    const w = (p || 0) * 5; // scale up for visibility
+    return w > 100 ? 100 : w;
+  }
 
   analyseFixture(): void {
     if (!(this.h2hHome && this.h2hAway)) {
       this.predictions = null;
       return;
     }
-    const teamA = { name: this.h2hHome, matchesInvolved: this.homeCount || (this.homeBreakdown as any)?.total || 1 };
-    const teamB = { name: this.h2hAway, matchesInvolved: this.awayCount || (this.awayBreakdown as any)?.total || 1 };
+    const teamA = { id: this.h2hHomeId, name: this.h2hHome, matchesInvolved: this.homeCount || (this.homeBreakdown as any)?.total || 1 };
+    const teamB = { id: this.h2hAwayId, name: this.h2hAway, matchesInvolved: this.awayCount || (this.awayBreakdown as any)?.total || 1 };
     const h2hData = (this.h2hMatchesAll && this.h2hMatchesAll.length > 0) ? this.h2hMatchesAll : this.h2hMatches;
-    this.predictions = this.poisson.calculatePredictions(teamA, teamB, h2hData as any[], {});
+    const preds = this.poisson.calculatePredictions(teamA as any, teamB as any, h2hData as any[], {});
+    this.predictions = preds;
+    if ((preds as any)?.usedFallback) {
+      const msg = 'Limited H2H data; using league averages for Poisson model.';
+      console.warn('[PlayedMatches][AnalyseFixture]', msg, { h2hCount: h2hData?.length ?? 0, home: this.h2hHome, away: this.h2hAway });
+      this.showDataHint = true;
+      try { (window as any).alert?.(msg); } catch {}
+    }
   }
 
   private destroy$ = new Subject<void>();
@@ -502,6 +560,10 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Initialize league context
+    this.leagueId = this.leagueContext.getCurrentLeagueId();
+    this.leagueContext.leagueId$.pipe(takeUntil(this.destroy$)).subscribe(id => { this.leagueId = id ?? null; });
+
     // Track flags readiness to ensure deep-link triggers after predictive flag is known
     let flagsReady = false;
     const tryProcessDeepLink = () => {
@@ -565,6 +627,14 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.route.queryParams
       .pipe(takeUntil(this.destroy$))
       .subscribe(params => {
+        const lidParam = params?.['leagueId'];
+        const lid = (lidParam != null) ? Number(lidParam) : NaN;
+        if (!Number.isNaN(lid) && lid > 0) {
+          // Set league context from navigation (Fixtures tab)
+          this.leagueContext.setCurrentLeagueId(lid);
+          this.leagueId = lid;
+          console.log('[LeagueContext] Set leagueId from fixture:', lid);
+        }
         const home = params?.['h2hHome'];
         const away = params?.['h2hAway'];
         if (home && away && typeof home === 'string' && typeof away === 'string') {
@@ -642,6 +712,33 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.gdInsufficient = valid < 3;
   }
 
+  private async promptSelectCandidate(teamName: string, candidates: TeamSuggestion[]): Promise<TeamSuggestion | null> {
+    try {
+      const key = `team_disambig:${(teamName || '').trim().toLowerCase()}`;
+      // Cache hit
+      const cached = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+      if (cached) {
+        const cache = JSON.parse(cached);
+        const match = (candidates || []).find(c => c.id === cache.id || c.leagueId === cache.leagueId);
+        if (match) return match;
+      }
+      // Build options text
+      const lines = (candidates || []).map((c, idx) => `${idx + 1}) ${c.name} – ${c.leagueId != null ? 'League ' + c.leagueId : 'Unknown league'}`);
+      const chosen = window.prompt(`Multiple teams named "${teamName}" found.\nSelect the correct one by number:\n\n${lines.join('\n')}`, '1');
+      const num = chosen ? parseInt(chosen, 10) : NaN;
+      if (!Number.isNaN(num) && num >= 1 && num <= candidates.length) {
+        const sel = candidates[num - 1];
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(key, JSON.stringify({ id: sel.id, leagueId: sel.leagueId }));
+        } catch {}
+        return sel;
+      }
+    } catch (e) {
+      console.warn('[PlayedMatches] Disambiguation prompt failed', e);
+    }
+    return null;
+  }
+
   // Unified wrapper to ensure both manual search and deep-link follow the same workflow
   runHeadToHeadSearch(home: string, away: string) {
     const h = (home ?? '').toString().trim();
@@ -658,6 +755,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
 
   async selectH2H(home: any, away: any) {
     this.h2hAnyCount = null;
+    this.h2hHomeId = null; this.h2hAwayId = null;
     // Robustly extract team names from string or object inputs
     const getTeamName = (t: any): string | null => {
       if (!t) return null;
@@ -714,7 +812,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       this.showTeamHint = true;
       return;
     }
-    console.log('[PlayedMatches] Extracted names for league', this.leagueId, ':', JSON.stringify({ homeName, awayName }, null, 2));
+    console.log('[PlayedMatches] Extracted names for league', this.leagueId, ':', { homeName, awayName });
 
     this.h2hSelected = true;
     this.h2hHome = homeName;
@@ -749,13 +847,53 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       this.homeForm = null; this.awayForm = null;
 
       // Resolve league/season context
+      let lid: number | null = (typeof this.leagueId === 'number' && this.leagueId > 0) ? this.leagueId : (this.leagueContext.getCurrentLeagueId() ?? null);
+      let inferred = false;
+      if (lid == null) {
+        // Attempt to infer leagueId from team identities when user came via manual search
+        try {
+          const homeRes = await this.teamService.findByNameWithDisambiguation(homeName).toPromise();
+          let homeInfo: any = homeRes?.team ?? null;
+          if ((!homeInfo || !homeInfo.leagueId) && homeRes?.conflict && Array.isArray(homeRes.candidates)) {
+            homeInfo = await this.promptSelectCandidate(homeName, homeRes.candidates);
+          }
+
+          const awayRes = await this.teamService.findByNameWithDisambiguation(awayName).toPromise();
+          let awayInfo: any = awayRes?.team ?? null;
+          if ((!awayInfo || !awayInfo.leagueId) && awayRes?.conflict && Array.isArray(awayRes.candidates)) {
+            awayInfo = await this.promptSelectCandidate(awayName, awayRes.candidates);
+          }
+
+          const hL = (homeInfo && typeof (homeInfo as any).leagueId === 'number') ? (homeInfo as any).leagueId as number : null;
+          const aL = (awayInfo && typeof (awayInfo as any).leagueId === 'number') ? (awayInfo as any).leagueId as number : null;
+          if (hL && aL && hL === aL) {
+            lid = hL;
+            inferred = true;
+            console.log('[PlayedMatches] Inferred leagueId from team selection:', lid);
+            // Persist into global context so other services pick it up
+            this.leagueContext.setCurrentLeagueId(lid);
+            this.leagueId = lid;
+          } else {
+            console.warn('[PlayedMatches] Could not infer a common leagueId from selected teams', { homeInfo, awayInfo });
+          }
+        } catch (e) {
+          console.warn('[PlayedMatches] League inference by team names failed', e);
+        }
+      }
+
       let seasonId: number | null = (window as any).__SEASON_ID__ ?? null;
       if (seasonId == null || typeof seasonId !== 'number') {
-        try {
-          const sid = await this.matchService.getSeasonId(this.leagueId, this.seasonName).toPromise();
-          if (typeof sid === 'number') seasonId = sid;
-        } catch (e) {
-          console.warn('[PlayedMatches] seasonId resolution failed', e);
+        if (typeof lid === 'number') {
+          try {
+            // If league was inferred, request latest season by passing empty seasonName to trigger backend fallback
+            const seasonNameForFetch = inferred ? '' : this.seasonName;
+            const sid = await this.matchService.getSeasonId(lid, seasonNameForFetch as any).toPromise();
+            if (typeof sid === 'number') seasonId = sid;
+          } catch (e) {
+            console.warn('[PlayedMatches] seasonId resolution failed', e);
+          }
+        } else {
+          console.warn('[PlayedMatches] Missing active leagueId; cannot resolve seasonId.');
         }
       }
       if (seasonId == null || typeof seasonId !== 'number') {
@@ -766,14 +904,16 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         let homeId: number | null = null;
         let awayId: number | null = null;
         try {
-          homeId = await this.teamService.getScopedTeamId(homeName, this.leagueId).toPromise();
-          awayId = await this.teamService.getScopedTeamId(awayName, this.leagueId).toPromise();
+          // Pass lid only if available; service can also read from context
+          homeId = await this.teamService.getScopedTeamId(homeName, typeof lid === 'number' ? lid : undefined).toPromise();
+          awayId = await this.teamService.getScopedTeamId(awayName, typeof lid === 'number' ? lid : undefined).toPromise();
         } catch (e) {
           console.warn('[PlayedMatches] league-scoped team id resolution failed', e);
         }
 
         if (typeof homeId === 'number' && typeof awayId === 'number') {
           console.debug('[PlayedMatches] Resolved IDs', { homeId, awayId, seasonId });
+          this.h2hHomeId = homeId; this.h2hAwayId = awayId;
           console.debug('[PlayedMatches] calling getH2HFormByIds', { homeId, awayId, seasonId });
           this.matchService.getH2HFormByIds(homeId, awayId, seasonId, 5).subscribe({
             next: list => {
@@ -965,5 +1105,99 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     const start = series[series.length - 1]; // oldest in our most-recent-first list
     const end = series[0]; // most recent
     return `${(start ?? 0).toFixed(1)} → ${(end ?? 0).toFixed(1)}`;
+  }
+
+  // Build payload for PDF export
+  private buildPdfPayload(): any {
+    const teamA = {
+      name: this.h2hHome,
+      matchesInvolved: this.homeCount || this.homeBreakdown?.total || 0,
+      wins: this.homeBreakdown?.wins || 0,
+      draws: this.homeBreakdown?.draws || 0,
+      losses: this.homeBreakdown?.losses || 0,
+      btts: this.homeBreakdown?.btts || 0,
+      over15: this.homeBreakdown?.over15 || 0,
+      over25: this.homeBreakdown?.over25 || 0,
+    };
+    const teamB = {
+      name: this.h2hAway,
+      matchesInvolved: this.awayCount || this.awayBreakdown?.total || 0,
+      wins: this.awayBreakdown?.wins || 0,
+      draws: this.awayBreakdown?.draws || 0,
+      losses: this.awayBreakdown?.losses || 0,
+      btts: this.awayBreakdown?.btts || 0,
+      over15: this.awayBreakdown?.over15 || 0,
+      over25: this.awayBreakdown?.over25 || 0,
+    };
+    const history = (this.h2hMatches || []).map(m => ({ year: m.year, date: m.date, match: `${m.homeTeam} vs ${m.awayTeam}`, result: m.result }));
+    const allOrientations = (this.h2hMatchesAll || []).map(m => ({ year: m.year, date: m.date, match: `${m.homeTeam} vs ${m.awayTeam}`, result: m.result }));
+
+    const predictions = this.predictions ? {
+      win: this.predictions.teamAWin,
+      draw: this.predictions.draw,
+      loss: this.predictions.teamBWin,
+      btts: this.predictions.btts,
+      over15: this.predictions.over15,
+      over25: this.predictions.over25,
+      over35: this.predictions.over35,
+      correctScores: (this.predictions.correctScores || []).map(cs => ({ score: cs.score, probability: cs.probability }))
+    } : null;
+
+    const insights = this.buildInsightsText();
+    const goalDifferential = this.gdAggregate ?? 0;
+    const averageGD = this.gdAverage ?? 0;
+    return {
+      totalMatches: this.total,
+      teamA,
+      teamB,
+      h2h: {
+        insights,
+        goalDifferential,
+        averageGD,
+        last5TeamA: {
+          streak: this.homeForm?.currentStreak || '0',
+          winRate: this.homeForm?.winRate || 0,
+          points: this.homeForm?.pointsEarned || 0,
+          recent: this.homeForm?.recentResults || []
+        },
+        last5TeamB: {
+          streak: this.awayForm?.currentStreak || '0',
+          winRate: this.awayForm?.winRate || 0,
+          points: this.awayForm?.pointsEarned || 0,
+          recent: this.awayForm?.recentResults || []
+        },
+        history,
+        allOrientations
+      },
+      predictions
+    };
+  }
+
+  downloadAsPDF(): void {
+    if (!this.predictions) { return; }
+    const payload = this.buildPdfPayload();
+    try { console.log('[Download] Sending payload:', payload); } catch {}
+    this.matchService.generateAnalysisPdf(payload).subscribe({
+      next: (resp: any) => {
+        const blob = resp?.body instanceof Blob ? resp.body as Blob : new Blob([resp], { type: 'application/pdf' });
+        const cd = resp?.headers?.get ? resp.headers.get('Content-Disposition') : null;
+        let filename = 'analysis.pdf';
+        if (cd && /filename=([^;]+)/i.test(cd)) {
+          const m = cd.match(/filename=([^;]+)/i);
+          if (m && m[1]) filename = m[1].replace(/"/g, '').trim();
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 0);
+      },
+      error: (err: any) => {
+        console.error('[PlayedMatches] PDF generation failed', err);
+        try { (window as any).alert?.('PDF generation failed. Try again or check backend logs.'); } catch {}
+      }
+    });
   }
 }

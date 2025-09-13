@@ -26,13 +26,14 @@ public class GlobalLeadersController {
             @RequestParam(name = "limit", defaultValue = "5") int limit,
             @RequestParam(name = "minMatches", defaultValue = "3") int minMatches,
             @RequestParam(name = "scope", defaultValue = "overall") String scope,
-            @RequestParam(name = "lastN", defaultValue = "0") int lastN
+            @RequestParam(name = "lastN", defaultValue = "0") int lastN,
+            @RequestParam(name = "leagueId", required = false) Long leagueId
     ) {
         if (limit <= 0) limit = 5;
         if (limit > 50) limit = 50; // safety cap
         if (minMatches < 1) minMatches = 1;
         if (lastN < 0) lastN = 0;
-        List<GlobalLeaderDto> res = service.getLeaders(category, limit, minMatches, scope, lastN);
+        List<GlobalLeaderDto> res = service.getLeaders(category, limit, minMatches, scope, lastN, leagueId);
         return ResponseEntity.ok(res);
     }
 }

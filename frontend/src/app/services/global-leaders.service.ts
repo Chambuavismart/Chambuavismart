@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, shareReplay } from 'rxjs/operators';
+import { LeagueContextService } from './league-context.service';
 
 export interface GlobalLeader {
   teamId: number;
@@ -18,15 +19,21 @@ export interface GlobalLeader {
 @Injectable({ providedIn: 'root' })
 export class GlobalLeadersService {
   private cache = new Map<string, Observable<GlobalLeader[]>>();
+  private leagueContext = inject(LeagueContextService);
 
   constructor(private http: HttpClient) {}
 
   getLeaders(category: string, limit = 5, minMatches = 3, scope: 'overall'|'home'|'away' = 'overall', lastN: number = 0): Observable<GlobalLeader[]> {
-    const key = `${category}:${limit}:${minMatches}:${scope}:${lastN}`;
+    const leagueId = this.leagueContext.getCurrentLeagueId();
+    const lidKey = leagueId ? `:${leagueId}` : ':none';
+    const key = `${category}:${limit}:${minMatches}:${scope}:${lastN}${lidKey}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
 
+    const params: any = { category, limit: String(limit), minMatches: String(minMatches), scope, lastN: String(lastN) };
+    if (leagueId) params.leagueId = String(leagueId);
+
     const obs = this.http
-      .get<GlobalLeader[]>(`/api/global-leaders`, { params: { category, limit: String(limit), minMatches: String(minMatches), scope, lastN: String(lastN) } })
+      .get<GlobalLeader[]>(`/api/global-leaders`, { params })
       .pipe(
         shareReplay(1),
         catchError(err => {

@@ -8,6 +8,7 @@ import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.TeamRepository;
 import com.chambua.vismart.repository.TeamAliasRepository;
 import com.chambua.vismart.service.MatchAnalysisService;
+import com.chambua.vismart.util.TeamNameNormalizer;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -49,9 +50,11 @@ public class MatchAnalysisController {
         if ((homeId == null || awayId == null) && homeName != null && awayName != null) {
             String hn = homeName.trim();
             String an = awayName.trim();
-            // 1) exact league-scoped name match
-            homeId = teamRepository.findByLeagueAndNameIgnoreCase(league, hn).map(Team::getId).orElse(null);
-            awayId = teamRepository.findByLeagueAndNameIgnoreCase(league, an).map(Team::getId).orElse(null);
+            String hnNorm = TeamNameNormalizer.normalize(hn);
+            String anNorm = TeamNameNormalizer.normalize(an);
+            // 1) exact league-scoped name match (normalized)
+            homeId = teamRepository.findByNormalizedNameAndLeagueId(hnNorm, league.getId()).map(Team::getId).orElse(null);
+            awayId = teamRepository.findByNormalizedNameAndLeagueId(anNorm, league.getId()).map(Team::getId).orElse(null);
             // 2) alias fallback if still unresolved
             if (homeId == null) {
                 homeId = teamAliasRepository.findByAliasIgnoreCase(hn).map(a -> a.getTeam() != null ? a.getTeam().getId() : null).orElse(null);
@@ -59,7 +62,7 @@ public class MatchAnalysisController {
             if (awayId == null) {
                 awayId = teamAliasRepository.findByAliasIgnoreCase(an).map(a -> a.getTeam() != null ? a.getTeam().getId() : null).orElse(null);
             }
-            // 3) partial contains fallback within league
+            // 3) partial contains fallback within league (use legacy contains for now)
             if (homeId == null) {
                 homeId = teamRepository.findByLeagueAndNameContainingIgnoreCase(league, hn).map(Team::getId).orElse(null);
             }

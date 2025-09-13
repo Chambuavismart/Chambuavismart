@@ -99,10 +99,13 @@ import { forkJoin } from 'rxjs';
 export class FixturesComponent implements OnInit, OnDestroy {
   openAnalysis(f: FixtureDTO) {
     // Navigate to Played Matches tab with pre-filled H2H teams, preserving orientation
+    // Include leagueId so the Fixture Analysis tab can scope lookups correctly
+    const leagueId = this.selectedLeagueId ?? null;
     this.router.navigate(['/played-matches-summary'], {
       queryParams: {
         h2hHome: f?.homeTeam ?? '',
-        h2hAway: f?.awayTeam ?? ''
+        h2hAway: f?.awayTeam ?? '',
+        ...(leagueId ? { leagueId } : {})
       }
     });
   }

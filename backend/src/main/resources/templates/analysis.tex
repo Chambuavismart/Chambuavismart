@@ -1,0 +1,91 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{eso-pic}
+\usepackage{tikz}
+\usepackage{noto}
+\geometry{margin=1in}
+\begin{document}
+\AddToShipoutPictureBG{%
+  \AtPageCenter{% 
+    \begin{tikzpicture}
+      \node[rotate=45,opacity=0.2,font=\Large] {Powered by ChambuaVismart};
+    \end{tikzpicture}
+  }}
+
+\section*{{{TITLE}}}
+\textbf{Total Matches Played}: {{TOTAL_MATCHES}} \\
+
+\subsection*{Team Summaries}
+\begin{tabular}{ll}
+  \toprule
+  \textbf{{{TEAM_A_NAME}}} & \\
+  Matches Involved & {{TEAM_A_MATCHES}} \\
+  Wins & {{TEAM_A_WINS}} \\
+  Draws & {{TEAM_A_DRAWS}} \\
+  Losses & {{TEAM_A_LOSSES}} \\
+  BTTS & {{TEAM_A_BTTS}} \\
+  Over 1.5 & {{TEAM_A_OVER15}} \\
+  Over 2.5 & {{TEAM_A_OVER25}} \\
+  \midrule
+  \textbf{{{TEAM_B_NAME}}} & \\
+  Matches Involved & {{TEAM_B_MATCHES}} \\
+  Wins & {{TEAM_B_WINS}} \\
+  Draws & {{TEAM_B_DRAWS}} \\
+  Losses & {{TEAM_B_LOSSES}} \\
+  BTTS & {{TEAM_B_BTTS}} \\
+  Over 1.5 & {{TEAM_B_OVER15}} \\
+  Over 2.5 & {{TEAM_B_OVER25}} \\
+  \bottomrule
+\end{tabular}
+
+\subsection*{H2H Insights}
+{{H2H_INSIGHTS}} \\
+\textbf{Goal Differential ({{GD_PERSPECTIVE}} perspective)}: {{GD_AGG}}, Average GD: {{GD_AVG}} \\
+\textbf{{{TEAM_A_NAME}} Last 5}: {{LAST5_A}} \\
+\textbf{{{TEAM_B_NAME}} Last 5}: {{LAST5_B}} \\
+
+\subsection*{Head-to-Head Results}
+\begin{tabular}{lllr}
+  \toprule
+  Year & Date & Match & Result \\
+  \midrule
+  {{H2H_HISTORY_ROWS}}
+  \bottomrule
+\end{tabular}
+
+\vspace{0.5cm}
+\begin{tabular}{lllr}
+  \toprule
+  Year & Date & Match & Result \\
+  \midrule
+  {{H2H_ALL_ROWS}}
+  \bottomrule
+\end{tabular}
+
+\subsection*{Fixture Analysis Results}
+\begin{tabular}{lr}
+  \toprule
+  Outcome & Probability \\
+  \midrule
+  {{TEAM_A_NAME}} Win & {{A_WIN}}\% \\
+  Draw & {{DRAW}}\% \\
+  {{TEAM_B_NAME}} Win & {{B_WIN}}\% \\
+  Both Teams To Score (BTTS) & {{BTTS}}\% \\
+  Over 1.5 Goals & {{OVER15}}\% \\
+  Over 2.5 Goals & {{OVER25}}\% \\
+  Over 3.5 Goals & {{OVER35}}\% \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.5cm}
+\begin{tabular}{lr}
+  \toprule
+  Most Probable Correct Scores & Probability \\
+  \midrule
+  {{CORRECT_SCORES_ROWS}}
+  \bottomrule
+\end{tabular}
+
+\end{document}

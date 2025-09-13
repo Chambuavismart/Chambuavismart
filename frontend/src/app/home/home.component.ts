@@ -33,6 +33,27 @@ export class HomeComponent implements OnInit, OnDestroy {
   todayFixtures: LeagueFixturesResponse[] = [];
   todayLoading = false;
 
+  // Flattened, time-sorted list of today's fixtures across all leagues
+  get todayFlat(): { leagueId: number; leagueName: string; leagueCountry?: string; fixture: { id: number; round: string; dateTime: string; homeTeam: string; awayTeam: string; homeScore: number | null; awayScore: number | null; status: any; }; }[] {
+    const items: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+    for (const lg of this.todayFixtures || []) {
+      const fs = lg?.fixtures || [];
+      for (const f of fs) {
+        if (!f) continue;
+        items.push({ leagueId: lg.leagueId, leagueName: lg.leagueName, leagueCountry: lg.leagueCountry, fixture: f });
+      }
+    }
+    items.sort((a, b) => {
+      const ta = this.toUtcMillis(a.fixture?.dateTime);
+      const tb = this.toUtcMillis(b.fixture?.dateTime);
+      if (isNaN(ta) && isNaN(tb)) return 0;
+      if (isNaN(ta)) return 1; // push invalid/unknown times to bottom
+      if (isNaN(tb)) return -1;
+      return ta - tb; // earliest first
+    });
+    return items;
+  }
+
   // Leaders cache for highlighting
   private leaderTeams: Set<string> = new Set<string>();
   private leadersByTeam: Map<string, GlobalLeader[]> = new Map<string, GlobalLeader[]>();
@@ -308,14 +329,17 @@ export class HomeComponent implements OnInit, OnDestroy {
     return parts.length ? parts.join(' • ') : null;
   }
 
-  // Navigate to Match Analysis with preselected fixture via query params
-  goToAnalysis(league: { leagueId: number; leagueName: string }, f: any) {
-    if (!league?.leagueId || !f) return;
-    const qp: any = {
-      leagueId: league.leagueId,
-      homeTeamName: f?.homeTeam,
-      awayTeamName: f?.awayTeam
-    };
-    this.router.navigate(['/match-analysis'], { queryParams: qp });
+  // Navigate to Played Matches Summary (Fixture Analysis) with preselected teams
+  // Reuse the exact logic used in Fixtures tab: h2hHome, h2hAway, and optional leagueId
+  goToAnalysis(league: { leagueId?: number; leagueName?: string } | null, f: any) {
+    if (!f) return;
+    const leagueId = league?.leagueId ?? null;
+    this.router.navigate(['/played-matches-summary'], {
+      queryParams: {
+        h2hHome: f?.homeTeam ?? '',
+        h2hAway: f?.awayTeam ?? '',
+        ...(leagueId ? { leagueId } : {})
+      }
+    });
   }
 }
