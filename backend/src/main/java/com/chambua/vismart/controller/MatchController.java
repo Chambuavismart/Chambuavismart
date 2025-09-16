@@ -9,6 +9,7 @@ import com.chambua.vismart.repository.SeasonRepository;
 import com.chambua.vismart.dto.FormGuideRowDTO;
 import com.chambua.vismart.dto.AnalysisRequest;
 import com.chambua.vismart.service.LaTeXService;
+import com.chambua.vismart.repository.AdminAuditRepository;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +29,12 @@ public class MatchController {
     private final FormGuideService formGuideService;
     private final SeasonRepository seasonRepository;
     private final LaTeXService laTeXService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AdminAuditRepository adminAuditRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.chambua.vismart.repository.TeamRepository teamRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
     public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags, FormGuideService formGuideService, SeasonRepository seasonRepository, LaTeXService laTeXService) {
@@ -132,35 +139,37 @@ public class MatchController {
         logger.info("[H2H_MATCHES][REQ] home='{}' away='{}' homeId={} awayId={} seasonId={} limit={}", homeName, awayName, homeId, awayId, seasonId, lim);
         List<Match> list = java.util.Collections.emptyList();
         String path = "none";
-        // Preferred: ID + season-scoped path
-        if (homeId != null && awayId != null && seasonId != null) {
+        // Preferred: ID-based oriented H2H across ALL seasons (ignore seasonId for oriented history)
+        if (homeId != null && awayId != null) {
             try {
-                // Align with analysis service: prefer league-scoped season query
-                Long lid = null;
+                list = matchRepository.findH2HByTeamIds(homeId, awayId);
+                path = "ID+ALL_SEASONS_ORIENTED";
+            } catch (Exception ex) {
+                logger.warn("[H2H_MATCHES][ERR][ID+ALL_SEASONS] {}", ex.toString());
+                list = java.util.Collections.emptyList();
+            }
+            // If ID-based path returned nothing, try resolving names from IDs and query oriented-by-name across all seasons
+            if ((list == null || list.isEmpty()) && teamRepository != null) {
                 try {
-                    var sOpt = seasonRepository.findById(seasonId);
-                    if (sOpt.isPresent() && sOpt.get().getLeague() != null && sOpt.get().getLeague().getId() != null) {
-                        lid = sOpt.get().getLeague().getId();
+                    String hn = teamRepository.findById(homeId).map(t -> t.getName()).orElse(null);
+                    String an = teamRepository.findById(awayId).map(t -> t.getName()).orElse(null);
+                    if (hn != null && !hn.isBlank() && an != null && !an.isBlank()) {
+                        try {
+                            list = matchRepository.findPlayedByExactNames(hn.trim(), an.trim());
+                            path = "ID_RESOLVED_TO_NAMES_EXACT";
+                        } catch (Exception ignoredExact) { list = java.util.Collections.emptyList(); }
+                        if (list == null || list.isEmpty()) {
+                            try {
+                                list = matchRepository.findPlayedByFuzzyNames(hn.trim(), an.trim());
+                                path = "ID_RESOLVED_TO_NAMES_FUZZY";
+                            } catch (Exception ignoredFuzzy) { list = java.util.Collections.emptyList(); }
+                        }
+                        logger.info("[H2H_MATCHES][FallbackFromIds] Resolved names '{}' vs '{}' -> {} matches", hn, an, (list!=null?list.size():0));
                     }
-                } catch (Exception ignored) { /* fallback below */ }
-                if (lid != null) {
-                    list = matchRepository.findHeadToHeadBySeason(lid, seasonId, homeId, awayId);
-                    path = "ID+SEASON+LEAGUE";
+                } catch (Exception ex) {
+                    logger.warn("[H2H_MATCHES][ERR][ID_RESOLVE_NAMES] {}", ex.toString());
                 }
-                // Fallback: season-only, both orientations (scores or PLAYED)
-                if (list == null || list.isEmpty()) {
-                    java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
-                    list = matchRepository.findH2HByTeamIdsAndSeason(homeId, awayId, seasonId, today);
-                    if (path.equals("none")) path = "ID+SEASON"; else path += ">ID+SEASON";
-                }
-                // New: Fallback to league-only within resolved league (cross-season within same league)
-                if ((list == null || list.isEmpty()) && lid != null) {
-                    try {
-                        list = matchRepository.findHeadToHead(lid, homeId, awayId);
-                        path += ">ID+LEAGUE";
-                    } catch (Exception ignoredFallback) { /* keep empty */ }
-                }
-            } catch (Exception ex) { logger.warn("[H2H_MATCHES][ERR][ID+SEASON] {}", ex.toString()); list = java.util.Collections.emptyList(); }
+            }
         }
         // Fallback: name-based (across seasons/leagues as implemented in H2HService)
         if ((list == null || list.isEmpty()) && homeName != null && !homeName.isBlank() && awayName != null && !awayName.isBlank()) {
@@ -348,7 +357,7 @@ public class MatchController {
             } catch (Exception ignored) {}
             if (lid == null) return List.of();
             try {
-                List<FormGuideRowDTO> rows = formGuideService.compute(lid, seasonId, lim, FormGuideService.Scope.OVERALL);
+                List<FormGuideRowDTO> rows = formGuideService.computeForTeams(lid, seasonId, lim, java.util.Arrays.asList(homeId, awayId));
                 FormGuideRowDTO homeRow = rows.stream().filter(r -> Objects.equals(r.getTeamId(), homeId)).findFirst().orElse(null);
                 FormGuideRowDTO awayRow = rows.stream().filter(r -> Objects.equals(r.getTeamId(), awayId)).findFirst().orElse(null);
                 List<H2HFormTeamResponse> out = new ArrayList<>(2);
@@ -450,6 +459,7 @@ public class MatchController {
         java.time.LocalDate now = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
         List<Long> excludedIds = new ArrayList<>();
         List<Map<String, Object>> matches = new ArrayList<>();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
         for (Match m : all) {
             if (matches.size() >= limit) break;
             java.time.LocalDate md = m.getDate();
@@ -457,14 +467,50 @@ public class MatchController {
                 excludedIds.add(m.getId());
                 continue;
             }
+            seen.add(m.getId());
             String result = (m.getHomeGoals() != null && m.getAwayGoals() != null) ? (m.getHomeGoals() + "-" + m.getAwayGoals()) : "-";
             Map<String, Object> dto = new LinkedHashMap<>();
             dto.put("year", md.getYear());
             dto.put("date", md.toString());
-            dto.put("homeTeam", m.getHomeTeam() != null ? m.getHomeTeam().getName() : null);
-            dto.put("awayTeam", m.getAwayTeam() != null ? m.getAwayTeam().getName() : null);
+            String homeName = null;
+            String awayName = null;
+            try { homeName = (m.getHomeTeam() != null ? m.getHomeTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] homeTeam name not initialized for matchId={}", m.getId()); }
+            try { awayName = (m.getAwayTeam() != null ? m.getAwayTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] awayTeam name not initialized for matchId={}", m.getId()); }
+            dto.put("homeTeam", homeName);
+            dto.put("awayTeam", awayName);
             dto.put("result", result);
             matches.add(dto);
+        }
+        // If season-scoped list is sparse and backend flagged fallback, fetch global recent matches across all competitions for this team
+        if (matches.size() < Math.min(3, limit) && row.isFallback()) {
+            try {
+                List<Match> global = matchRepository.findRecentPlayedByTeamId(row.getTeamId());
+                for (Match m : global) {
+                    if (matches.size() >= limit) break;
+                    if (m == null || m.getId() == null) continue;
+                    if (seen.contains(m.getId())) continue; // avoid duplicates if any
+                    java.time.LocalDate md = m.getDate();
+                    if (md == null || md.isAfter(now)) {
+                        excludedIds.add(m.getId());
+                        continue;
+                    }
+                    String result = (m.getHomeGoals() != null && m.getAwayGoals() != null) ? (m.getHomeGoals() + "-" + m.getAwayGoals()) : "-";
+                    Map<String, Object> dto = new LinkedHashMap<>();
+                    dto.put("year", md.getYear());
+                    dto.put("date", md.toString());
+                    String homeName = null;
+                    String awayName = null;
+                    try { homeName = (m.getHomeTeam() != null ? m.getHomeTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] homeTeam name not initialized for matchId={}", m.getId()); }
+                    try { awayName = (m.getAwayTeam() != null ? m.getAwayTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] awayTeam name not initialized for matchId={}", m.getId()); }
+                    dto.put("homeTeam", homeName);
+                    dto.put("awayTeam", awayName);
+                    dto.put("result", result);
+                    matches.add(dto);
+                }
+                logger.info("[Last5][FallbackMatches] Used global recent matches for teamId={} (added {} entries)", row.getTeamId(), Math.max(0, matches.size()));
+            } catch (Exception ex) {
+                logger.warn("[Last5][FallbackMatches][Error] teamId={}, err={}", row.getTeamId(), ex.toString());
+            }
         }
         if (!excludedIds.isEmpty()) {
             logger.info("[Last5][Validation] Excluded matches for teamId={}, seasonId={}: IDs={} due to null or future date", row.getTeamId(), seasonId, excludedIds);
@@ -479,10 +525,37 @@ public class MatchController {
         last5.put("pointsPerGame", ppg);
         last5.put("bttsPercent", btts);
         last5.put("over25Percent", over25);
+        last5.put("fallback", row.isFallback());
         String teamIdStr = row.getTeamId() != null ? String.valueOf(row.getTeamId()) : null;
         String teamName = row.getTeamName();
-        String note = "Last 5 includes matches against all opponents, including H2H if recent";
-        return new H2HFormTeamResponse(teamIdStr, teamName, last5, matches, seasonResolved, matchesAvailable, note);
+        String note;
+        if (row.isFallback()) {
+            note = "Recent form for " + teamName + " — last up to 5 played matches across all competitions (fallback due to limited data in season). Points use W=3, D=1, L=0.";
+            try {
+                if (adminAuditRepository != null) {
+                    com.chambua.vismart.model.AdminAudit audit = new com.chambua.vismart.model.AdminAudit();
+                    audit.setAction("last5_fallback");
+                    audit.setParams("{\"teamId\": " + teamIdStr + ", \"seasonId\": " + seasonId + "}");
+                    audit.setAffectedCount(1L);
+                    adminAuditRepository.save(audit);
+                }
+            } catch (Exception ignoredAudit) {}
+        } else {
+            note = "Recent form for " + teamName + " — last up to 5 played matches in season " + (seasonResolved != null ? seasonResolved : String.valueOf(seasonId)) + ". Points use W=3, D=1, L=0.";
+        }
+        // Ensure sourceLeague is set without triggering lazy initialization
+        String sourceLeague = row.getSourceLeague();
+        if ((sourceLeague == null || sourceLeague.isBlank()) && teamRepository != null) {
+            try {
+                var proj = teamRepository.findTeamProjectionById(row.getTeamId());
+                if (proj != null) sourceLeague = proj.getLeagueName();
+                logger.info("[Last5][SourceLeague] teamId={}, resolved='{}' via projection", row.getTeamId(), sourceLeague);
+            } catch (Exception ex) {
+                logger.warn("[Last5][SourceLeague][Error] teamId={}, err={}", row.getTeamId(), ex.toString());
+            }
+        }
+        logger.info("[Last5][Response] teamId={}, matches={}, sourceLeague={}", row.getTeamId(), matches.size(), sourceLeague);
+        return new H2HFormTeamResponse(teamIdStr, teamName, last5, matches, seasonResolved, matchesAvailable, note, sourceLeague);
     }
 
     private String computeStreak(List<String> last) {
@@ -615,7 +688,7 @@ public class MatchController {
         return f;
     }
 
-    public record H2HFormTeamResponse(String teamId, String teamName, Map<String, Object> last5, List<Map<String, Object>> matches, String seasonResolved, String matchesAvailable, String note) {}
+    public record H2HFormTeamResponse(String teamId, String teamName, Map<String, Object> last5, List<Map<String, Object>> matches, String seasonResolved, String matchesAvailable, String note, String sourceLeague) {}
 
     // --- PDF generation endpoint ---
     @PostMapping("/generate-analysis-pdf")

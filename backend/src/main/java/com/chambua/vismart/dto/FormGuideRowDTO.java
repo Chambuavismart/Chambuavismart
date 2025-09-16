@@ -46,6 +46,13 @@ public class FormGuideRowDTO {
     private int weightedHomeMatches;
     private int weightedAwayMatches;
 
+    // Indicator: when true, overall recent form used a global fallback (all competitions)
+    private boolean fallback;
+    // Source league name when fallback is used (to inform frontend about origin of global matches)
+    private String sourceLeague;
+    // How many matches available in computed list (for Last 5 window)
+    private int matchesAvailable;
+
     public FormGuideRowDTO() {}
 
     public FormGuideRowDTO(Long teamId, String teamName, int mp, int totalMp, int w, int d, int l, int gf, int ga, int pts,
@@ -106,6 +113,9 @@ public class FormGuideRowDTO {
     public int getWeightedAwayOver35Percent() { return weightedAwayOver35Percent; }
     public int getWeightedHomeMatches() { return weightedHomeMatches; }
     public int getWeightedAwayMatches() { return weightedAwayMatches; }
+    public boolean isFallback() { return fallback; }
+    public String getSourceLeague() { return sourceLeague; }
+    public int getMatchesAvailable() { return matchesAvailable; }
 
     public void setTeamId(Long teamId) { this.teamId = teamId; }
     public void setTeamName(String teamName) { this.teamName = teamName; }
@@ -143,6 +153,9 @@ public class FormGuideRowDTO {
     public void setWeightedAwayOver35Percent(int v) { this.weightedAwayOver35Percent = v; }
     public void setWeightedHomeMatches(int v) { this.weightedHomeMatches = v; }
     public void setWeightedAwayMatches(int v) { this.weightedAwayMatches = v; }
+    public void setFallback(boolean fallback) { this.fallback = fallback; }
+    public void setSourceLeague(String sourceLeague) { this.sourceLeague = sourceLeague; }
+    public void setMatchesAvailable(int matchesAvailable) { this.matchesAvailable = matchesAvailable; }
 
     // Aliases for API compatibility with expected field names
     // Overall weighted metrics

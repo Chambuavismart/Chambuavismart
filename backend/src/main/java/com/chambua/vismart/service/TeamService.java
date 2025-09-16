@@ -32,13 +32,16 @@ public class TeamService {
         if (name == null || name.trim().isEmpty()) return List.of();
         String raw = name.trim();
         String normalized = TeamNameNormalizer.normalize(raw);
-        List<Team> matches = teamRepository.findByNameOrAliasWithLeague(normalized, raw);
-        if (leagueId != null) {
-            final Long lid = leagueId;
-            matches = matches.stream()
-                    .filter(t -> t.getLeague() != null && Objects.equals(t.getLeague().getId(), lid))
-                    .collect(Collectors.toList());
+        // First, fetch all matches globally with league eagerly loaded
+        List<Team> all = teamRepository.findByNameOrAliasWithLeague(normalized, raw);
+        if (leagueId == null) {
+            return all;
         }
-        return matches;
+        final Long lid = leagueId;
+        List<Team> scoped = all.stream()
+                .filter(t -> t.getLeague() != null && Objects.equals(t.getLeague().getId(), lid))
+                .collect(Collectors.toList());
+        // Fallback: if no team found in the provided league, return global list to allow cross-league resolution
+        return scoped.isEmpty() ? all : scoped;
     }
 }

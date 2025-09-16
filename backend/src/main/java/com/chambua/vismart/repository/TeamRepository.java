@@ -11,6 +11,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface TeamRepository extends JpaRepository<Team, Long> {
+    // Lightweight projection: id, name, leagueName (for fallback source annotation without triggering LazyInitialization)
+    interface TeamProjection {
+        Long getId();
+        String getName();
+        String getLeagueName();
+    }
     // Deletion helper: remove all teams for a league (used when deleting a league)
     long deleteByLeague_Id(Long leagueId);
     // Normalized-name based finders
@@ -88,6 +94,10 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     // Fetch-join variant to ensure League is initialized with Team for DTO mapping
     @Query("select distinct t from Team t left join fetch t.league l left join TeamAlias a on a.team = t where t.normalizedName = :normalized or lower(a.alias) = lower(:raw)")
     List<Team> findByNameOrAliasWithLeague(@Param("normalized") String normalized, @Param("raw") String raw);
+
+    // Projection by id to get league name without initializing entity graph
+    @Query("select t.id as id, t.name as name, l.name as leagueName from Team t join t.league l where t.id = :teamId")
+    TeamProjection findTeamProjectionById(@Param("teamId") Long teamId);
 
     // Default overload for backward compatibility
     default List<Team> findByNameOrAliasWithLeague(String name) {

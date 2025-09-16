@@ -180,7 +180,10 @@ import { PoissonService, Predictions } from '../services/poisson.service';
           <div class="breakdown-title">{{ h2hHome }} — Last 5 <span *ngIf="homeSeasonResolved">({{ homeSeasonResolved }})</span>
                       <span class="hint" *ngIf="homeMatchesAvailableText"> — {{ homeMatchesAvailableText }}</span>
                     </div>
-          <div class="section-desc">Recent head-to-head form vs {{ h2hAway }} (up to 5 matches). Points use W=3, D=1, L=0.</div>
+          <div class="section-desc" *ngIf="homeIsFallback; else homeScopedNote">Recent form for {{ h2hHome }} — last up to 5 played matches from {{ homeSourceLeague || 'all competitions' }} (fallback due to limited data in {{ homeSeasonResolved || 'this competition' }}). Points use W=3, D=1, L=0.</div>
+          <ng-template #homeScopedNote>
+            <div class="section-desc">Recent form for {{ h2hHome }} — last up to 5 played matches in {{ homeSeasonResolved || 'this competition' }}. Points use W=3, D=1, L=0.</div>
+          </ng-template>
           <div class="breakdown-row" *ngIf="homeForm; else homeFormLoading">
             <div class="form-badges compact">
               <span class="compact-seq">
@@ -199,16 +202,23 @@ import { PoissonService, Predictions } from '../services/poisson.service';
           </ng-template>
           <div class="hint" *ngIf="homeForm && (homeForm?.recentResults?.length || 0) === 0">No recent matches found</div>
           <div class="breakdown-row" *ngIf="homeForm">
-            <div>Streak: <strong>{{ formatStreak(homeForm?.currentStreak) }}</strong></div>
-            <div>Win rate: <strong>{{ homeForm?.winRate ?? 0 }}%</strong></div>
-            <div>Points: <strong>{{ homeForm?.pointsEarned ?? 0 }}</strong></div>
+            <div title="Number of consecutive results from the most recent match going backwards (e.g., 3W means 3 straight wins).">Streak: <strong>{{ formatStreak(homeForm?.currentStreak) }}</strong></div>
+            <div title="Percentage of wins within the last up to 5 played matches considered.">Win rate: <strong>{{ homeForm?.winRate ?? 0 }}%</strong></div>
+            <div title="Total points from those matches using W=3, D=1, L=0.">Points: <strong>{{ homeForm?.pointsEarned ?? 0 }}</strong></div>
+          </div>
+          <div class="hint" *ngIf="homeForm">
+            <span *ngIf="homeIsFallback; else homeScopedExplain">Computed from the last up to 5 played matches across all competitions because {{ h2hHome }} has limited data in {{ homeSeasonResolved || 'this competition' }}.</span>
+            <ng-template #homeScopedExplain>Computed from the last up to 5 played matches in {{ homeSeasonResolved || 'this competition' }}.</ng-template>
           </div>
         </div>
         <div class="profile-card">
           <div class="breakdown-title">{{ h2hAway }} — Last 5 <span *ngIf="awaySeasonResolved">({{ awaySeasonResolved }})</span>
                       <span class="hint" *ngIf="awayMatchesAvailableText"> — {{ awayMatchesAvailableText }}</span>
                     </div>
-          <div class="section-desc">Recent head-to-head form vs {{ h2hHome }} (up to 5 matches). Points use W=3, D=1, L=0.</div>
+          <div class="section-desc" *ngIf="awayIsFallback; else awayScopedNote">Recent form for {{ h2hAway }} — last up to 5 played matches from {{ awaySourceLeague || 'all competitions' }} (fallback due to limited data in {{ awaySeasonResolved || 'this competition' }}). Points use W=3, D=1, L=0.</div>
+          <ng-template #awayScopedNote>
+            <div class="section-desc">Recent form for {{ h2hAway }} — last up to 5 played matches in {{ awaySeasonResolved || 'this competition' }}. Points use W=3, D=1, L=0.</div>
+          </ng-template>
           <div class="breakdown-row" *ngIf="awayForm; else awayFormLoading">
             <div class="form-badges compact">
               <span class="compact-seq">
@@ -227,9 +237,13 @@ import { PoissonService, Predictions } from '../services/poisson.service';
           </ng-template>
           <div class="hint" *ngIf="awayForm && (awayForm?.recentResults?.length || 0) === 0">No recent matches found</div>
           <div class="breakdown-row" *ngIf="awayForm">
-            <div>Streak: <strong>{{ formatStreak(awayForm?.currentStreak) }}</strong></div>
-            <div>Win rate: <strong>{{ awayForm?.winRate ?? 0 }}%</strong></div>
-            <div>Points: <strong>{{ awayForm?.pointsEarned ?? 0 }}</strong></div>
+            <div title="Number of consecutive results from the most recent match going backwards (e.g., 3W means 3 straight wins).">Streak: <strong>{{ formatStreak(awayForm?.currentStreak) }}</strong></div>
+            <div title="Percentage of wins within the last up to 5 played matches considered.">Win rate: <strong>{{ awayForm?.winRate ?? 0 }}%</strong></div>
+            <div title="Total points from those matches using W=3, D=1, L=0.">Points: <strong>{{ awayForm?.pointsEarned ?? 0 }}</strong></div>
+          </div>
+          <div class="hint" *ngIf="awayForm">
+            <span *ngIf="awayIsFallback; else awayScopedExplain">Computed from the last up to 5 played matches across all competitions because {{ h2hAway }} has limited data in {{ awaySeasonResolved || 'this competition' }}.</span>
+            <ng-template #awayScopedExplain>Computed from the last up to 5 played matches in {{ awaySeasonResolved || 'this competition' }}.</ng-template>
           </div>
         </div>
       </div>
@@ -481,11 +495,15 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   gdAggregate: number | null = null;
   gdAverage: number | null = null;
   gdInsufficient = true;
+  // Resolved numeric season id (when using ID-based flow)
+  seasonIdResolved: number | null = null;
 
   homeCount = 0; awayCount = 0;
   loadingHomeCount = false; loadingAwayCount = false;
   homeBreakdown: TeamBreakdownDto | null = null; awayBreakdown: TeamBreakdownDto | null = null;
   loadingHomeBreakdown = false; loadingAwayBreakdown = false;
+  homeIsFallback: boolean = false; awayIsFallback: boolean = false;
+  homeSourceLeague: string | null = null; awaySourceLeague: string | null = null;
 
   // Predictions via Poisson
   predictions: Predictions | null = null;
@@ -502,6 +520,23 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     const cap = 25;
     const scale = sum > 0 ? Math.min(1, cap / sum) : 1;
     return cs.map(c => ({ score: c.score, probability: c.probability, displayProb: +(c.probability * scale).toFixed(1) }));
+  }
+
+  // Ensure oriented H2H is fetched only after IDs are available; fallback to names otherwise
+  private fetchOrientedH2H(homeName: string, awayName: string): void {
+    if (typeof this.h2hHomeId === 'number' && typeof this.h2hAwayId === 'number') {
+      console.debug('[PlayedMatches] Fetching oriented H2H across all seasons by IDs', { homeId: this.h2hHomeId, awayId: this.h2hAwayId });
+      this.matchService.getH2HMatchesByIdsAllSeasons(this.h2hHomeId, this.h2hAwayId, 200).subscribe({
+        next: list => { this.h2hMatches = list ?? []; if (this.predictiveOn) this.computeGDFromMatches(); },
+        error: () => { this.h2hMatches = []; if (this.predictiveOn) this.computeGDFromMatches(); }
+      });
+    } else {
+      console.debug('[PlayedMatches] Fetching oriented H2H by names (IDs not yet resolved)', { homeName, awayName });
+      this.matchService.getH2HMatches(homeName, awayName).subscribe({
+        next: list => { this.h2hMatches = list ?? []; if (this.predictiveOn) this.computeGDFromMatches(); },
+        error: () => { this.h2hMatches = []; if (this.predictiveOn) this.computeGDFromMatches(); }
+      });
+    }
   }
 
   barWidth(p: number): number {
@@ -899,7 +934,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
             // If league was inferred, request latest season by passing empty seasonName to trigger backend fallback
             const seasonNameForFetch = inferred ? '' : this.seasonName;
             const sid = await this.matchService.getSeasonId(lid, seasonNameForFetch as any).toPromise();
-            if (typeof sid === 'number') seasonId = sid;
+            if (typeof sid === 'number') { seasonId = sid; this.seasonIdResolved = sid; }
           } catch (e) {
             console.warn('[PlayedMatches] seasonId resolution failed', e);
           }
@@ -932,17 +967,21 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
                 }
                 const winRate = team?.last5?.winRate ?? 0;
                 const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
-                return { recentResults: recent, currentStreak: seqStr, winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
+                return { recentResults: recent, currentStreak: this.computeCompactStreak(recent), winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
               };
               const hEntry = safe.find(t => (t?.teamName || '').toLowerCase() === homeName.toLowerCase()) || safe[0] || null;
               const aEntry = safe.find(t => (t?.teamName || '').toLowerCase() === awayName.toLowerCase()) || safe[1] || null;
               this.homeForm = hEntry ? mapTeam(hEntry, homeName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
               this.awayForm = aEntry ? mapTeam(aEntry, awayName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
-              // Map season context and messages
+              // Map season context, messages and fallback flags
               this.homeSeasonResolved = hEntry?.seasonResolved || null;
               this.awaySeasonResolved = aEntry?.seasonResolved || null;
               this.homeMatchesAvailableText = hEntry?.matchesAvailable || null;
               this.awayMatchesAvailableText = aEntry?.matchesAvailable || null;
+              this.homeIsFallback = !!(hEntry?.last5?.fallback);
+              this.awayIsFallback = !!(aEntry?.last5?.fallback);
+              this.homeSourceLeague = hEntry?.sourceLeague || null;
+              this.awaySourceLeague = aEntry?.sourceLeague || null;
             },
             error: (err) => {
               console.error('[PlayedMatches] getH2HFormByNamesWithAutoSeason failed', err);
@@ -970,10 +1009,13 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         if (typeof homeId === 'number' && typeof awayId === 'number') {
           console.debug('[PlayedMatches] Resolved IDs', { homeId, awayId, seasonId });
           this.h2hHomeId = homeId; this.h2hAwayId = awayId;
+          this.seasonIdResolved = seasonId;
           console.debug('[PlayedMatches] calling getH2HFormByIds', { homeId, awayId, seasonId });
           this.matchService.getH2HFormByIds(homeId, awayId, seasonId, 5).subscribe({
             next: list => {
               const safe = Array.isArray(list) ? list : [];
+              // After IDs are confirmed via Last-5 response, fetch oriented H2H with IDs
+              this.fetchOrientedH2H(homeName, awayName);
               const toSummary = (team: any, teamLabel: string): FormSummaryDto => {
                 const seqStr: string = team?.last5?.streak || '0';
                 const recent: string[] = [];
@@ -994,17 +1036,21 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
                 }
                 const winRate = team?.last5?.winRate ?? 0;
                 const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
-                return { recentResults: recent, currentStreak: seqStr, winRate: winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
+                return { recentResults: recent, currentStreak: this.computeCompactStreak(recent), winRate: winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
               };
               const homeEntry = safe.find(t => Number(t?.teamId) === homeId) || safe.find(t => t?.teamName?.toLowerCase?.() === homeName.toLowerCase()) || null;
               const awayEntry = safe.find(t => Number(t?.teamId) === awayId) || safe.find(t => t?.teamName?.toLowerCase?.() === awayName.toLowerCase()) || null;
               this.homeForm = homeEntry ? toSummary(homeEntry, homeName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
               this.awayForm = awayEntry ? toSummary(awayEntry, awayName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
-              // Map season context and messages
+              // Map season context, messages and fallback flags
               this.homeSeasonResolved = homeEntry?.seasonResolved || null;
               this.awaySeasonResolved = awayEntry?.seasonResolved || null;
               this.homeMatchesAvailableText = homeEntry?.matchesAvailable || null;
               this.awayMatchesAvailableText = awayEntry?.matchesAvailable || null;
+              this.homeIsFallback = !!(homeEntry?.last5?.fallback);
+              this.awayIsFallback = !!(awayEntry?.last5?.fallback);
+              this.homeSourceLeague = homeEntry?.sourceLeague || null;
+              this.awaySourceLeague = awayEntry?.sourceLeague || null;
             },
             error: (err) => {
               console.error('[PlayedMatches] getH2HFormByIds failed', err);
@@ -1021,11 +1067,8 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Load H2H matches respecting orientation
-    this.matchService.getH2HMatches(homeName, awayName).subscribe({
-      next: list => { this.h2hMatches = list ?? []; if (this.predictiveOn) this.computeGDFromMatches(); },
-      error: () => { this.h2hMatches = []; if (this.predictiveOn) this.computeGDFromMatches(); }
-    });
+    // Defer oriented H2H fetch until IDs are resolved; see fetchOrientedH2H()
+    this.fetchOrientedH2H(homeName, awayName);
 
     // Load total H2H count regardless of orientation
     this.matchService.getH2HCountAnyOrientation(homeName, awayName).subscribe({
@@ -1054,6 +1097,12 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.showTeamHint = false;
     this.showDataHint = false;
     this.h2hAnyCount = null;
+    this.homeMatchesAvailableText = null;
+    this.awayMatchesAvailableText = null;
+    this.homeSeasonResolved = null;
+    this.awaySeasonResolved = null;
+    this.homeIsFallback = false;
+    this.awayIsFallback = false;
   }
 
   pct(v?: number | null): string {
@@ -1148,10 +1197,22 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     if (v === 'L') return 'letter-loss';
     return '';
   }
+  private computeCompactStreak(recent: string[] | null | undefined): string {
+    const arr = Array.isArray(recent) ? recent : [];
+    if (arr.length === 0) return '0';
+    const first = (arr[0] || '').toUpperCase();
+    if (!['W','D','L'].includes(first)) return '0';
+    let count = 1;
+    for (let i = 1; i < arr.length; i++) {
+      const v = (arr[i] || '').toUpperCase();
+      if (v !== first) break;
+      count++;
+    }
+    return `${count}${first}`;
+  }
   formatStreak(s: string | null | undefined): string {
     if (!s) return '—';
-    // s like "3W" -> "3W in a row"
-    if (/^\d+[WDL]$/i.test(s)) return `${s} in a row`;
+    if (/^\d+[WDL]$/i.test(s)) return s;
     return s;
   }
   barHeight(v: number | null | undefined): string {

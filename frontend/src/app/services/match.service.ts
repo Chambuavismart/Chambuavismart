@@ -8,7 +8,7 @@ export interface TeamBreakdownDto { total: number; wins: number; draws: number; 
 export interface H2HSuggestion { teamA: string; teamB: string; }
 export interface H2HMatchDto { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; season: string | null; }
 export interface FormSummaryDto { recentResults: string[]; currentStreak: string; winRate: number; pointsEarned: number; ppgSeries?: number[]; }
-export interface H2HFormTeamDto { teamId: string; teamName: string; last5: { streak: string; winRate: number; pointsPerGame: number; bttsPercent: number; over25Percent: number; }; matches: { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; }[]; seasonResolved?: string | null; matchesAvailable?: string | null; warnings?: string[]; note?: string | null; }
+export interface H2HFormTeamDto { teamId: string; teamName: string; last5: { streak: string; winRate: number; pointsPerGame: number; bttsPercent: number; over25Percent: number; fallback?: boolean; ppgSeries?: number[]; }; matches: { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; }[]; seasonResolved?: string | null; matchesAvailable?: string | null; warnings?: string[]; note?: string | null; sourceLeague?: string | null; }
 
 @Injectable({ providedIn: 'root' })
 export class MatchService {
@@ -52,6 +52,11 @@ export class MatchService {
   // New: Preferred ID-based H2H retrieval scoped to a season
   getH2HMatchesByIds(homeId: number, awayId: number, seasonId: number, limit: number = 10): Observable<H2HMatchDto[]> {
     return this.http.get<H2HMatchDto[]>(`${this.baseUrl}/h2h/matches`, { params: { homeId, awayId, seasonId, limit } as any });
+  }
+
+  // New: Oriented H2H across ALL seasons by IDs (backend ignores season when IDs are provided)
+  getH2HMatchesByIdsAllSeasons(homeId: number, awayId: number, limit: number = 200): Observable<H2HMatchDto[]> {
+    return this.http.get<H2HMatchDto[]>(`${this.baseUrl}/h2h/matches`, { params: { homeId, awayId, limit } as any });
   }
 
   // Total H2H count regardless of orientation

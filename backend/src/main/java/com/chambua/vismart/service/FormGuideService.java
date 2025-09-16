@@ -23,9 +23,18 @@ public class FormGuideService {
     @PersistenceContext
     private EntityManager em;
 
+    private final com.chambua.vismart.repository.TeamRepository teamRepository;
+
     // Additional constructor for tests or manual wiring
     public FormGuideService(EntityManager em) {
         this.em = em;
+        this.teamRepository = null;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public FormGuideService(EntityManager em, com.chambua.vismart.repository.TeamRepository teamRepository) {
+        this.em = em;
+        this.teamRepository = teamRepository;
     }
 
 
@@ -173,6 +182,51 @@ public class FormGuideService {
             list.sort(Comparator.comparing(Row::getDate).reversed().thenComparing(Row::getRound, Comparator.nullsLast(Comparator.reverseOrder())));
             if (list.isEmpty()) continue;
 
+            boolean usedFallback = false;
+            if (scope == Scope.OVERALL && list.size() < 3) {
+                try {
+                    // Fallback: fetch recent played matches across all competitions for this team
+                    Long teamId = e.getKey();
+                    String gHome = "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name, m.id AS match_id " +
+                            "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id " +
+                            "WHERE (m.home_team_id = ?1) AND m.status = 'PLAYED' AND m.match_date IS NOT NULL AND m.match_date <= ?2";
+                    String gAway = "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name, m.id AS match_id " +
+                            "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id " +
+                            "WHERE (m.away_team_id = ?1) AND m.status = 'PLAYED' AND m.match_date IS NOT NULL AND m.match_date <= ?2";
+                    String gsql = "SELECT * FROM (" + gHome + " UNION ALL " + gAway + ") x ORDER BY md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC";
+                    java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+                    log.info("[FormGuide][Fallback] Scoped matches <3 for teamId={}; using global recent.", teamId);
+                    System.out.println("[DEBUG_LOG] FormGuide Fallback global SQL: " + gsql);
+                    @SuppressWarnings("unchecked")
+                    List<Object[]> gRows = em.createNativeQuery(gsql)
+                            .setParameter(1, teamId)
+                            .setParameter(2, java.sql.Date.valueOf(today))
+                            .getResultList();
+                    List<Row> gList = new ArrayList<>();
+                    for (Object[] r : gRows) {
+                        Object dateObj = r[0];
+                        java.sql.Date date = (dateObj instanceof java.sql.Date)
+                                ? (java.sql.Date) dateObj
+                                : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
+                        Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                        Long tId = ((Number) r[2]).longValue();
+                        String tName = (String) r[3];
+                        int gf_ = ((Number) r[4]).intValue();
+                        int ga_ = ((Number) r[5]).intValue();
+                        boolean isHome = ((Number) r[6]).intValue() == 1;
+                        String oppName = (String) r[7];
+                        gList.add(new Row(tId, tName, date, round, gf_, ga_, isHome, oppName));
+                        if (gList.size() >= Math.max(limit, 5)) { /* we only need up to limit (default 5) */ }
+                    }
+                    if (!gList.isEmpty()) {
+                        list = gList;
+                        usedFallback = true;
+                    }
+                } catch (Exception ex) {
+                    log.warn("[FormGuide][Fallback][Error] teamId={}, err={}", e.getKey(), ex.toString());
+                }
+            }
+
             int windowSize = Math.min(list.size(), limit);
 
             int w=0,d=0,l=0,gf=0,ga=0,pts=0,btts=0,ov15=0,ov25=0,ov35=0;
@@ -230,6 +284,7 @@ public class FormGuideService {
             Row first = list.get(0);
             FormGuideRowDTO dto = new FormGuideRowDTO(first.teamId, first.teamName, mpWindow, totalMp, w, d, l, gf, ga, pts, round2(ppg), seq, bttsPct, over15Pct, over25Pct, over35Pct);
             dto.setLastResultsDetails(details);
+            dto.setFallback(usedFallback);
             // set weighted averages for goals per match
             if (sumWeights > 0.0) {
                 dto.setAvgGfWeighted(wGf / sumWeights);
@@ -336,5 +391,144 @@ public class FormGuideService {
         int over25Pct = (int) Math.round((wOv25 * 100.0) / sumW);
         int over35Pct = (int) Math.round((wOv35 * 100.0) / sumW);
         return new Split(avgGf, avgGa, ppg, bttsPct, over15Pct, over25Pct, over35Pct, window);
+    }
+
+    // New: compute forms for specific team IDs, with season-scoped first and global fallback if sparse
+    public List<FormGuideRowDTO> computeForTeams(Long leagueId, Long seasonId, int limit, List<Long> teamIds) {
+        if (leagueId == null) throw new IllegalArgumentException("leagueId is required");
+        if (seasonId == null) throw new IllegalArgumentException("seasonId is required");
+        if (limit <= 0) limit = 5;
+        if (teamIds == null || teamIds.isEmpty()) return java.util.Collections.emptyList();
+
+        List<FormGuideRowDTO> out = new ArrayList<>(teamIds.size());
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+
+        for (Long teamId : teamIds) {
+            if (teamId == null) continue;
+            // Season-scoped, league-scoped queries for this team
+            String sHome =
+                    "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name, m.id AS match_id " +
+                    "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id " +
+                    "WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED' AND m.home_team_id = ?3 AND m.match_date IS NOT NULL AND m.match_date <= ?4";
+            String sAway =
+                    "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name, m.id AS match_id " +
+                    "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id " +
+                    "WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED' AND m.away_team_id = ?3 AND m.match_date IS NOT NULL AND m.match_date <= ?4";
+            String scoped = "SELECT * FROM (" + sHome + " UNION ALL " + sAway + ") x ORDER BY md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC";
+            @SuppressWarnings("unchecked")
+            List<Object[]> rs = em.createNativeQuery(scoped)
+                    .setParameter(1, leagueId)
+                    .setParameter(2, seasonId)
+                    .setParameter(3, teamId)
+                    .setParameter(4, java.sql.Date.valueOf(today))
+                    .getResultList();
+            List<Row> list = new ArrayList<>();
+            for (Object[] r : rs) {
+                Object dateObj = r[0];
+                java.sql.Date date = (dateObj instanceof java.sql.Date)
+                        ? (java.sql.Date) dateObj
+                        : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
+                Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                Long tId = ((Number) r[2]).longValue();
+                String tName = (String) r[3];
+                int gf = ((Number) r[4]).intValue();
+                int ga = ((Number) r[5]).intValue();
+                boolean isHome = ((Number) r[6]).intValue() == 1;
+                String oppName = (String) r[7];
+                list.add(new Row(tId, tName, date, round, gf, ga, isHome, oppName));
+                if (list.size() >= Math.max(limit, 5)) { /* only need up to limit for metrics */ }
+            }
+
+            boolean usedFallback = false;
+            if (list.size() < 3) {
+                // Global fallback for this team (all competitions)
+                String gHome =
+                        "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name, m.id AS match_id " +
+                        "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id " +
+                        "WHERE (m.home_team_id = ?1) AND m.status = 'PLAYED' AND m.match_date IS NOT NULL AND m.match_date <= ?2";
+                String gAway =
+                        "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name, m.id AS match_id " +
+                        "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id " +
+                        "WHERE (m.away_team_id = ?1) AND m.status = 'PLAYED' AND m.match_date IS NOT NULL AND m.match_date <= ?2";
+                String gsql = "SELECT * FROM (" + gHome + " UNION ALL " + gAway + ") x ORDER BY md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC";
+                log.info("[FormGuide][Fallback] Scoped matches <3 for teamId={}; using global recent.", teamId);
+                @SuppressWarnings("unchecked")
+                List<Object[]> gRows = em.createNativeQuery(gsql)
+                        .setParameter(1, teamId)
+                        .setParameter(2, java.sql.Date.valueOf(today))
+                        .getResultList();
+                list.clear();
+                for (Object[] r : gRows) {
+                    Object dateObj = r[0];
+                    java.sql.Date date = (dateObj instanceof java.sql.Date)
+                            ? (java.sql.Date) dateObj
+                            : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
+                    Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                    Long tId = ((Number) r[2]).longValue();
+                    String tName = (String) r[3];
+                    int gf = ((Number) r[4]).intValue();
+                    int ga = ((Number) r[5]).intValue();
+                    boolean isHome = ((Number) r[6]).intValue() == 1;
+                    String oppName = (String) r[7];
+                    list.add(new Row(tId, tName, date, round, gf, ga, isHome, oppName));
+                    if (list.size() >= Math.max(limit, 5)) { /* cap for computation */ }
+                }
+                usedFallback = !list.isEmpty();
+            }
+
+            if (list.isEmpty()) {
+                // Nothing to report for this team
+                continue;
+            }
+
+            // Compute metrics, mirroring main compute() logic for a single team
+            list.sort(Comparator.comparing(Row::getDate).reversed().thenComparing(Row::getRound, Comparator.nullsLast(Comparator.reverseOrder())));
+            int windowSize = Math.min(list.size(), limit);
+
+            int w=0,d=0,l=0,gf=0,ga=0,pts=0,btts=0,ov15=0,ov25=0,ov35=0; // raw counts
+            double sumWeights = 0.0, wPts=0.0, wBtts=0.0, wOv15=0.0, wOv25=0.0, wOv35=0.0, wGf=0.0, wGa=0.0;
+            List<String> seq = new ArrayList<>(windowSize);
+            List<String> details = new ArrayList<>(windowSize);
+            for (int i = 0; i < windowSize; i++) {
+                Row row = list.get(i);
+                double weight = calculateWeight(i);
+                sumWeights += weight;
+                gf += row.gf; ga += row.ga;
+                int total = row.gf + row.ga;
+                wGf += row.gf * weight; wGa += row.ga * weight;
+                if (row.gf > row.ga) { w++; pts += 3; seq.add("W"); wPts += 3 * weight; details.add("Won " + row.gf + "-" + row.ga + (row.isHome ? " vs " : " at ") + row.oppName); }
+                else if (row.gf == row.ga) { d++; pts += 1; seq.add("D"); wPts += 1 * weight; details.add("Drew " + row.gf + "-" + row.ga + (row.isHome ? " vs " : " at ") + row.oppName); }
+                else { l++; seq.add("L"); details.add("Lost " + row.gf + "-" + row.ga + (row.isHome ? " vs " : " at ") + row.oppName); }
+                boolean isBtts = (row.gf > 0 && row.ga > 0);
+                if (isBtts) { btts++; wBtts += weight; }
+                if (total >= 2) { ov15++; wOv15 += weight; }
+                if (total >= 3) { ov25++; wOv25 += weight; }
+                if (total >= 4) { ov35++; wOv35 += weight; }
+            }
+            int totalMp = list.size();
+            double ppg = sumWeights == 0.0 ? 0.0 : (wPts / sumWeights);
+            int bttsPct = sumWeights == 0.0 ? 0 : (int) Math.round((wBtts * 100.0) / sumWeights);
+            int over15Pct = sumWeights == 0.0 ? 0 : (int) Math.round((wOv15 * 100.0) / sumWeights);
+            int over25Pct = sumWeights == 0.0 ? 0 : (int) Math.round((wOv25 * 100.0) / sumWeights);
+            int over35Pct = sumWeights == 0.0 ? 0 : (int) Math.round((wOv35 * 100.0) / sumWeights);
+
+            Row first = list.get(0);
+            FormGuideRowDTO dto = new FormGuideRowDTO(first.teamId, first.teamName, windowSize, totalMp, w, d, l, gf, ga, pts, round2(ppg), seq, bttsPct, over15Pct, over25Pct, over35Pct);
+            dto.setLastResultsDetails(details);
+            dto.setFallback(usedFallback);
+            dto.setMatchesAvailable(list.size());
+            if (usedFallback && teamRepository != null) {
+                try {
+                    var proj = teamRepository.findTeamProjectionById(teamId);
+                    if (proj != null) {
+                        dto.setSourceLeague(proj.getLeagueName());
+                    }
+                } catch (Exception ignored) {}
+            }
+            if (sumWeights > 0.0) { dto.setAvgGfWeighted(wGf / sumWeights); dto.setAvgGaWeighted(wGa / sumWeights); }
+
+            out.add(dto);
+        }
+        return out;
     }
 }
