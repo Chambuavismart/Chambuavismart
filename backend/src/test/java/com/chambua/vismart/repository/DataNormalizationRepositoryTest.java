@@ -9,7 +9,7 @@ import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@org.springframework.boot.test.context.SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=create-drop"})
+@org.springframework.boot.test.context.SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=none"})
 @org.springframework.transaction.annotation.Transactional
 class DataNormalizationRepositoryTest {
 

@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { MatchUploadService } from '../services/match-upload.service';
 import { COUNTRIES } from '../shared/countries.constant';
 import { COUNTRY_LEAGUES } from '../shared/country-leagues.constant';
+import { HttpClient } from '@angular/common/http';
 
 @Component({
   selector: 'app-archives-upload',
@@ -49,11 +50,14 @@ import { COUNTRY_LEAGUES } from '../shared/country-leagues.constant';
               <input *ngIf="useManualLeague" class="input" [(ngModel)]="rawLeagueName" (ngModelChange)="onLeagueManualChange()" placeholder="Type league name..." />
             </div>
             <div class="grid gap-1">
-              <label>Country</label>
-              <select class="input" [(ngModel)]="rawCountry" (ngModelChange)="onCountryChange()">
-                <option value="">Select country...</option>
-                <option *ngFor="let c of countries" [value]="c">{{ c }}</option>
-              </select>
+              <label>Country or Competition</label>
+              <div class="country-select">
+                <input class="input" type="text" [(ngModel)]="countryFilter" placeholder="Search country or competition..." />
+                <select class="input" [(ngModel)]="rawCountry" (ngModelChange)="onCountryChange()">
+                  <option value="">Select country or competition...</option>
+                  <option *ngFor="let c of filteredCountries" [value]="c">{{ displayContext(c) }}</option>
+                </select>
+              </div>
             </div>
             <div class="grid gap-1">
               <label>Season </label>
@@ -148,8 +152,53 @@ Nublense
   `
 })
 export class ArchivesUploadComponent {
+  constructor(){
+    const http = inject(HttpClient);
+    // Dynamically load contexts (countries + competitions) with fallback to static COUNTRIES
+    http.get<any>('/api/matches/upload/api/options/contexts').subscribe({
+      next: (res) => {
+        try {
+          let countries = Array.isArray(res?.countries) ? (res.countries as string[]) : (COUNTRIES as string[]);
+          const compGroups = res?.competitions || {};
+          const flatComps: string[] = [];
+          for (const k of Object.keys(compGroups)) {
+            const arr = compGroups[k];
+            if (Array.isArray(arr)) flatComps.push(...arr);
+          }
+          if (!countries || countries.length === 0) countries = COUNTRIES as string[];
+          this.competitions = flatComps;
+          const merged = [...countries, ...this.competitions];
+          const seen = new Set<string>();
+          const deduped = merged.filter(v => {
+            const key = (v || '').trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          this.countries = deduped.slice().sort((a, b) => a.localeCompare(b));
+        } catch {
+          this.countries = COUNTRIES;
+          this.competitions = [];
+        }
+      },
+      error: _ => {
+        this.countries = COUNTRIES;
+        this.competitions = [];
+      }
+    });
+  }
   countries: readonly string[] = COUNTRIES;
+  competitions: string[] = [];
+  countryFilter: string = '';
   seasons: readonly string[] = [];
+  get filteredCountries(): readonly string[] {
+    const q = this.countryFilter?.toLowerCase().trim();
+    if (!q) return this.countries;
+    return this.countries.filter(c => c.toLowerCase().includes(q));
+  }
+  displayContext(c: string): string {
+    return this.competitions.includes(c) ? `[Comp] ${c}` : c;
+  }
   private generateSeasons(startYear: number, endYear: number): string[] {
     const arr: string[] = [];
     for (let y = startYear; y <= endYear; y++) {
@@ -233,7 +282,7 @@ export class ArchivesUploadComponent {
     this.rawErrors = [];
     this.rawSuccess = false;
     if (!this.rawCountry.trim() || !this.rawLeagueName.trim() || !this.rawSeason.trim() || !this.rawText.trim()){
-      this.rawMessage = 'Please fill Country, League, Season and paste Raw Text.';
+      this.rawMessage = 'Please fill Country or Competition, League, Season and paste Raw Text.';
       this.rawSuccess = false;
       return;
     }

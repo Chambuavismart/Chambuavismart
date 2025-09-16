@@ -14,8 +14,11 @@ spring:
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
+    # IMPORTANT: Never allow Hibernate to auto-create or drop the schema in ANY profile.
+    # Do NOT change this to create or create-drop. Doing so can delete your data.
+    # Use managed migrations (Flyway/Liquibase) or manual scripts for schema changes.
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     open-in-view: false
     properties:
       hibernate:
@@ -58,7 +61,8 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
         jdbc.time_zone: Africa/Nairobi
     hibernate:
-      ddl-auto: update
+      # SAFETY: Do not auto-manage schema in dev either.
+      ddl-auto: none
   flyway:
     enabled: false
     locations: classpath:db/migration
@@ -84,7 +88,8 @@ spring:
         dialect: org.hibernate.dialect.H2Dialect
         jdbc.time_zone: Africa/Nairobi
     hibernate:
-      ddl-auto: create-drop
+      # TEST SAFETY: Even in tests, never create-drop automatically to avoid accidental data loss in shared envs.
+      ddl-auto: none
     show-sql: false
   flyway:
     enabled: false

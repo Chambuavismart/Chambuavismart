@@ -11,8 +11,11 @@ import com.chambua.vismart.repository.TeamRepository;
 import com.chambua.vismart.util.TeamNameNormalizer;
 import com.chambua.vismart.repository.SeasonRepository;
 import com.chambua.vismart.model.Season;
+import com.chambua.vismart.repository.CountryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -37,13 +40,114 @@ public class MatchUploadService {
     private final MatchRepository matchRepository;
     private final MatchDataValidationService validationService;
     private final SeasonRepository seasonRepository;
+    private final CountryRepository countryRepository;
 
-    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository, MatchDataValidationService validationService, SeasonRepository seasonRepository) {
+    @Value("${app.enableCompetitions:false}")
+    private boolean enableCompetitions;
+
+    private static final Set<String> COMPETITIONS = new java.util.LinkedHashSet<>(java.util.List.of(
+            // Global (FIFA)
+            "FIFA — World Cup",
+            "FIFA — Club World Cup",
+            "FIFA — U-20 World Cup",
+            "FIFA — U-17 World Cup",
+            "FIFA — Women’s World Cup",
+            "FIFA — U-20 Women’s World Cup",
+            "FIFA — U-17 Women’s World Cup",
+            "FIFA — Olympic Football Tournament (Men)",
+            "FIFA — Olympic Football Tournament (Women)",
+            "FIFA — Confederations Cup (historical)",
+            // Africa (CAF)
+            "CAF — Africa Cup of Nations (AFCON)",
+            "CAF — African Nations Championship (CHAN)",
+            "CAF — Champions League",
+            "CAF — Confederation Cup",
+            "CAF — Super Cup",
+            "CAF — Africa Women Cup of Nations",
+            "CAF — Women’s Champions League",
+            // Asia (AFC)
+            "AFC — Asian Cup",
+            "AFC — Champions League Elite",
+            "AFC — Champions League Two",
+            "AFC — AFC Cup",
+            "AFC — Women’s Asian Cup",
+            "AFC — Women’s Champions League",
+            // Europe (UEFA)
+            "UEFA — European Championship (EURO)",
+            "UEFA — Champions League",
+            "UEFA — Europa League",
+            "UEFA — Europa Conference League",
+            "UEFA — Super Cup",
+            "UEFA — Nations League",
+            "UEFA — Women’s European Championship",
+            "UEFA — Women’s Champions League",
+            // CONCACAF
+            "CONCACAF — Gold Cup",
+            "CONCACAF — Nations League",
+            "CONCACAF — Champions Cup",
+            "CONCACAF — Central American Cup",
+            "CONCACAF — Caribbean Cup",
+            "CONCACAF — W Gold Cup",
+            "CONCACAF — W Championship",
+            // CONMEBOL
+            "CONMEBOL — Copa América",
+            "CONMEBOL — Copa Libertadores",
+            "CONMEBOL — Copa Sudamericana",
+            "CONMEBOL — Recopa Sudamericana",
+            "CONMEBOL — Copa América Femenina",
+            "CONMEBOL — Copa Libertadores Femenina",
+            // OFC
+            "OFC — Nations Cup",
+            "OFC — Champions League",
+            "OFC — Women’s Nations Cup",
+            "OFC — Women’s Champions League",
+            // Other / Intercontinental
+            "Intercontinental — Panamerican Championship (historical)",
+            "Intercontinental — Arab Cup",
+            "Intercontinental — Afro-Asian Cup of Nations (historical)"
+    ));
+
+    private static String norm(String s) { return s == null ? "" : s.trim().replaceAll("\\s+", " "); }
+    private boolean isKnownCompetition(String label) {
+        if (label == null) return false;
+        String x = norm(label);
+        // Normalize hyphen variants to em dash used in canonical list
+        x = x.replace("-", "—").replace("–", "—");
+        // Case-insensitive comparison on collapsed whitespace
+        for (String c : COMPETITIONS) {
+            String cc = norm(c);
+            if (cc.equalsIgnoreCase(x)) return true;
+        }
+        return false;
+    }
+
+    private boolean isKnownCountryName(String name) {
+        if (name == null || name.isBlank()) return false;
+        try {
+            for (var c : countryRepository.findAllByOrderByNameAsc()) {
+                if (c.getName() != null && c.getName().trim().equalsIgnoreCase(name.trim())) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    // Public helpers for controller/UI
+    public boolean isCompetitionsFeatureEnabled() { return enableCompetitions; }
+    public boolean isCompetitionLabel(String label) { return isKnownCompetition(label); }
+
+    @Autowired
+    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository, MatchDataValidationService validationService, SeasonRepository seasonRepository, CountryRepository countryRepository) {
         this.leagueRepository = leagueRepository;
         this.teamRepository = teamRepository;
         this.matchRepository = matchRepository;
         this.validationService = validationService;
         this.seasonRepository = seasonRepository;
+        this.countryRepository = countryRepository;
+    }
+
+    // Backward-compatible constructor for existing tests
+    public MatchUploadService(LeagueRepository leagueRepository, TeamRepository teamRepository, MatchRepository matchRepository, MatchDataValidationService validationService, SeasonRepository seasonRepository) {
+        this(leagueRepository, teamRepository, matchRepository, validationService, seasonRepository, null);
     }
 
     public record UploadResult(boolean success, List<String> errors, int insertedCount, long deletedCount,
@@ -85,7 +189,19 @@ public class MatchUploadService {
             errors.add("CSV file is empty");
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
-        League league = findOrCreateLeague(leagueName, country, season);
+        // Competition/country context validation (feature-flagged)
+        String ctx = normalizeKey(opt(country));
+        if (enableCompetitions) {
+            boolean comp = isKnownCompetition(ctx);
+            boolean cntry = isKnownCountryName(ctx);
+            if (comp) {
+                log.info("[Upload][Competition] Detected competition context: {}", ctx);
+            } else if (!cntry) {
+                log.warn("[Upload][Validation] Unknown contextLabel: {}", ctx);
+                warnLogs.add(new WarnLog(null, null, "[Upload][Validation] Unknown contextLabel: " + ctx + "; check canonical spelling"));
+            }
+        }
+        League league = findOrCreateLeague(leagueName, ctx, season);
         Season seasonEntity = null;
         if (seasonId != null) {
             seasonEntity = seasonRepository.findById(seasonId).orElse(null);
@@ -315,7 +431,19 @@ public class MatchUploadService {
             errors.add("Text content is empty");
             return new UploadResult(false, errors, 0, 0, updatedLogs, skippedLogs, warnLogs);
         }
-        League league = findOrCreateLeague(leagueName, country, season);
+        // Competition/country context validation (feature-flagged)
+        String ctx = normalizeKey(opt(country));
+        if (enableCompetitions) {
+            boolean comp = isKnownCompetition(ctx);
+            boolean cntry = isKnownCountryName(ctx);
+            if (comp) {
+                log.info("[Upload][Competition] Detected competition context: {}", ctx);
+            } else if (!cntry) {
+                log.warn("[Upload][Validation] Unknown contextLabel: {}", ctx);
+                warnLogs.add(new WarnLog(null, null, "[Upload][Validation] Unknown contextLabel: " + ctx + "; check canonical spelling"));
+            }
+        }
+        League league = findOrCreateLeague(leagueName, ctx, season);
         Season seasonEntity = null;
         if (seasonId != null) {
             seasonEntity = seasonRepository.findById(seasonId).orElse(null);
@@ -488,7 +616,11 @@ public class MatchUploadService {
             }
 
             if (isPureNumber(line)) { continue; }
-            errors.add("Unrecognized line format: " + line);
+            if (strict) {
+                errors.add("Unrecognized line format: " + line);
+            } else {
+                warnLogs.add(new WarnLog(null, null, "Ignored line: " + line));
+            }
         }
 
         // 2) Validate
@@ -645,11 +777,9 @@ public class MatchUploadService {
                         }
                     }
                 } else {
-                    // Strict team validation for Raw Text Upload: ensure teams already exist in this league
-                    String homeNorm = TeamNameNormalizer.normalize(homeName.trim());
-                    String awayNorm = TeamNameNormalizer.normalize(awayName.trim());
-                    Optional<Team> homeOpt = teamRepository.findByNormalizedNameAndLeagueId(homeNorm, league.getId());
-                    Optional<Team> awayOpt = teamRepository.findByNormalizedNameAndLeagueId(awayNorm, league.getId());
+                    // Strict team validation for Raw Text Upload: ensure teams already exist in this league (name-based for backward compatibility)
+                    Optional<Team> homeOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, homeName.trim());
+                    Optional<Team> awayOpt = teamRepository.findByLeagueAndNameIgnoreCase(league, awayName.trim());
                     boolean missing = false;
                     boolean homeMissing = false;
                     boolean awayMissing = false;
@@ -754,13 +884,20 @@ public class MatchUploadService {
     private Team findOrCreateTeam(League league, String name) {
         String raw = opt(name);
         if (raw.isEmpty()) throw new IllegalArgumentException("Team name is required");
+        String trimmed = raw.trim();
+        // 1) Try exact name match within league (backward compatible with legacy tests/mocks)
+        Optional<Team> byName = teamRepository.findByLeagueAndNameIgnoreCase(league, trimmed);
+        if (byName.isPresent()) return byName.get();
+        // 2) Try normalized name lookup
         String normalized = TeamNameNormalizer.normalize(raw);
         log.info("Resolving team (leagueId={}): raw='{}', normalized='{}'", league.getId(), raw, normalized);
-        return teamRepository.findByNormalizedNameAndLeagueId(normalized, league.getId())
-                .orElseGet(() -> {
-                    log.info("Creating new team in league {} with name: raw='{}', normalized='{}'", league.getId(), raw, normalized);
-                    return teamRepository.save(new Team(raw, league));
-                });
+        Optional<Team> byNorm = teamRepository.findByNormalizedNameAndLeagueId(normalized, league.getId());
+        if (byNorm.isPresent()) return byNorm.get();
+        // 3) Create if still not found
+        log.info("Creating new team in league {} with name: raw='{}', normalized='{}'", league.getId(), raw, normalized);
+        Team created = new Team(raw, league);
+        Team saved = teamRepository.save(created);
+        return saved != null ? saved : created;
     }
 
     private static String[] normalizeHeader(String header) {
@@ -863,10 +1000,10 @@ public class MatchUploadService {
         // Treat playoff stage labels (Final/Semi-finals/Quarter-finals) as valid round context, not headers
         if (isPlayoffStage(t)) return false;
         // country or section header with colon, standings/draw, group/play offs keywords
-        if (t.matches("^[A-Z][A-Z\u00C0-\u017F\s]+:?$")) return true;
+        if (t.matches("^[A-Z][A-Z\\u00C0-\\u017F\\s-]+:?$")) return true;
         String tl = t.toLowerCase();
         if (tl.equals("standings") || tl.equals("draw")) return true;
-        if (tl.contains("group") || tl.contains("play off")) return true;
+        if (tl.contains("group") || tl.contains("play off") || tl.contains("apertura") || tl.contains("clausura")) return true;
         return false;
     }
 

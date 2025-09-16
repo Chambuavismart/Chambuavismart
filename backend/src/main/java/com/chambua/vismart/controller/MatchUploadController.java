@@ -3,13 +3,16 @@ package com.chambua.vismart.controller;
 import com.chambua.vismart.model.MatchStatus;
 import com.chambua.vismart.repository.LeagueRepository;
 import com.chambua.vismart.repository.MatchRepository;
+import com.chambua.vismart.repository.CountryRepository;
 import com.chambua.vismart.service.MatchUploadService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -20,11 +23,13 @@ public class MatchUploadController {
     private final MatchUploadService service;
     private final LeagueRepository leagueRepository;
     private final MatchRepository matchRepository;
+    private final CountryRepository countryRepository;
 
-    public MatchUploadController(MatchUploadService service, LeagueRepository leagueRepository, MatchRepository matchRepository) {
+    public MatchUploadController(MatchUploadService service, LeagueRepository leagueRepository, MatchRepository matchRepository, CountryRepository countryRepository) {
         this.service = service;
         this.leagueRepository = leagueRepository;
         this.matchRepository = matchRepository;
+        this.countryRepository = countryRepository;
     }
 
     @PostMapping(path = "/csv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -132,6 +137,88 @@ public class MatchUploadController {
                     "success", false,
                     "message", ex.getMessage()
             ));
+        }
+    }
+    @GetMapping(path = "/api/options/contexts", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Cacheable("contextsOptions")
+    public ResponseEntity<?> getContexts() {
+        try {
+            List<String> countries = countryRepository.findAllByOrderByNameAsc().stream().map(c -> c.getName()).toList();
+            Map<String, List<String>> competitions = Map.of(
+                    "global", List.of(
+                            "FIFA — World Cup",
+                            "FIFA — Club World Cup",
+                            "FIFA — U-20 World Cup",
+                            "FIFA — U-17 World Cup",
+                            "FIFA — Women’s World Cup",
+                            "FIFA — U-20 Women’s World Cup",
+                            "FIFA — U-17 Women’s World Cup",
+                            "FIFA — Olympic Football Tournament (Men)",
+                            "FIFA — Olympic Football Tournament (Women)",
+                            "FIFA — Confederations Cup (historical)"
+                    ),
+                    "africa", List.of(
+                            "CAF — Africa Cup of Nations (AFCON)",
+                            "CAF — African Nations Championship (CHAN)",
+                            "CAF — Champions League",
+                            "CAF — Confederation Cup",
+                            "CAF — Super Cup",
+                            "CAF — Africa Women Cup of Nations",
+                            "CAF — Women’s Champions League"
+                    ),
+                    "asia", List.of(
+                            "AFC — Asian Cup",
+                            "AFC — Champions League Elite",
+                            "AFC — Champions League Two",
+                            "AFC — AFC Cup",
+                            "AFC — Women’s Asian Cup",
+                            "AFC — Women’s Champions League"
+                    ),
+                    "europe", List.of(
+                            "UEFA — European Championship (EURO)",
+                            "UEFA — Champions League",
+                            "UEFA — Europa League",
+                            "UEFA — Europa Conference League",
+                            "UEFA — Super Cup",
+                            "UEFA — Nations League",
+                            "UEFA — Women’s European Championship",
+                            "UEFA — Women’s Champions League"
+                    ),
+                    "concacaf", List.of(
+                            "CONCACAF — Gold Cup",
+                            "CONCACAF — Nations League",
+                            "CONCACAF — Champions Cup",
+                            "CONCACAF — Central American Cup",
+                            "CONCACAF — Caribbean Cup",
+                            "CONCACAF — W Gold Cup",
+                            "CONCACAF — W Championship"
+                    ),
+                    "conmebol", List.of(
+                            "CONMEBOL — Copa América",
+                            "CONMEBOL — Copa Libertadores",
+                            "CONMEBOL — Copa Sudamericana",
+                            "CONMEBOL — Recopa Sudamericana",
+                            "CONMEBOL — Copa América Femenina",
+                            "CONMEBOL — Copa Libertadores Femenina"
+                    ),
+                    "ofc", List.of(
+                            "OFC — Nations Cup",
+                            "OFC — Champions League",
+                            "OFC — Women’s Nations Cup",
+                            "OFC — Women’s Champions League"
+                    ),
+                    "other", List.of(
+                            "Intercontinental — Panamerican Championship (historical)",
+                            "Intercontinental — Arab Cup",
+                            "Intercontinental — Afro-Asian Cup of Nations (historical)"
+                    )
+            );
+            return ResponseEntity.ok(Map.of(
+                    "countries", countries,
+                    "competitions", competitions
+            ));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of("success", false, "message", ex.getMessage()));
         }
     }
 }

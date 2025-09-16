@@ -79,14 +79,14 @@ import { LeagueContextService } from '../services/league-context.service';
             </div>
           </ng-template>
 
-          <!-- Country handling -->
+          <!-- Country or Competition handling (MVP) -->
           <label>
-            Country
+            Country or Competition
             <div class="country-select">
-              <input type="text" class="country-filter" [(ngModel)]="countryFilter" placeholder="Search country..." [disabled]="requiresExistingLeague"/>
+              <input type="text" class="country-filter" [(ngModel)]="countryFilter" placeholder="Search country or competition..." [disabled]="requiresExistingLeague"/>
               <select [(ngModel)]="country" [disabled]="requiresExistingLeague" (ngModelChange)="onCountryChange()">
-                <option value="">Select country...</option>
-                <option *ngFor="let c of filteredCountries" [value]="c">{{c}}</option>
+                <option value="">Select country or competition...</option>
+                <option *ngFor="let c of filteredCountries" [value]="c">{{ displayContext(c) }}</option>
               </select>
             </div>
           </label>
@@ -287,10 +287,14 @@ export class MatchUploadComponent {
   // Country dropdown support
   countryFilter: string = '';
   countries: readonly string[] = COUNTRIES;
+  competitions: string[] = [];
   get filteredCountries(): readonly string[] {
     const q = this.countryFilter?.toLowerCase().trim();
     if (!q) return this.countries;
     return this.countries.filter(c => c.toLowerCase().includes(q));
+  }
+  displayContext(c: string): string {
+    return this.competitions.includes(c) ? `[Comp] ${c}` : c;
   }
 
   // League selection for NEW_LEAGUE mode
@@ -386,6 +390,45 @@ export class MatchUploadComponent {
             this.fixturesOptionById[opt.leagueId] = { season: opt.season, country: g.country, leagueName: g.leagueName };
           }
         }
+      }
+    });
+
+    // Dynamically load contexts (countries + competitions) with fallback to static constants
+    this.http.get<any>('/api/matches/upload/api/options/contexts').subscribe({
+      next: (res) => {
+        try {
+          let countries = Array.isArray(res?.countries) ? (res.countries as string[]) : (COUNTRIES as string[]);
+          const compGroups = res?.competitions || {};
+          const flatComps: string[] = [];
+          for (const k of Object.keys(compGroups)) {
+            const arr = compGroups[k];
+            if (Array.isArray(arr)) flatComps.push(...arr);
+          }
+          // Fallback if backend returned an empty countries array (e.g., DB not seeded)
+          if (!countries || countries.length === 0) {
+            countries = COUNTRIES as string[];
+          }
+          // Assign lists
+          this.competitions = flatComps;
+          // Merge for a single select list: Countries first, then competitions. De-duplicate and sort alphabetically.
+          const merged = [...countries, ...this.competitions];
+          const seen = new Set<string>();
+          const deduped = merged.filter(v => {
+            const key = (v || '').trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          // Keep simple alpha sort for usability
+          this.countries = deduped.slice().sort((a, b) => a.localeCompare(b));
+        } catch {
+          this.countries = COUNTRIES;
+          this.competitions = [];
+        }
+      },
+      error: _ => {
+        this.countries = COUNTRIES;
+        this.competitions = [];
       }
     });
   }
@@ -608,7 +651,7 @@ export class MatchUploadComponent {
     }
 
     // NEW_LEAGUE requires country, season, and a league (from dropdown or manual)
-    if (!this.country.trim()) { this.success = false; this.message = 'Please select a country.'; return false; }
+    if (!this.country.trim()) { this.success = false; this.message = 'Please select a country or competition.'; return false; }
     if (!this.season.trim()) { this.success = false; this.message = 'Please select a season.'; return false; }
     const chosen = (this.useManualLeague ? this.leagueManual?.trim() : this.leagueSelect?.trim()) || '';
     if (!chosen) {
