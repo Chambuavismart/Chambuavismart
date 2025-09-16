@@ -2,7 +2,7 @@ import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
-import { League, LeagueService, FormGuideRowDTO } from '../services/league.service';
+import { League, LeagueService, FormGuideRowDTO, GroupedLeagueDTO } from '../services/league.service';
 import { Season, SeasonService } from '../services/season.service';
 import { Subject, of } from 'rxjs';
 import { switchMap, distinctUntilChanged, map, tap, catchError, finalize } from 'rxjs/operators';
@@ -20,7 +20,9 @@ import { switchMap, distinctUntilChanged, map, tap, catchError, finalize } from 
           <label class="label">League</label>
           <select class="select" [ngModel]="leagueId" (ngModelChange)="onLeagueChange($event)">
             <option [ngValue]="null">-- Choose a league --</option>
-            <option *ngFor="let lg of leagues" [ngValue]="lg.id">{{ lg.country }} {{ lg.season }} – {{ lg.name }}</option>
+            <optgroup *ngFor="let g of groupedLeagues" [label]="g.groupLabel">
+              <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
+            </optgroup>
           </select>
 
           <label class="label">Season</label>
@@ -302,6 +304,9 @@ export class FormGuideComponent implements OnInit {
   private route: ActivatedRoute = inject(ActivatedRoute);
 
   leagues: League[] = [];
+  // Grouped leagues for dropdown (grouped by Country — League Name, options per season latest->oldest)
+  groupedLeagues: GroupedLeagueDTO[] = [];
+  private optionById: Record<number, { leagueName: string; country: string; season: string }> = {};
   leagueId: number | null = null;
   limit: number | 'all' = 'all';
   scope: 'overall'|'home'|'away' = 'overall';
@@ -321,22 +326,19 @@ export class FormGuideComponent implements OnInit {
   private loadParams$ = new Subject<{ leagueId: number; seasonId: number; limit: number | 'all'; scope: 'overall'|'home'|'away' }>();
 
   constructor(){
-    this.api.getLeagues().subscribe({ next: d => {
-      const arr = (d ?? []).slice();
-      arr.sort((a,b) => {
-        const ca = (a.country || '').toLowerCase();
-        const cb = (b.country || '').toLowerCase();
-        if (ca < cb) return -1;
-        if (ca > cb) return 1;
-        // tie-breakers for stable UX
-        const sa = (a.season || '').toLowerCase();
-        const sb = (b.season || '').toLowerCase();
-        if (sa < sb) return -1;
-        if (sa > sb) return 1;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-      this.leagues = arr;
+    // Load grouped leagues for dropdown and build quick lookup map
+    this.api.getGroupedLeaguesForUpload().subscribe({ next: groups => {
+      this.groupedLeagues = groups || [];
+      this.optionById = {};
+      for (const g of this.groupedLeagues) {
+        for (const opt of (g.options || [])) {
+          if (opt && typeof opt.leagueId === 'number') {
+            this.optionById[opt.leagueId] = { leagueName: g.leagueName, country: g.country, season: opt.season };
+          }
+        }
+      }
     }, error: _ => this.error = 'Failed to load leagues' });
+
     // hydrate from URL query params if provided
     this.route.queryParamMap.subscribe(qp => {
       const lid = qp.get('leagueId');
@@ -609,7 +611,9 @@ export class FormGuideComponent implements OnInit {
 
   headerLeagueName(){
     const lg = this.leagues.find(l => l.id === this.leagueId);
-    return lg ? `${lg.name}` : '';
+    if (lg) return `${lg.name}`;
+    const info = (this.leagueId != null) ? this.optionById[this.leagueId] : null;
+    return info ? `${info.leagueName}` : '';
   }
   headerSeasonName(){
     const s = this.seasons.find(x => x.id === this.seasonId!);

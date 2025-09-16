@@ -3,6 +3,7 @@ import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, NavigationEnd } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO } from '../services/fixtures.service';
+import { LeagueService, GroupedLeagueDTO } from '../services/league.service';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
 import { forkJoin } from 'rxjs';
 
@@ -50,7 +51,9 @@ import { forkJoin } from 'rxjs';
       <div class="toolbar">
         <label class="muted">League</label>
         <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="loadFixtures()">
-          <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueCountry }} – {{ l.leagueName }} – {{ l.season }} ({{ l.upcomingCount }})</option>
+          <optgroup *ngFor="let g of groupedLeagues" [label]="g.groupLabel">
+            <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
+          </optgroup>
         </select>
         <label class="muted">Upcoming only</label>
         <input type="checkbox" [(ngModel)]="upcomingOnly" (change)="loadFixtures()"/>
@@ -112,8 +115,11 @@ export class FixturesComponent implements OnInit, OnDestroy {
   private api = inject(FixturesService);
   private router = inject(Router);
   private leadersApi = inject(GlobalLeadersService);
+  private leagueService = inject(LeagueService);
 
   leagues: LeagueWithUpcomingDTO[] = [];
+  // Grouped leagues for mobile dropdown (Country — League Name, seasons latest->oldest)
+  groupedLeagues: GroupedLeagueDTO[] = [];
   selectedLeagueId: number | null = null;
   currentLeagueName: string | null = null;
   fixtures: FixtureDTO[] = [];
@@ -146,6 +152,19 @@ export class FixturesComponent implements OnInit, OnDestroy {
       // Preload leaders cache, then load fixtures
       this.loadLeaders();
       this.loadFixtures();
+    });
+
+    // Load grouped leagues for the mobile dropdown
+    this.leagueService.getGroupedLeaguesForUpload().subscribe(groups => {
+      this.groupedLeagues = groups || [];
+      // If nothing is selected yet, default to the first option
+      if ((this.selectedLeagueId == null) && this.groupedLeagues.length) {
+        const firstGroup = this.groupedLeagues[0];
+        const firstOpt = firstGroup?.options?.[0];
+        if (firstOpt && typeof firstOpt.leagueId === 'number') {
+          this.selectedLeagueId = firstOpt.leagueId;
+        }
+      }
     });
 
     // When navigating (even to the same route), refresh if URL contains /fixtures

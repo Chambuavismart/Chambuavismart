@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatchUploadService } from '../services/match-upload.service';
-import { LeagueService, LeagueDto } from '../services/league.service';
+import { LeagueService, LeagueDto, GroupedLeagueDTO } from '../services/league.service';
 import { SeasonService, Season } from '../services/season.service';
 import { HttpClient } from '@angular/common/http';
 import { COUNTRIES } from '../shared/countries.constant';
@@ -48,9 +48,11 @@ import { LeagueContextService } from '../services/league-context.service';
           <ng-container *ngIf="requiresExistingLeague; else newLeagueBlock">
             <label>
               League
-              <select [(ngModel)]="selectedLeague" (change)="onLeagueSelected()">
-                <option value="">Select league...</option>
-                <option *ngFor="let league of leagues" [value]="league.id">{{ league.country }} • {{ league.name }} • {{ league.season }}</option>
+              <select [(ngModel)]="selectedLeague" (ngModelChange)="onLeagueSelected()">
+                <option [ngValue]="null">Select league...</option>
+                <optgroup *ngFor="let g of groupedFixturesLeagues" [label]="g.groupLabel">
+                  <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
+                </optgroup>
               </select>
             </label>
           </ng-container>
@@ -147,6 +149,14 @@ Nublense
 0
 2
         </pre>
+        <label style="display:block; margin:6px 0;" title="Enable when your text is clean and already in the accepted formats. Disable to let the parser ignore headers/noise.">
+          <input type="checkbox" [(ngModel)]="strictText"/>
+          Strict mode (reject messy inputs; require clean format)
+        </label>
+        <div class="hint" style="margin: -4px 0 8px 0;">
+          When to use: turn this ON for clean, well-formatted EPL-style inputs or the single-line format so the system strictly validates and catches mistakes.
+          Turn this OFF for messy copy-pastes that include extra headers like 'FRANCE:', 'Standings', group names, or status markers (AET/FT) so the parser can ignore that noise.
+        </div>
         <textarea [(ngModel)]="text" rows="12" placeholder="Paste your rounds and matches here..."></textarea>
         <button (click)="uploadText()" [disabled]="!text.trim()">Upload Text</button>
       </div>
@@ -160,8 +170,14 @@ Nublense
             League
             <select [(ngModel)]="fixturesLeagueId" (ngModelChange)="onFixturesLeagueChange()">
               <option [ngValue]="null">Select a league...</option>
-              <option *ngFor="let l of fixturesLeagues" [ngValue]="l.id">{{l.country}} {{l.season}} – {{l.name}}</option>
+              <optgroup *ngFor="let g of groupedFixturesLeagues" [label]="g.groupLabel">
+                <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
+              </optgroup>
             </select>
+          </label>
+          <label>
+            <input type="checkbox" [(ngModel)]="fixturesStrictMode"/>
+            Strict mode (legacy exact 6-line blocks)
           </label>
           <label style="grid-column: 1 / -1;">
             <input type="checkbox" [(ngModel)]="fullReplace"/> Full replace existing fixtures
@@ -195,6 +211,17 @@ Gimnasia Mendoza
         {{message}}
       </div>
 
+      <!-- Extra feedback for fixtures/text uploads -->
+      <div *ngIf="processedMatches || (ignoredLines?.length || 0) > 0" class="card" style="border-color:#94a3b8">
+        <h3 style="color:#334155">Parser Feedback</h3>
+        <div *ngIf="processedMatches">Processed matches: {{processedMatches}}</div>
+        <div *ngIf="ignoredLines?.length">Ignored lines (sample):
+          <ul>
+            <li *ngFor="let l of ignoredLines">{{l}}</li>
+          </ul>
+        </div>
+      </div>
+
       <!-- Upload feedback grouped -->
       <div *ngIf="results.updated?.length" class="card" style="border-color:#10b981">
         <h3 style="color:#065f46">Updated</h3>
@@ -209,10 +236,13 @@ Gimnasia Mendoza
           </tr>
         </table>
       </div>
-      <div *ngIf="results.warnings?.length" class="card" style="border-color:#fb923c">
+      <div *ngIf="(warnObjects?.length || 0) > 0 || (warnStrings?.length || 0) > 0" class="card" style="border-color:#fb923c">
         <h3 style="color:#b45309">Warnings</h3>
-        <ul>
-          <li *ngFor="let w of results.warnings">{{w.homeTeam}} vs {{w.awayTeam}} — {{w.reason}}</li>
+        <ul *ngIf="(warnObjects?.length || 0) > 0">
+          <li *ngFor="let w of warnObjects">{{w.homeTeam}} vs {{w.awayTeam}} — {{w.reason}}</li>
+        </ul>
+        <ul *ngIf="(warnStrings?.length || 0) > 0">
+          <li *ngFor="let s of warnStrings">{{s}}</li>
         </ul>
       </div>
       <div *ngIf="results.skipped?.length" class="card" style="border-color:#ef4444">
@@ -306,7 +336,7 @@ export class MatchUploadComponent {
 
   // Existing leagues dataset
   leagues: { id: number; name: string; country: string; season: string; }[] = [];
-  selectedLeague: string = '';
+  selectedLeague: number | null = null;
 
   // Fixtures upload state
   fixturesLeagueId: number | null = null;
@@ -314,7 +344,9 @@ export class MatchUploadComponent {
   fixturesLeagueName: string = '';
   fixturesCountry: string = '';
   fixturesRawText: string = '';
-  fixturesLeagues: { id: number; name: string; country: string; season: string; }[] = [];
+  // Grouped leagues for fixtures dropdown
+  groupedFixturesLeagues: GroupedLeagueDTO[] = [];
+  private fixturesOptionById: Record<number, { season: string; country: string; leagueName: string }> = {};
 
   file?: File;
   text = '';
@@ -323,6 +355,14 @@ export class MatchUploadComponent {
   success = false;
   errors: string[] = [];
   results: { updated?: any[]; skipped?: any[]; warnings?: any[] } = {};
+  // Enhanced feedback fields (fixtures/text uploads)
+  processedMatches: number = 0;
+  ignoredLines: string[] = [];
+  warnStrings: string[] = [];
+  warnObjects: any[] = [];
+  // Strict mode toggles
+  strictText: boolean = false;
+  fixturesStrictMode: boolean = false;
 
   seasons: Season[] = [];
   seasonId: number | null = null;
@@ -335,21 +375,18 @@ export class MatchUploadComponent {
   }
 
   constructor(private api: MatchUploadService, private leagueApi: LeagueService, private seasonApi: SeasonService, private http: HttpClient, private leagueContext: LeagueContextService) {
-    // load leagues for fixtures tab
-    this.leagueApi.getLeagues().subscribe(ls => {
-      const arr = (ls ?? []).slice();
-      arr.sort((a,b) => {
-        const ca = (a.country || '').toLowerCase();
-        const cb = (b.country || '').toLowerCase();
-        if (ca < cb) return -1;
-        if (ca > cb) return 1;
-        const sa = (a.season || '').toLowerCase();
-        const sb = (b.season || '').toLowerCase();
-        if (sa < sb) return -1;
-        if (sa > sb) return 1;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-      this.fixturesLeagues = arr.map(l => ({ id: l.id, name: l.name, country: l.country, season: l.season }));
+    // Load grouped leagues for fixtures tab (grouped by country + league name; seasons latest -> oldest)
+    this.leagueApi.getGroupedLeaguesForUpload().subscribe(groups => {
+      this.groupedFixturesLeagues = groups || [];
+      // Build quick lookup by leagueId to fill details on selection
+      this.fixturesOptionById = {};
+      for (const g of this.groupedFixturesLeagues) {
+        for (const opt of (g.options || [])) {
+          if (opt && typeof opt.leagueId === 'number') {
+            this.fixturesOptionById[opt.leagueId] = { season: opt.season, country: g.country, leagueName: g.leagueName };
+          }
+        }
+      }
     });
   }
 
@@ -361,29 +398,25 @@ export class MatchUploadComponent {
   }
 
   onFixturesLeagueChange(){
-    const l = this.fixturesLeagues.find(x => x.id === this.fixturesLeagueId);
-    if (l) this.fixturesSeason = l.season;
-    if (this.fixturesLeagueId) {
-      this.leagueApi.getLeagueDetails(this.fixturesLeagueId).subscribe(details => {
-        this.fixturesLeagueName = details.name;
-        this.fixturesCountry = details.country;
-        this.fixturesSeason = details.season;
-      });
+    if (this.fixturesLeagueId != null && this.fixturesOptionById[this.fixturesLeagueId]){
+      const info = this.fixturesOptionById[this.fixturesLeagueId];
+      this.fixturesLeagueName = info.leagueName;
+      this.fixturesCountry = info.country;
+      this.fixturesSeason = info.season;
     } else {
       this.fixturesLeagueName = '';
       this.fixturesCountry = '';
+      this.fixturesSeason = '';
     }
   }
 
   onUploadTypeChange(){
-    // Load leagues when an existing-league-based type is selected
+    // No need to load flat leagues; grouped list is already loaded in ctor
     if (this.requiresExistingLeague) {
-      this.leagueApi.getAllLeagues().subscribe(data => {
-        this.leagues = (data || []).map(d => ({ id: d.id, name: d.name, country: d.country, season: d.season }));
-      });
+      // keep current grouped list and await user selection
     } else {
       // Reset fields for new league upload
-      this.selectedLeague = '';
+      this.selectedLeague = null;
       this.leagues = [];
       this.country = '';
       this.season = '';
@@ -401,11 +434,18 @@ export class MatchUploadComponent {
     if (this.selectedLeague) {
       const lid = Number(this.selectedLeague);
       if (!Number.isNaN(lid) && lid > 0) this.leagueContext.setCurrentLeagueId(lid);
-      this.leagueApi.getLeagueDetails(this.selectedLeague).subscribe(details => {
-        this.country = details.country;
-        this.season = details.season;
-        this.leagueName = details.name; // keep API contract
-      });
+      const info = this.fixturesOptionById[lid];
+      if (info) {
+        this.country = info.country;
+        this.season = info.season;
+        this.leagueName = info.leagueName;
+      } else {
+        this.leagueApi.getLeagueDetails(lid).subscribe(details => {
+          this.country = details.country;
+          this.season = details.season;
+          this.leagueName = details.name; // keep API contract
+        });
+      }
     } else {
       this.country = '';
       this.season = '';
@@ -427,7 +467,7 @@ export class MatchUploadComponent {
     this.resetFeedback();
     if (!this.validateMeta()) return;
     const leagueIdOpt = this.requiresExistingLeague && this.selectedLeague ? Number(this.selectedLeague) : null;
-    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false, allowSeasonAutoCreate: this.uploadType==='FULL_REPLACE' }).subscribe({
+    this.api.uploadUnifiedText(this.uploadType, this.leagueName, this.country, this.season, this.text, { seasonId: null, leagueId: leagueIdOpt, autoDetectSeason: false, strict: this.strictText, allowSeasonAutoCreate: this.uploadType==='FULL_REPLACE' }).subscribe({
       next: res => this.handleResult(res),
       error: err => this.handleHttpError(err)
     });
@@ -444,8 +484,9 @@ export class MatchUploadComponent {
     const body = {
       leagueId: this.fixturesLeagueId,
       season: this.fixturesSeason,
-      fullReplace: false,
-      rawText: this.fixturesRawText
+      fullReplace: this.fullReplace,
+      rawText: this.fixturesRawText,
+      strictMode: this.fixturesStrictMode
     };
     this.http.post('/api/fixtures/upload-text', body).subscribe({
       next: (res: any) => {
@@ -464,6 +505,20 @@ export class MatchUploadComponent {
     this.errors = res?.errors || [];
     // Capture grouped results
     this.results = { updated: res?.updated || [], skipped: res?.skipped || [], warnings: res?.warnings || [] };
+    // Process warnings into strings vs objects for display compatibility
+    this.warnStrings = [];
+    this.warnObjects = [];
+    const ws: any[] = this.results.warnings || [];
+    for (const w of ws) {
+      if (w && typeof w === 'object' && ('reason' in w || 'homeTeam' in w || 'awayTeam' in w)) {
+        this.warnObjects.push(w);
+      } else if (typeof w === 'string') {
+        this.warnStrings.push(w);
+      }
+    }
+    // Enhanced feedback fields
+    this.processedMatches = res?.processedMatches ?? 0;
+    this.ignoredLines = res?.ignoredLines || [];
     const anyUpdated = (this.results.updated?.length || 0) > 0;
     const inserted = (res?.inserted !== undefined ? res.inserted : res?.insertedCount) ?? 0;
     const deleted = (res?.deleted !== undefined ? res.deleted : res?.deletedCount) ?? 0;
@@ -479,8 +534,10 @@ export class MatchUploadComponent {
     } else if (completedAll !== null) {
       suffix = ` Completed in DB: ${completedAll}.`;
     }
+    const skippedCount = (this.results.skipped?.length || 0);
     if (this.success) {
-      this.message = baseMsg + suffix;
+      const skippedNote = skippedCount === 0 ? ' No matches were skipped.' : ` Skipped ${skippedCount} match(es).`;
+      this.message = baseMsg + suffix + skippedNote;
     } else {
       // Summarize strict out-of-window errors when present
       const out = this.errors.filter(e => /out-of-window|outside season window/i.test(e)).length;

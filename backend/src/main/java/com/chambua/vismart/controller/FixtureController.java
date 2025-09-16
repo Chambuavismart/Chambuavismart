@@ -85,6 +85,8 @@ public class FixtureController {
     public List<LeagueFixturesResponse> getFixturesByDate(@RequestParam("date") String dateIso,
                                                           @RequestParam(value = "season", required = false) String season,
                                                           @RequestParam(value = "refresh", required = false, defaultValue = "false") boolean refresh) {
+        // Log at INFO to ensure visibility in default setups
+        log.info("GET /api/fixtures/by-date date={} season={} refresh={}", dateIso, season, refresh);
         LocalDate date;
         try { date = LocalDate.parse(dateIso); } catch (Exception e){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date format. Expected YYYY-MM-DD");
@@ -123,6 +125,8 @@ public class FixtureController {
                 (LeagueFixturesResponse lfr) -> lfr.getFixtures() == null || lfr.getFixtures().isEmpty() ? null : lfr.getFixtures().get(0).getDateTime(),
                 Comparator.nullsLast(Comparator.naturalOrder())
         ));
+        int total = out.stream().mapToInt(l -> l.getFixtures() == null ? 0 : l.getFixtures().size()).sum();
+        log.info("/api/fixtures/by-date: {} leagues, {} fixtures for date={}", out.size(), total, date);
         return out;
     }
 
@@ -130,6 +134,7 @@ public class FixtureController {
     public Set<String> getAvailableDates(@RequestParam("year") int year,
                                          @RequestParam("month") int month,
                                          @RequestParam(value = "season", required = false) String season){
+        log.info("GET /api/fixtures/available-dates year={} month={} season={}", year, month, season);
         if (month < 1 || month > 12) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid month");
         var dates = fixtureService.getAvailableDatesForMonth(year, month, season);
         return dates.stream().map(LocalDate::toString).collect(Collectors.toCollection(LinkedHashSet::new));

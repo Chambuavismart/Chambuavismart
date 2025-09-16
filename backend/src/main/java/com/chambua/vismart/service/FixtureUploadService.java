@@ -60,9 +60,12 @@ public class FixtureUploadService {
             deleted = fixtureRepository.deleteByLeague_Id(league.getId());
         }
         List<String> errors = new ArrayList<>();
-        List<Fixture> fixtures = parseCsv(csvText, league, effectiveSeason, errors);
+        List<String> warnings = new ArrayList<>();
+        List<Fixture> fixtures = parseCsv(csvText, league, effectiveSeason, errors, warnings);
         if (!errors.isEmpty()) {
-            return UploadResultDTO.fail("CSV parsing failed", errors);
+            UploadResultDTO fail = UploadResultDTO.fail("CSV parsing failed", errors);
+            fail.setWarnings(warnings);
+            return fail;
         }
         // Validate and normalize (require scores, season consistency, duplicate detection, sort by date)
         validateAndNormalize(fixtures, league, effectiveSeason, errors);
@@ -87,7 +90,18 @@ public class FixtureUploadService {
             processed++;
         }
         String msg = String.format("CSV upload processed: %d. Deleted (replace mode): %d", processed, deleted);
-        return UploadResultDTO.ok(processed, deleted, msg);
+        UploadResultDTO ok = UploadResultDTO.ok(processed, deleted, msg);
+        // If many auto-corrections, add a hint to verify season string
+        long autoCount = warnings.stream().filter(w -> w != null && w.startsWith("[Parsing][AutoCorrect]")).count();
+        if (autoCount > 0) {
+            ok.setWarnings(warnings);
+            if (autoCount > 10) {
+                java.util.ArrayList<String> w2 = new java.util.ArrayList<>(warnings);
+                w2.add("Many dates auto-corrected—verify season string (e.g., use 2024/2025 for historical data)");
+                ok.setWarnings(w2);
+            }
+        }
+        return ok;
     }
 
     @Transactional
@@ -108,15 +122,30 @@ public class FixtureUploadService {
         }
 
         List<String> errors = new ArrayList<>();
-        List<Fixture> fixtures = parseFixtures(req.getRawText(), league, season, errors);
+        List<String> warnings = new ArrayList<>();
+        List<String> ignored = new ArrayList<>();
+        List<Fixture> fixtures = parseFixtures(req.getRawText(), league, season, errors, warnings, ignored, req.isStrictMode());
 
+        boolean partial = false;
         if (!errors.isEmpty()) {
-            return UploadResultDTO.fail("Parse errors encountered", errors);
+            // Partial success if we parsed more than half a block per error (best-effort heuristic)
+            partial = !fixtures.isEmpty() && errors.size() < fixtures.size();
+            if (!partial) {
+                UploadResultDTO fail = UploadResultDTO.fail("Parse errors encountered", errors);
+                fail.setWarnings(warnings);
+                fail.setIgnoredLines(ignored.subList(0, Math.min(10, ignored.size())));
+                fail.setProcessedMatches(fixtures.size());
+                return fail;
+            }
         }
-        // Validate and normalize (require scores, season consistency, duplicate detection, sort by date)
+        // Validate and normalize (allow UPCOMING fixtures without scores)
         validateAndNormalize(fixtures, league, season, errors);
-        if (!errors.isEmpty()) {
-            return UploadResultDTO.fail("Validation failed", errors);
+        if (!errors.isEmpty() && !partial) {
+            UploadResultDTO fail = UploadResultDTO.fail("Validation failed", errors);
+            fail.setWarnings(warnings);
+            fail.setIgnoredLines(ignored.subList(0, Math.min(10, ignored.size())));
+            fail.setProcessedMatches(fixtures.size());
+            return fail;
         }
         fixtures.sort(java.util.Comparator.comparing(Fixture::getDateTime));
 
@@ -144,17 +173,40 @@ public class FixtureUploadService {
                 insertedOrUpdated++;
             }
         }
-        String msg = String.format("Fixtures for %s (%s) uploaded successfully. Total processed: %d.", league.getName(), season, insertedOrUpdated);
-        return UploadResultDTO.ok(insertedOrUpdated, deleted, msg);
+        String msg = (partial ? "Partial success: " : "") + String.format("Fixtures for %s (%s) uploaded. Total processed: %d.", league.getName(), season, insertedOrUpdated);
+        UploadResultDTO ok = UploadResultDTO.ok(insertedOrUpdated, deleted, msg);
+        if (warnings != null && !warnings.isEmpty()) {
+            long autoCount = warnings.stream().filter(w -> w != null && w.startsWith("[Parsing][AutoCorrect]")).count();
+            if (autoCount > 10) {
+                java.util.ArrayList<String> w2 = new java.util.ArrayList<>(warnings);
+                w2.add("Many dates auto-corrected—verify season string (e.g., use 2024/2025 for historical data)");
+                ok.setWarnings(w2);
+            } else {
+                ok.setWarnings(warnings);
+            }
+        }
+        ok.setIgnoredLines(ignored.subList(0, Math.min(10, ignored.size())));
+        ok.setProcessedMatches(fixtures.size());
+        return ok;
     }
 
-    private List<Fixture> parseFixtures(String rawText, League league, String season, List<String> errors){
+    public List<Fixture> parseFixtures(String rawText, League league, String season, List<String> errors, List<String> warnings, List<String> ignored, boolean strictMode){
         List<Fixture> out = new ArrayList<>();
         if (rawText == null) {
             errors.add("Raw text is empty");
             return out;
         }
-        String[] lines = rawText.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        String[] rawLines = rawText.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        // Preprocess: filter out obvious non-match lines when non-strict
+        List<String> linesList = new ArrayList<>();
+        for (String rl : rawLines) {
+            String t = rl == null ? "" : rl.trim();
+            if (t.isEmpty()) continue;
+            if (!strictMode && isNonMatchHeader(t)) { ignored.add(t); continue; }
+            linesList.add(t);
+        }
+        String[] lines = linesList.toArray(new String[0]);
+
         String currentRound = null;
         int i = 0;
         while (i < lines.length){
@@ -164,10 +216,15 @@ public class FixtureUploadService {
                 currentRound = line;
                 i++; continue;
             }
-            // Expect a date line like dd.MM. HH:mm
+            // Expect a date line like dd.MM. HH:mm (flexible)
             if (matchesDateTime(line)){
                 String dateLine = line;
                 int blockStart = i + 1;
+                // Optional status marker line (AET/FT/HT)
+                if (blockStart < lines.length && isStatusMarker(lines[blockStart])) {
+                    warnings.add("Info: Status marker '" + lines[blockStart] + "' ignored at line " + (blockStart+1));
+                    blockStart++;
+                }
                 if (blockStart + 5 >= lines.length){
                     errors.add("Unexpected end of input after date at line " + (i+1));
                     break;
@@ -204,7 +261,27 @@ public class FixtureUploadService {
                     f.setAwayTeam(away);
                     f.setHomeScore(homeScore);
                     f.setAwayScore(awayScore);
+                    // Initial status based on scores
                     f.setStatus((homeScore == null || awayScore == null) ? FixtureStatus.UPCOMING : FixtureStatus.FINISHED);
+                    // Smart date validation/correction against Nairobi today
+                    java.time.LocalDate todayNairobi = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+                    boolean splitSeason = season != null && season.contains("/");
+                    if (f.getDateTime() != null) {
+                        java.time.LocalDate inferred = f.getDateTime().toLocalDate();
+                        int mo = inferred.getMonthValue();
+                        if (inferred.isAfter(todayNairobi)) {
+                            if (splitSeason && homeScore != null && awayScore != null && mo >= 1 && mo <= 6) {
+                                java.time.LocalDateTime orig = f.getDateTime();
+                                f.setDateTime(orig.minusYears(1));
+                                warnings.add("[Parsing][AutoCorrect] Shifted date: " + orig.toLocalDate() + " -> " + f.getDateTime().toLocalDate() + " (" + season + ")");
+                                // keep FINISHED status
+                            } else if (homeScore == null || awayScore == null) {
+                                // Future fixture without score stays UPCOMING
+                                f.setStatus(FixtureStatus.UPCOMING);
+                                warnings.add("[Parsing][Future] Match date=" + inferred + " > today; set UPCOMING");
+                            }
+                        }
+                    }
                     out.add(f);
                 } catch (DateTimeParseException ex){
                     errors.add("Invalid date/time at line " + (i+1) + ": '" + dateLine + "'");
@@ -219,6 +296,7 @@ public class FixtureUploadService {
                 i++;
                 continue;
             }
+            if (!strictMode && isNonMatchHeader(line)) { ignored.add(line); i++; continue; }
             // line didn't match anything meaningful
             errors.add("Unexpected line format at " + (i+1) + ": '" + line + "'");
             i++;
@@ -226,7 +304,7 @@ public class FixtureUploadService {
         return out;
     }
 
-    private List<Fixture> parseCsv(String csvText, League league, String season, List<String> errors) {
+    public List<Fixture> parseCsv(String csvText, League league, String season, List<String> errors, List<String> warnings) {
         List<Fixture> out = new ArrayList<>();
         if (csvText == null || csvText.isBlank()) {
             errors.add("CSV is empty");
@@ -281,7 +359,25 @@ public class FixtureUploadService {
                 f.setAwayTeam(away);
                 f.setHomeScore(homeScore);
                 f.setAwayScore(awayScore);
+                // Initial status based on provided scores
                 f.setStatus((homeScore == null || awayScore == null) ? FixtureStatus.UPCOMING : FixtureStatus.FINISHED);
+                // Smart date validation/correction
+                java.time.LocalDate todayNairobi = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+                boolean splitSeason = season != null && season.contains("/");
+                if (f.getDateTime() != null) {
+                    java.time.LocalDate inferred = f.getDateTime().toLocalDate();
+                    int mo = inferred.getMonthValue();
+                    if (inferred.isAfter(todayNairobi)) {
+                        if (splitSeason && homeScore != null && awayScore != null && mo >= 1 && mo <= 6) {
+                            java.time.LocalDateTime orig = f.getDateTime();
+                            f.setDateTime(orig.minusYears(1));
+                            if (warnings != null) warnings.add("[Parsing][AutoCorrect] Shifted date: " + orig.toLocalDate() + " -> " + f.getDateTime().toLocalDate() + " (" + season + ")");
+                        } else if (homeScore == null || awayScore == null) {
+                            f.setStatus(FixtureStatus.UPCOMING);
+                            if (warnings != null) warnings.add("[Parsing][Future] Match date=" + inferred + " > today; set UPCOMING");
+                        }
+                    }
+                }
                 out.add(f);
             } catch (Exception ex) {
                 errors.add("Line " + (i+1) + ": invalid date/time");
@@ -310,9 +406,9 @@ public class FixtureUploadService {
     }
 
     private boolean matchesDateTime(String line){
-        // Accept 1–2 digit day, 1–2 digit month, and 1–2 digit hour (e.g., "1.9. 9:00" or "01.09. 13:00")
+        // Accept 1–2 digit day, 1–2 digit month, optional trailing dot, and 1–2 digit hour (e.g., "1.9. 9:00", "01.09 13:00")
         String l = line == null ? "" : line.trim();
-        return l.matches("^\\d{1,2}\\.\\d{1,2}\\.\\s*\\d{1,2}:\\d{2}$");
+        return l.matches("^\\d{1,2}\\.\\d{1,2}\\.?\\s*\\d{1,2}:\\d{2}$");
     }
     private boolean isDash(String s){
         if (s == null) return false;
@@ -327,15 +423,21 @@ public class FixtureUploadService {
     }
 
     private LocalDateTime parseDateTime(String dateLine, String season){
-        // dateLine: dd.MM. HH:mm, choose year from season
+        // Normalize to canonical pattern dd.MM. HH:mm then append year
+        String normalized = normalizeDateLine(dateLine);
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM. HH:mm yyyy");
-        String year = String.valueOf(resolveYearFromSeason(dateLine, season));
-        String toParse = dateLine + " " + year;
+        String year = String.valueOf(resolveYearFromSeason(normalized, season));
+        String toParse = normalized + " " + year;
         return LocalDateTime.parse(toParse, fmt);
     }
 
     private int resolveYearFromSeason(String dateLine, String season){
-        int month = Integer.parseInt(dateLine.substring(3,5));
+        // Extract month from patterns like d.M. H:mm or d.M H:mm
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d{1,2})\\.(\\d{1,2})\\.?(?:\\s+)(\\d{1,2}:\\d{2})$").matcher(dateLine.trim());
+        int month = 7; // default July if parse fails
+        if (m.find()) {
+            month = Integer.parseInt(m.group(2));
+        }
         if (season != null && season.contains("/")){
             String[] parts = season.split("/");
             int y1 = Integer.parseInt(parts[0]);
@@ -343,6 +445,33 @@ public class FixtureUploadService {
             return (month >= 7) ? y1 : y2;
         }
         try { return Integer.parseInt(season); } catch (Exception e){ return LocalDateTime.now().getYear(); }
+    }
+
+    private static boolean isStatusMarker(String s) {
+        if (s == null) return false;
+        String t = s.trim().toUpperCase();
+        return t.matches("^[A-Z]{1,3}$") && (t.equals("AET") || t.equals("FT") || t.equals("HT"));
+    }
+
+    private static boolean isNonMatchHeader(String s) {
+        if (s == null) return false;
+        String t = s.trim();
+        // Heuristics: lines with trailing colon or single-word/short section names, or containing Group/Play Offs
+        if (t.matches("^[A-Z][A-Z\u00C0-\u017F\s]+:\\s*$")) return true; // country/section in caps ending with colon
+        if (t.equalsIgnoreCase("Standings") || t.equalsIgnoreCase("Draw")) return true;
+        if (t.toLowerCase().contains("group") || t.toLowerCase().contains("play off")) return true;
+        if (t.equalsIgnoreCase("Semi-finals") || t.equalsIgnoreCase("Quarter-finals") || t.equalsIgnoreCase("Final")) return true;
+        return false;
+    }
+
+    private static String normalizeDateLine(String dateLine) {
+        String ln = dateLine == null ? "" : dateLine.trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d{1,2})\\.(\\d{1,2})\\.?(?:\\s+)(\\d{1,2}:\\d{2})$").matcher(ln);
+        if (!m.find()) return ln; // return as-is; caller will validate
+        int d = Integer.parseInt(m.group(1));
+        int mo = Integer.parseInt(m.group(2));
+        String time = m.group(3);
+        return String.format("%02d.%02d. %s", d, mo, time);
     }
 
     // Validation and normalization for fixtures uploads (allow upcoming fixtures without scores)

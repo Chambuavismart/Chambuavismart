@@ -27,10 +27,11 @@ import { OnInit, inject } from '@angular/core';
               <table class="grid">
                 <thead>
                   <tr>
-                    <th style="width:40%">League</th>
+                    <th style="width:32%">League</th>
                     <th>Seasons</th>
                     <th style="width:16%">Season</th>
                     <th style="width:24%">Last Updated (EAT)</th>
+                    <th style="width:8%">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -44,6 +45,9 @@ import { OnInit, inject } from '@angular/core';
                       <span>{{ l.currentSeasonName || '—' }}</span>
                     </td>
                     <td>{{ formatInstantEAT(l.lastUpdatedAt) }}</td>
+                    <td>
+                      <button class="btn-danger" (click)="confirmDelete(l)" title="Delete league and all its matches">Delete</button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -91,6 +95,9 @@ import { OnInit, inject } from '@angular/core';
     .badge { display:inline-block; background:#16233a; border:1px solid #2a3a55; color:#d7e6ff; padding:3px 10px; border-radius:999px; margin-right:6px; margin-bottom:6px; font-size:12px; }
     .tag { margin-left:8px; background:#0d2a45; border:1px solid #244c7a; color:#93c5fd; padding:2px 8px; border-radius:999px; font-size:11px; vertical-align:middle; }
 
+    .btn-danger { background:#7f1d1d; color:#fee2e2; border:1px solid #991b1b; padding:6px 10px; border-radius:8px; cursor:pointer; }
+    .btn-danger:hover { background:#991b1b; }
+
     /* Loading skeletons */
     .skeleton { display:block; }
     .skeleton-line { height: 14px; background: linear-gradient(90deg, #0e1626, #131f35, #0e1626); background-size: 200% 100%; animation: sh 1.2s infinite; border-radius: 6px; margin: 8px 0 14px; }
@@ -106,9 +113,22 @@ export class AdminUploadComponent implements OnInit {
   expanded: Record<string, boolean> = {};
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  private load() {
     this.admin.getLeaguesSummary().subscribe({
       next: v => { this.list = v || []; },
       error: () => { this.list = []; }
+    });
+  }
+
+  confirmDelete(l: AdminLeagueSummaryDto) {
+    const ok = confirm(`Delete ${l.name} (${l.country}) and ALL its matches, fixtures and seasons? This cannot be undone.`);
+    if (!ok) return;
+    this.admin.deleteLeague(l.leagueId).subscribe({
+      next: () => { this.load(); },
+      error: (err) => { console.error('Failed to delete league', err); this.load(); }
     });
   }
 

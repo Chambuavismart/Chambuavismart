@@ -5,6 +5,7 @@ public class FixturesUploadRequest {
     private String season;
     private boolean fullReplace;
     private String rawText;
+    private boolean strictMode; // preserve legacy behavior when true
 
     public Long getLeagueId() { return leagueId; }
     public void setLeagueId(Long leagueId) { this.leagueId = leagueId; }
@@ -17,4 +18,7 @@ public class FixturesUploadRequest {
 
     public String getRawText() { return rawText; }
     public void setRawText(String rawText) { this.rawText = rawText; }
+
+    public boolean isStrictMode() { return strictMode; }
+    public void setStrictMode(boolean strictMode) { this.strictMode = strictMode; }
 }

@@ -50,13 +50,14 @@ export class FixturesService {
   }
 
   // New: fixtures by date (grouped by league)
-  getFixturesByDate(date: string, season?: string): Observable<LeagueFixturesResponse[]> {
+  getFixturesByDate(date: string, season?: string, refresh?: boolean): Observable<LeagueFixturesResponse[]> {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new Error('getFixturesByDate: invalid date. Expected YYYY-MM-DD');
     }
     const formattedDate = date; // already YYYY-MM-DD; no timezone
-    const params = new URLSearchParams({ date: formattedDate });
+    const params = new URLSearchParams({ date: formattedDate, _ts: String(Date.now()) });
     if (season && season.trim()) params.set('season', season.trim());
+    if (refresh) params.set('refresh', 'true');
     const url = `${this.baseUrl}/by-date?${params.toString()}`;
     // Temporary debug logging to verify alignment with backend
     // eslint-disable-next-line no-console
@@ -71,6 +72,7 @@ export class FixturesService {
     }
     const params = new URLSearchParams({ year: String(year), month: String(month) });
     if (season && season.trim()) params.set('season', season.trim());
+    params.set('_ts', String(Date.now()));
     return this.http.get<string[]>(`${this.baseUrl}/available-dates?${params.toString()}`);
   }
 }

@@ -228,18 +228,32 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.pastFixtures = [];
     // eslint-disable-next-line no-console
     console.debug('[HomeComponent] fetching fixtures for date', iso);
+    const hasDot = this.availableDates?.has?.(iso) === true;
+    const handleSuccess = (res: any, attemptedRefresh: boolean) => {
+      this.pastFixtures = Array.isArray(res) ? res.filter(Boolean) : [];
+      // eslint-disable-next-line no-console
+      console.debug('[HomeComponent] fixtures loaded:', this.pastFixtures.length, '(refresh:', attemptedRefresh, ')');
+      if (hasDot && (!this.pastFixtures || this.pastFixtures.length === 0) && !attemptedRefresh) {
+        // Retry once with refresh=true if calendar indicated fixtures should exist
+        // eslint-disable-next-line no-console
+        console.debug('[HomeComponent] empty result but calendar shows availability; retrying with refresh=true');
+        this.fixturesApi.getFixturesByDate(iso, this.season, true).subscribe({
+          next: r2 => { handleSuccess(r2, true); },
+          error: e2 => { handleError(e2, true); }
+        });
+        return;
+      }
+      this.loadingPast = false;
+    };
+    const handleError = (err: any, attemptedRefresh: boolean) => {
+      // eslint-disable-next-line no-console
+      console.debug('[HomeComponent] fixtures load error', err, '(refresh:', attemptedRefresh, ')');
+      this.pastFixtures = [];
+      this.loadingPast = false;
+    };
     this.fixturesApi.getFixturesByDate(iso, this.season).subscribe({
-      next: res => {
-        // defensive: ensure array
-        this.pastFixtures = Array.isArray(res) ? res.filter(Boolean) : [];
-        // eslint-disable-next-line no-console
-        console.debug('[HomeComponent] fixtures loaded:', this.pastFixtures.length);
-        this.loadingPast = false;
-      },
-      error: err => {
-        // eslint-disable-next-line no-console
-        console.debug('[HomeComponent] fixtures load error', err);
-        this.pastFixtures = []; this.loadingPast = false; }
+      next: res => handleSuccess(res, false),
+      error: err => handleError(err, false)
     });
     this.showCalendar = false;
   }

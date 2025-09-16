@@ -149,7 +149,8 @@ public class MatchController {
                 }
                 // Fallback: season-only, both orientations (scores or PLAYED)
                 if (list == null || list.isEmpty()) {
-                    list = matchRepository.findH2HByTeamIdsAndSeason(homeId, awayId, seasonId);
+                    java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+                    list = matchRepository.findH2HByTeamIdsAndSeason(homeId, awayId, seasonId, today);
                     if (path.equals("none")) path = "ID+SEASON"; else path += ">ID+SEASON";
                 }
                 // New: Fallback to league-only within resolved league (cross-season within same league)
@@ -332,6 +333,7 @@ public class MatchController {
                                                  @RequestParam(name = "away", required = false) String awayName,
                                                  @RequestParam(name = "leagueId", required = false) Long leagueId,
                                                  @RequestParam(name = "seasonName", required = false) String seasonName,
+                                                 @RequestParam(name = "autoSeason", defaultValue = "false") boolean autoSeason,
                                                  @RequestParam(name = "limit", defaultValue = "5") int limit) {
         long start = System.currentTimeMillis();
         org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MatchController.class);
@@ -345,14 +347,19 @@ public class MatchController {
                 lid = seasonRepository.findById(seasonId).map(s -> s.getLeague() != null ? s.getLeague().getId() : null).orElse(null);
             } catch (Exception ignored) {}
             if (lid == null) return List.of();
-            List<FormGuideRowDTO> rows = formGuideService.compute(lid, seasonId, lim, FormGuideService.Scope.OVERALL);
-            FormGuideRowDTO homeRow = rows.stream().filter(r -> Objects.equals(r.getTeamId(), homeId)).findFirst().orElse(null);
-            FormGuideRowDTO awayRow = rows.stream().filter(r -> Objects.equals(r.getTeamId(), awayId)).findFirst().orElse(null);
-            List<H2HFormTeamResponse> out = new ArrayList<>(2);
-            if (homeRow != null) out.add(buildTeamResponseById(homeRow, seasonId, lim));
-            if (awayRow != null) out.add(buildTeamResponseById(awayRow, seasonId, lim));
-            logger.info("[H2H_FORM][RESP_ID] leagueId={}, seasonId={}, teams={}, ms={}", lid, seasonId, out.size(), (System.currentTimeMillis()-start));
-            return out;
+            try {
+                List<FormGuideRowDTO> rows = formGuideService.compute(lid, seasonId, lim, FormGuideService.Scope.OVERALL);
+                FormGuideRowDTO homeRow = rows.stream().filter(r -> Objects.equals(r.getTeamId(), homeId)).findFirst().orElse(null);
+                FormGuideRowDTO awayRow = rows.stream().filter(r -> Objects.equals(r.getTeamId(), awayId)).findFirst().orElse(null);
+                List<H2HFormTeamResponse> out = new ArrayList<>(2);
+                if (homeRow != null) out.add(buildTeamResponseById(homeRow, seasonId, lim));
+                if (awayRow != null) out.add(buildTeamResponseById(awayRow, seasonId, lim));
+                logger.info("[H2H_FORM][RESP_ID] leagueId={}, seasonId={}, teams={}, ms={}", lid, seasonId, out.size(), (System.currentTimeMillis()-start));
+                return out;
+            } catch (Exception ex) {
+                logger.error("[H2H_FORM][RESP_ID][ERROR] leagueId={}, seasonId={}, err={}", lid, seasonId, ex.toString());
+                return List.of();
+            }
         }
 
         // Backward-compatible: resolve by names within provided leagueId+seasonName (or latest season if seasonName missing), then use IDs thereafter
@@ -370,6 +377,20 @@ public class MatchController {
                     .orElse(null);
             if (sid == null) {
                 logger.warn("[H2H_FORM][REQ_NAME] Season '{}' not found for leagueId={}; attempting latest season fallback.", sname, leagueId);
+                if (autoSeason) {
+                    sid = seasonRepository.findLatestWithPlayedMatchesByLeagueId(leagueId).map(s -> s.getId()).orElse(null);
+                    if (sid != null) {
+                        logger.info("[H2H_FORM][REQ_NAME][FallbackLatestWithPlayed] leagueId={}, seasonId={}.", leagueId, sid);
+                    }
+                }
+            }
+        }
+        if (sid == null) {
+            if (autoSeason) {
+                sid = seasonRepository.findLatestWithPlayedMatchesByLeagueId(leagueId).map(s -> s.getId()).orElse(null);
+                if (sid != null) {
+                    logger.info("[H2H_FORM][REQ_NAME][AutoSeasonLatestWithPlayed] leagueId={}, seasonId={}.", leagueId, sid);
+                }
             }
         }
         if (sid == null) {
@@ -380,46 +401,77 @@ public class MatchController {
                 logger.warn("[H2H_FORM][REQ_NAME] No seasons available for leagueId={}; aborting name-based form fetch.", leagueId);
                 return List.of();
             } else {
-                logger.info("[H2H_FORM][REQ_NAME][FallbackLatest] leagueId={}, seasonId={}.", leagueId, sid);
+                logger.warn("[H2H_FORM][REQ_NAME][FallbackLatestNoPlayed] leagueId={}, seasonId={}.", leagueId, sid);
             }
         }
-        List<FormGuideRowDTO> rows = formGuideService.compute(leagueId, sid, lim, FormGuideService.Scope.OVERALL);
-        FormGuideRowDTO homeRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().equalsIgnoreCase(hn)).findFirst().orElse(null);
-        if (homeRow == null) {
-            homeRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().toLowerCase().contains(hn.toLowerCase())).findFirst().orElse(null);
+        try {
+            List<FormGuideRowDTO> rows = formGuideService.compute(leagueId, sid, lim, FormGuideService.Scope.OVERALL);
+            FormGuideRowDTO homeRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().equalsIgnoreCase(hn)).findFirst().orElse(null);
+            if (homeRow == null) {
+                homeRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().toLowerCase().contains(hn.toLowerCase())).findFirst().orElse(null);
+            }
+            FormGuideRowDTO awayRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().equalsIgnoreCase(an)).findFirst().orElse(null);
+            if (awayRow == null) {
+                awayRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().toLowerCase().contains(an.toLowerCase())).findFirst().orElse(null);
+            }
+            List<H2HFormTeamResponse> out = new ArrayList<>(2);
+            if (homeRow != null) out.add(buildTeamResponseById(homeRow, sid, lim));
+            if (awayRow != null) out.add(buildTeamResponseById(awayRow, sid, lim));
+            logger.info("[H2H_FORM][RESP_NAME] leagueId={}, seasonId={}, teams={}, ms={}", leagueId, sid, out.size(), (System.currentTimeMillis()-start));
+            return out;
+        } catch (Exception ex) {
+            logger.error("[H2H_FORM][RESP_NAME][ERROR] leagueId={}, seasonId={}, err={}", leagueId, sid, ex.toString());
+            return List.of();
         }
-        FormGuideRowDTO awayRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().equalsIgnoreCase(an)).findFirst().orElse(null);
-        if (awayRow == null) {
-            awayRow = rows.stream().filter(r -> r.getTeamName() != null && r.getTeamName().toLowerCase().contains(an.toLowerCase())).findFirst().orElse(null);
-        }
-        List<H2HFormTeamResponse> out = new ArrayList<>(2);
-        if (homeRow != null) out.add(buildTeamResponseById(homeRow, sid, lim));
-        if (awayRow != null) out.add(buildTeamResponseById(awayRow, sid, lim));
-        logger.info("[H2H_FORM][RESP_NAME] leagueId={}, seasonId={}, teams={}, ms={}", leagueId, sid, out.size(), (System.currentTimeMillis()-start));
-        return out;
     }
 
     private H2HFormTeamResponse buildTeamResponseById(FormGuideRowDTO row, Long seasonId, int limit) {
+        org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MatchController.class);
         // Compose last5 metrics
         String streak = computeStreak(row.getLastResults());
         int winRate = computePercent(row.getW(), row.getMp());
         double ppg = row.getPpg();
         int btts = row.getBttsPct();
         int over25 = row.getOver25Pct();
+
+        // Resolve season name for response
+        String seasonResolved = null;
+        try { seasonResolved = seasonRepository.findById(seasonId).map(s -> s.getName()).orElse(null); } catch (Exception ignored) {}
+
+        // Validation pre-check: count played in season
+        long playedCount = 0L;
+        try { playedCount = matchRepository.countPlayedByTeamAndSeason(row.getTeamId(), seasonId); } catch (Exception ignored) {}
+        if (playedCount == 0L) {
+            logger.info("[H2H_FORM][Validation] No played matches for {} in season {}.", row.getTeamName(), (seasonResolved != null ? seasonResolved : String.valueOf(seasonId)));
+        }
+
         // Fetch last N matches by teamId within the specified season (already ordered desc in query)
         List<Match> all = matchRepository.findRecentPlayedByTeamIdAndSeason(row.getTeamId(), seasonId);
+        java.time.LocalDate now = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+        List<Long> excludedIds = new ArrayList<>();
         List<Map<String, Object>> matches = new ArrayList<>();
         for (Match m : all) {
             if (matches.size() >= limit) break;
+            java.time.LocalDate md = m.getDate();
+            if (md == null || md.isAfter(now)) {
+                excludedIds.add(m.getId());
+                continue;
+            }
             String result = (m.getHomeGoals() != null && m.getAwayGoals() != null) ? (m.getHomeGoals() + "-" + m.getAwayGoals()) : "-";
             Map<String, Object> dto = new LinkedHashMap<>();
-            dto.put("year", m.getDate() != null ? m.getDate().getYear() : null);
-            dto.put("date", m.getDate() != null ? m.getDate().toString() : null);
+            dto.put("year", md.getYear());
+            dto.put("date", md.toString());
             dto.put("homeTeam", m.getHomeTeam() != null ? m.getHomeTeam().getName() : null);
             dto.put("awayTeam", m.getAwayTeam() != null ? m.getAwayTeam().getName() : null);
             dto.put("result", result);
             matches.add(dto);
         }
+        if (!excludedIds.isEmpty()) {
+            logger.info("[Last5][Validation] Excluded matches for teamId={}, seasonId={}: IDs={} due to null or future date", row.getTeamId(), seasonId, excludedIds);
+        }
+        // matchesAvailable info
+        String matchesAvailable = matches.size() + " of " + limit + " matches available";
+
         // Response includes both teamId and teamName for display
         Map<String, Object> last5 = new LinkedHashMap<>();
         last5.put("streak", formatFormString(row.getLastResults()));
@@ -429,7 +481,8 @@ public class MatchController {
         last5.put("over25Percent", over25);
         String teamIdStr = row.getTeamId() != null ? String.valueOf(row.getTeamId()) : null;
         String teamName = row.getTeamName();
-        return new H2HFormTeamResponse(teamIdStr, teamName, last5, matches);
+        String note = "Last 5 includes matches against all opponents, including H2H if recent";
+        return new H2HFormTeamResponse(teamIdStr, teamName, last5, matches, seasonResolved, matchesAvailable, note);
     }
 
     private String computeStreak(List<String> last) {
@@ -562,7 +615,7 @@ public class MatchController {
         return f;
     }
 
-    public record H2HFormTeamResponse(String teamId, String teamName, Map<String, Object> last5, List<Map<String, Object>> matches) {}
+    public record H2HFormTeamResponse(String teamId, String teamName, Map<String, Object> last5, List<Map<String, Object>> matches, String seasonResolved, String matchesAvailable, String note) {}
 
     // --- PDF generation endpoint ---
     @PostMapping("/generate-analysis-pdf")

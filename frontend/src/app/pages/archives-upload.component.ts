@@ -87,6 +87,14 @@ Nublense
               </pre>
             </div>
             <div class="grid gap-1">
+              <label class="flex items-center gap-2" title="Enable when your text is clean and already in the accepted formats. Disable to let the parser ignore headers/noise.">
+                <input type="checkbox" [(ngModel)]="rawStrict" />
+                <span>Strict mode (reject messy inputs; require clean format)</span>
+              </label>
+              <div class="text-xs text-gray-600 -mt-1 mb-1">
+                When to use: turn this ON for clean, well-formatted EPL-style inputs or the single-line format so the system strictly validates and catches mistakes.
+                Turn this OFF for messy copy-pastes that include extra headers like 'FRANCE:', 'Standings', group names, or status markers (AET/FT) so the parser can ignore that noise.
+              </div>
               <label>Raw Text</label>
               <textarea class="input" rows="14" style="min-height: 320px; resize: vertical;" [(ngModel)]="rawText" placeholder="Paste your rounds and matches here..."></textarea>
             </div>
@@ -96,6 +104,35 @@ Nublense
               </button>
               <button class="btn" type="button" (click)="rawText=''; rawMessage=''; rawErrors=[];">Clear</button>
             </div>
+
+            <!-- Parser feedback -->
+            <div *ngIf="processedMatches || (ignoredLines?.length || 0) > 0" class="mt-3 p-2 border rounded" style="border-color:#94a3b8">
+              <div class="font-semibold text-slate-700 mb-1">Parser Feedback</div>
+              <div *ngIf="processedMatches">Processed matches: {{processedMatches}}</div>
+              <div *ngIf="ignoredLines?.length">Ignored lines (sample):
+                <ul class="list-disc pl-5 text-xs">
+                  <li *ngFor="let l of ignoredLines">{{l}}</li>
+                </ul>
+              </div>
+            </div>
+
+            <div *ngIf="(warnObjects?.length || 0) > 0 || (warnStrings?.length || 0) > 0" class="mt-3 p-2 border rounded" style="border-color:#fb923c">
+              <div class="font-semibold text-amber-700">Warnings</div>
+              <ul *ngIf="(warnObjects?.length || 0) > 0" class="list-disc pl-5 text-xs">
+                <li *ngFor="let w of warnObjects">{{w.homeTeam}} <ng-container *ngIf="w.awayTeam">vs {{w.awayTeam}}</ng-container> — {{w.reason}}</li>
+              </ul>
+              <ul *ngIf="(warnStrings?.length || 0) > 0" class="list-disc pl-5 text-xs">
+                <li *ngFor="let s of warnStrings">{{s}}</li>
+              </ul>
+            </div>
+
+            <div *ngIf="(skipped?.length || 0) > 0" class="mt-3 p-2 border rounded" style="border-color:#ef4444">
+              <div class="font-semibold text-red-700">Skipped</div>
+              <ul class="list-disc pl-5 text-xs">
+                <li *ngFor="let s of skipped">{{s.homeTeam}} <ng-container *ngIf="s.awayTeam">vs {{s.awayTeam}}</ng-container> — {{s.reason}}</li>
+              </ul>
+            </div>
+
             <div *ngIf="rawMessage" class="mt-2" [ngClass]="{ 'text-green-700 bg-green-50 border border-green-300 rounded p-2': rawSuccess, 'text-red-700 bg-red-50 border border-red-300 rounded p-2': !rawSuccess }">{{ rawMessage }}</div>
             <div *ngIf="rawErrors?.length" class="mt-2 text-sm text-red-700 bg-red-50 border border-red-300 rounded p-2">
               <div>Errors:</div>
@@ -134,6 +171,14 @@ export class ArchivesUploadComponent {
   rawMessage: string = '';
   rawSuccess: boolean = false;
   rawErrors: string[] = [];
+  // Enhanced parser feedback fields
+  processedMatches: number = 0;
+  ignoredLines: string[] = [];
+  warnStrings: string[] = [];
+  warnObjects: any[] = [];
+  skipped: any[] = [];
+  // Strict toggle for archives raw text
+  rawStrict: boolean = false;
   // Upload type: incremental removed for archives
   rawType: 'NEW_LEAGUE' | 'FULL_REPLACE' = 'NEW_LEAGUE';
 
@@ -194,18 +239,43 @@ export class ArchivesUploadComponent {
     }
     this.rawLoading = true;
     // Use FULL_REPLACE for archives so it's idempotent and creates teams if needed
-    this.matchUpload.uploadUnifiedText('FULL_REPLACE', this.rawLeagueName.trim(), this.rawCountry.trim(), this.rawSeason.trim(), this.rawText, { allowSeasonAutoCreate: true }).subscribe({
+    this.matchUpload.uploadUnifiedText('FULL_REPLACE', this.rawLeagueName.trim(), this.rawCountry.trim(), this.rawSeason.trim(), this.rawText, { allowSeasonAutoCreate: true, strict: this.rawStrict }).subscribe({
       next: (res: any) => {
         this.rawSuccess = !!res?.success;
         this.rawErrors = res?.errors || [];
+        // Parse warnings into strings vs objects
+        this.warnStrings = [];
+        this.warnObjects = [];
+        const ws: any[] = res?.warnings || [];
+        for (const w of (ws || [])) {
+          if (w && typeof w === 'object' && ('reason' in w || 'homeTeam' in w || 'awayTeam' in w)) {
+            this.warnObjects.push(w);
+          } else if (typeof w === 'string') {
+            this.warnStrings.push(w);
+          }
+        }
+        this.skipped = res?.skipped || [];
+        // Enhanced feedback fields
+        this.processedMatches = res?.processedMatches ?? 0;
+        this.ignoredLines = res?.ignoredLines || [];
         const inserted = (res?.inserted !== undefined ? res.inserted : res?.insertedCount) ?? 0;
         const deleted = (res?.deleted !== undefined ? res.deleted : res?.deletedCount) ?? 0;
         if (this.rawSuccess){
-          this.rawMessage = `Processed. Inserted ${inserted}, deleted ${deleted}.`;
+          const skippedCount = (this.skipped?.length || 0);
+          let msg = `Processed. Inserted ${inserted}, deleted ${deleted}.`;
+          msg += skippedCount === 0 ? ' No valid matches were skipped.' : ` Skipped ${skippedCount} match(es).`;
+          this.rawMessage = msg;
           // clear text on success
           this.rawText = '';
         } else {
-          this.rawMessage = res?.message || 'Upload failed.';
+          // Friendly summary for strict out-of-window errors when present
+          try {
+            const errs: string[] = this.rawErrors || [];
+            const out = errs.filter(e => /out-of-window|outside season window/i.test(e)).length;
+            this.rawMessage = out > 0 ? `${out} matches rejected because they are outside season window (strict mode).` : (res?.message || 'Upload failed.');
+          } catch {
+            this.rawMessage = res?.message || 'Upload failed.';
+          }
         }
         this.rawLoading = false;
       },

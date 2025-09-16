@@ -32,6 +32,14 @@ public class H2HService {
         String away = awayName.trim();
         if (home.isEmpty() || away.isEmpty()) return List.of();
 
+        java.time.LocalDate todayNairobi = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+        java.util.function.Predicate<Match> pastOrAuto = m -> {
+            java.time.LocalDate d = m.getDate();
+            boolean auto = false;
+            try { auto = m.isAutoCorrected(); } catch (Throwable ignore) {}
+            return d == null || !d.isAfter(todayNairobi) || auto;
+        };
+
         // Try resolving names via TeamRepository using list-returning method to avoid NonUniqueResultException
         Team homeTeam = resolveTeamSafely(home);
         Team awayTeam = resolveTeamSafely(away);
@@ -40,18 +48,18 @@ public class H2HService {
             List<Long> homeIds = resolveAllTeamIds(home);
             List<Long> awayIds = resolveAllTeamIds(away);
             if (!homeIds.isEmpty() && !awayIds.isEmpty()) {
-                List<Match> bySets = matchRepository.findH2HByTeamIdSetsAllLeagues(homeIds, awayIds);
+                List<Match> bySets = matchRepository.findH2HByTeamIdSetsAllLeagues(homeIds, awayIds).stream().filter(pastOrAuto).toList();
                 if (!bySets.isEmpty()) return bySets;
             }
             // As a lightweight path, also try the single-ID method
-            List<Match> byIds = matchRepository.findH2HByTeamIds(homeTeam.getId(), awayTeam.getId());
+            List<Match> byIds = matchRepository.findH2HByTeamIds(homeTeam.getId(), awayTeam.getId()).stream().filter(pastOrAuto).toList();
             if (!byIds.isEmpty()) return byIds;
         }
 
         // Fallback to existing name-based queries to preserve current behavior
-        List<Match> exact = matchRepository.findPlayedByExactNames(home, away);
+        List<Match> exact = matchRepository.findPlayedByExactNames(home, away).stream().filter(pastOrAuto).toList();
         if (!exact.isEmpty()) return exact;
-        return matchRepository.findPlayedByFuzzyNames(home, away);
+        return matchRepository.findPlayedByFuzzyNames(home, away).stream().filter(pastOrAuto).toList();
     }
     private List<Long> resolveAllTeamIds(String input) {
         if (input == null) return List.of();

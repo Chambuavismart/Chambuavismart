@@ -5,7 +5,9 @@ import com.chambua.vismart.model.Match;
 import com.chambua.vismart.model.MatchStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -72,8 +74,8 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     List<Match> findH2HByTeamIds(@Param("homeId") Long homeId, @Param("awayId") Long awayId);
 
     // New: H2H by team IDs across both orientations within a specific season, played only OR with explicit scores present; eager-loaded to avoid LazyInitialization
-    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.season.id = :seasonId and (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and ((m.homeTeam.id = :homeId and m.awayTeam.id = :awayId) or (m.homeTeam.id = :awayId and m.awayTeam.id = :homeId)) order by m.date desc, m.round desc")
-    List<Match> findH2HByTeamIdsAndSeason(@Param("homeId") Long homeId, @Param("awayId") Long awayId, @Param("seasonId") Long seasonId);
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.season.id = :seasonId and (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and ((m.homeTeam.id = :homeId and m.awayTeam.id = :awayId) or (m.homeTeam.id = :awayId and m.awayTeam.id = :homeId)) and (m.date <= :today or m.isAutoCorrected = true) order by m.date desc, m.round desc")
+    List<Match> findH2HByTeamIdsAndSeason(@Param("homeId") Long homeId, @Param("awayId") Long awayId, @Param("seasonId") Long seasonId, @Param("today") java.time.LocalDate today);
 
     // H2H across ALL leagues and seasons by SETS of team IDs per side (orientation respected)
     @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and ((m.homeTeam.id in :homeIds and m.awayTeam.id in :awayIds)) order by m.date desc, m.round desc")
@@ -100,6 +102,10 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     // Count played matches involving a given team (either home or away)
     @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId)")
     long countPlayedByTeam(@Param("teamId") Long teamId);
+
+    // Count played matches for a given team within a specific season
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.season.id = :seasonId and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId)")
+    long countPlayedByTeamAndSeason(@Param("teamId") Long teamId, @Param("seasonId") Long seasonId);
 
     // Count played matches by exact team name (case-insensitive), regardless of league/season or team id duplication
     @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(trim(m.homeTeam.name)) = lower(trim(:teamName)) or lower(trim(m.awayTeam.name)) = lower(trim(:teamName)))")
@@ -134,7 +140,7 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     List<Match> findRecentPlayedByTeamId(@Param("teamId") Long teamId);
 
     // New: Last played matches for a given team id within a specific season (most recent first)
-    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.season.id = :seasonId and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) order by m.date desc, m.round desc")
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.season.id = :seasonId and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) order by m.date desc, m.round desc, m.id desc")
     List<Match> findRecentPlayedByTeamIdAndSeason(@Param("teamId") Long teamId, @Param("seasonId") Long seasonId);
 
     // New: Last played matches for a given team id within a specific league (most recent first)
@@ -160,4 +166,47 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     // List H2H matches between two team names regardless of orientation (case-insensitive), played only or explicit goals present
     @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and ((lower(trim(m.homeTeam.name)) = lower(trim(:teamA)) and lower(trim(m.awayTeam.name)) = lower(trim(:teamB))) or (lower(trim(m.homeTeam.name)) = lower(trim(:teamB)) and lower(trim(m.awayTeam.name)) = lower(trim(:teamA)))) order by m.date desc, m.round desc")
     List<Match> findH2HByNamesAnyOrientation(@Param("teamA") String teamA, @Param("teamB") String teamB);
+
+    // --- Data normalization: mark as PLAYED where goals exist and date is past or today ---
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("update Match m set m.status = com.chambua.vismart.model.MatchStatus.PLAYED where m.status <> com.chambua.vismart.model.MatchStatus.PLAYED and m.homeGoals is not null and m.awayGoals is not null and m.date <= :today")
+    int normalizeScoredPastMatches(@Param("today") LocalDate today);
+
+    // Helper counts
+    long countBySeasonId(Long seasonId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("update Match m set m.isArchived = true where m.season.id = :seasonId")
+    int archiveBySeasonId(@Param("seasonId") Long seasonId);
+
+    // --- Anomaly diagnostics ---
+    // 1) Matches with status PLAYED but date in the future
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.date > :today")
+    long countPlayedWithFutureDate(@Param("today") LocalDate today);
+
+    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.date > :today order by m.date asc")
+    List<Match> findPlayedWithFutureDate(@Param("today") LocalDate today);
+
+    // 2) Matches with non-null goals but status not PLAYED for past or today
+    @Query("select count(m) from Match m where m.status <> com.chambua.vismart.model.MatchStatus.PLAYED and m.homeGoals is not null and m.awayGoals is not null and m.date <= :today")
+    long countWithGoalsButNotPlayedPast(@Param("today") LocalDate today);
+
+    @Query("select m from Match m where m.status <> com.chambua.vismart.model.MatchStatus.PLAYED and m.homeGoals is not null and m.awayGoals is not null and m.date <= :today order by m.date desc")
+    List<Match> findWithGoalsButNotPlayedPast(@Param("today") LocalDate today);
+
+    // 3) Matches with status PLAYED but null date
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.date is null")
+    long countPlayedWithNullDate();
+
+    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.date is null")
+    List<Match> findPlayedWithNullDate();
+
+    // 4) Matches with status PLAYED but null round
+    @Query("select count(m) from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.round is null")
+    long countPlayedWithNullRound();
+
+    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.round is null")
+    List<Match> findPlayedWithNullRound();
 }

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.chambua.vismart.repository.SeasonRepository;
 import com.chambua.vismart.model.Season;
+import com.chambua.vismart.model.Match;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -43,87 +44,124 @@ public class FormGuideService {
 
         // Strict filtering: do not include NULL season rows or merge by date bounds
         String baseHome =
-                "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name " +
+                "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name, m.id AS match_id " +
                 "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id " +
-                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
+                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED'";
         String baseAway =
-                "SELECT m.match_date, m.round, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name " +
+                "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name, m.id AS match_id " +
                 "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id " +
-                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
+                "WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED'";
 
         String sql;
         if (scope == Scope.HOME) {
-            sql = baseHome + " ORDER BY 3, 1 DESC, 2 DESC"; // team_id, date desc, round desc
+            sql = "SELECT * FROM (" + baseHome + ") x ORDER BY team_id ASC, md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC"; // team_id asc, date desc, NULL rounds last, round desc, id desc
         } else if (scope == Scope.AWAY) {
-            sql = baseAway + " ORDER BY 3, 1 DESC, 2 DESC";
+            sql = "SELECT * FROM (" + baseAway + ") x ORDER BY team_id ASC, md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC";
         } else {
-            sql = baseHome + " UNION ALL " + baseAway + " ORDER BY 3, 1 DESC, 2 DESC";
+            sql = "SELECT * FROM (" + baseHome + " UNION ALL " + baseAway + ") x ORDER BY team_id ASC, md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC";
         }
 
+        log.info("[FORM_GUIDE][SQL][main] {}", sql);
+        System.out.println("[DEBUG_LOG] FORM_GUIDE SQL main: " + sql);
         var q = em.createNativeQuery(sql)
                 .setParameter(1, leagueId)
                 .setParameter(2, seasonId);
         @SuppressWarnings("unchecked")
         List<Object[]> rows = q.getResultList();
 
-        // Group rows by team for scope-driven main metrics
+        // Prepare maps
         Map<Long, List<Row>> byTeam = new LinkedHashMap<>();
-        for (Object[] r : rows) {
-            Object dateObj = r[0];
-            java.sql.Date date = (dateObj instanceof java.sql.Date)
-                    ? (java.sql.Date) dateObj
-                    : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
-            Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
-            Long teamId = ((Number) r[2]).longValue();
-            String teamName = (String) r[3];
-            int gf = ((Number) r[4]).intValue();
-            int ga = ((Number) r[5]).intValue();
-            boolean isHome = ((Number) r[6]).intValue() == 1;
-            String oppName = (String) r[7];
-            byTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
-                    .add(new Row(teamId, teamName, date, round, gf, ga, isHome, oppName));
-        }
-
-        // Also build full home and away maps regardless of requested scope, for weighted splits
-        var qHome = em.createNativeQuery(baseHome + " ORDER BY 3, 1 DESC, 2 DESC")
-                .setParameter(1, leagueId)
-                .setParameter(2, seasonId);
-        @SuppressWarnings("unchecked")
-        List<Object[]> homeRows = qHome.getResultList();
         Map<Long, List<Row>> homeByTeam = new LinkedHashMap<>();
-        for (Object[] r : homeRows) {
-            Object dateObj = r[0];
-            java.sql.Date date = (dateObj instanceof java.sql.Date)
-                    ? (java.sql.Date) dateObj
-                    : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
-            Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
-            Long teamId = ((Number) r[2]).longValue();
-            String teamName = (String) r[3];
-            int gf = ((Number) r[4]).intValue();
-            int ga = ((Number) r[5]).intValue();
-            String oppName = (String) r[7];
-            homeByTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
-                    .add(new Row(teamId, teamName, date, round, gf, ga, true, oppName));
-        }
-        var qAway = em.createNativeQuery(baseAway + " ORDER BY 3, 1 DESC, 2 DESC")
-                .setParameter(1, leagueId)
-                .setParameter(2, seasonId);
-        @SuppressWarnings("unchecked")
-        List<Object[]> awayRows = qAway.getResultList();
         Map<Long, List<Row>> awayByTeam = new LinkedHashMap<>();
-        for (Object[] r : awayRows) {
-            Object dateObj = r[0];
-            java.sql.Date date = (dateObj instanceof java.sql.Date)
-                    ? (java.sql.Date) dateObj
-                    : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
-            Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
-            Long teamId = ((Number) r[2]).longValue();
-            String teamName = (String) r[3];
-            int gf = ((Number) r[4]).intValue();
-            int ga = ((Number) r[5]).intValue();
-            String oppName = (String) r[7];
-            awayByTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
-                    .add(new Row(teamId, teamName, date, round, gf, ga, false, oppName));
+
+        if (rows != null && !rows.isEmpty()) {
+            // Group rows by team for scope-driven main metrics
+            for (Object[] r : rows) {
+                Object dateObj = r[0];
+                java.sql.Date date = (dateObj instanceof java.sql.Date)
+                        ? (java.sql.Date) dateObj
+                        : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
+                Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                Long teamId = ((Number) r[2]).longValue();
+                String teamName = (String) r[3];
+                int gf = ((Number) r[4]).intValue();
+                int ga = ((Number) r[5]).intValue();
+                boolean isHome = ((Number) r[6]).intValue() == 1;
+                String oppName = (String) r[7];
+                byTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
+                        .add(new Row(teamId, teamName, date, round, gf, ga, isHome, oppName));
+            }
+
+            // Also build full home and away maps regardless of requested scope, for weighted splits
+            log.info("[FORM_GUIDE][SQL][home] SELECT * FROM (" + baseHome + ") x ORDER BY x.team_id ASC, x.md DESC, CASE WHEN x.rnd IS NULL THEN 1 ELSE 0 END ASC, x.rnd DESC, x.match_id DESC");
+            System.out.println("[DEBUG_LOG] FORM_GUIDE SQL home: SELECT * FROM (" + baseHome + ") x ORDER BY x.team_id ASC, x.md DESC, CASE WHEN x.rnd IS NULL THEN 1 ELSE 0 END ASC, x.rnd DESC, x.match_id DESC");
+            var qHome = em.createNativeQuery("SELECT * FROM (" + baseHome + ") x ORDER BY x.team_id ASC, x.md DESC, CASE WHEN x.rnd IS NULL THEN 1 ELSE 0 END ASC, x.rnd DESC, x.match_id DESC")
+                    .setParameter(1, leagueId)
+                    .setParameter(2, seasonId);
+            @SuppressWarnings("unchecked")
+            List<Object[]> homeRows = qHome.getResultList();
+            for (Object[] r : homeRows) {
+                Object dateObj = r[0];
+                java.sql.Date date = (dateObj instanceof java.sql.Date)
+                        ? (java.sql.Date) dateObj
+                        : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
+                Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                Long teamId = ((Number) r[2]).longValue();
+                String teamName = (String) r[3];
+                int gf = ((Number) r[4]).intValue();
+                int ga = ((Number) r[5]).intValue();
+                String oppName = (String) r[7];
+                homeByTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
+                        .add(new Row(teamId, teamName, date, round, gf, ga, true, oppName));
+            }
+            log.info("[FORM_GUIDE][SQL][away] SELECT * FROM (" + baseAway + ") x ORDER BY x.team_id ASC, x.md DESC, CASE WHEN x.rnd IS NULL THEN 1 ELSE 0 END ASC, x.rnd DESC, x.match_id DESC");
+            System.out.println("[DEBUG_LOG] FORM_GUIDE SQL away: SELECT * FROM (" + baseAway + ") x ORDER BY x.team_id ASC, x.md DESC, CASE WHEN x.rnd IS NULL THEN 1 ELSE 0 END ASC, x.rnd DESC, x.match_id DESC");
+            var qAway = em.createNativeQuery("SELECT * FROM (" + baseAway + ") x ORDER BY x.team_id ASC, x.md DESC, CASE WHEN x.rnd IS NULL THEN 1 ELSE 0 END ASC, x.rnd DESC, x.match_id DESC")
+                    .setParameter(1, leagueId)
+                    .setParameter(2, seasonId);
+            @SuppressWarnings("unchecked")
+            List<Object[]> awayRows = qAway.getResultList();
+            for (Object[] r : awayRows) {
+                Object dateObj = r[0];
+                java.sql.Date date = (dateObj instanceof java.sql.Date)
+                        ? (java.sql.Date) dateObj
+                        : (dateObj instanceof java.time.LocalDate ? java.sql.Date.valueOf((java.time.LocalDate) dateObj) : null);
+                Integer round = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                Long teamId = ((Number) r[2]).longValue();
+                String teamName = (String) r[3];
+                int gf = ((Number) r[4]).intValue();
+                int ga = ((Number) r[5]).intValue();
+                String oppName = (String) r[7];
+                awayByTeam.computeIfAbsent(teamId, k -> new ArrayList<>())
+                        .add(new Row(teamId, teamName, date, round, gf, ga, false, oppName));
+            }
+        } else {
+            // JPQL fallback (e.g., for H2 compatibility in tests)
+            log.info("[FORM_GUIDE][FALLBACK][JPQL] Building form guide via JPQL for leagueId={}, seasonId={}", leagueId, seasonId);
+            List<Match> ms = em.createQuery("select m from Match m join fetch m.homeTeam join fetch m.awayTeam where m.league.id = :lid and m.season.id = :sid and (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) order by m.date desc, m.round desc, m.id desc", Match.class)
+                    .setParameter("lid", leagueId)
+                    .setParameter("sid", seasonId)
+                    .getResultList();
+            for (Match m : ms) {
+                java.sql.Date date = (m.getDate() != null) ? java.sql.Date.valueOf(m.getDate()) : null;
+                Integer round = m.getRound();
+                Long homeId = m.getHomeTeam() != null ? m.getHomeTeam().getId() : null;
+                String homeName = m.getHomeTeam() != null ? m.getHomeTeam().getName() : null;
+                Long awayId = m.getAwayTeam() != null ? m.getAwayTeam().getId() : null;
+                String awayName = m.getAwayTeam() != null ? m.getAwayTeam().getName() : null;
+                Integer hg = m.getHomeGoals() != null ? m.getHomeGoals() : 0;
+                Integer ag = m.getAwayGoals() != null ? m.getAwayGoals() : 0;
+                if (homeId != null) {
+                    Row hr = new Row(homeId, homeName, date, round, hg, ag, true, awayName);
+                    byTeam.computeIfAbsent(homeId, k -> new ArrayList<>()).add(hr);
+                    homeByTeam.computeIfAbsent(homeId, k -> new ArrayList<>()).add(hr);
+                }
+                if (awayId != null) {
+                    Row ar = new Row(awayId, awayName, date, round, ag, hg, false, homeName);
+                    byTeam.computeIfAbsent(awayId, k -> new ArrayList<>()).add(ar);
+                    awayByTeam.computeIfAbsent(awayId, k -> new ArrayList<>()).add(ar);
+                }
+            }
         }
 
         boolean entireLeague = (limit == Integer.MAX_VALUE);
@@ -225,7 +263,7 @@ public class FormGuideService {
 
         // Validation: sum of total MPs across teams should approximate total matches * factor
         try {
-            String dbg = "SELECT COUNT(*) FROM matches m WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
+            String dbg = "SELECT COUNT(*) FROM matches m WHERE m.league_id = ?1 AND m.season_id = ?2 AND m.status = 'PLAYED'";
             var dq = em.createNativeQuery(dbg)
                     .setParameter(1, leagueId)
                     .setParameter(2, seasonId);

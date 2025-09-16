@@ -38,6 +38,9 @@ public class FixtureService {
     }
 
     public List<Fixture> getFixturesByDate(LocalDate date, String season) {
+        // Align with calendar/availability logic: use DATE(date_time) to select fixtures for the exact
+        // calendar day regardless of timezone offsets. This matches native queries used elsewhere and
+        // avoids edge cases where a LocalDateTime range might miss rows around midnight.
         List<Fixture> results;
         if (season != null && !season.isBlank()) {
             results = fixtureRepository.findByDateOnlyAndSeason(date, season.trim());

@@ -177,7 +177,9 @@ import { PoissonService, Predictions } from '../services/poisson.service';
       <!-- Form & Streaks (Last 5) -->
       <div class="profiles-grid" *ngIf="h2hSelected && predictiveOn">
         <div class="profile-card">
-          <div class="breakdown-title">{{ h2hHome }} — Last 5 <span *ngIf="homeForm">({{ (homeForm?.recentResults?.length || 0) }} matches available)</span></div>
+          <div class="breakdown-title">{{ h2hHome }} — Last 5 <span *ngIf="homeSeasonResolved">({{ homeSeasonResolved }})</span>
+                      <span class="hint" *ngIf="homeMatchesAvailableText"> — {{ homeMatchesAvailableText }}</span>
+                    </div>
           <div class="section-desc">Recent head-to-head form vs {{ h2hAway }} (up to 5 matches). Points use W=3, D=1, L=0.</div>
           <div class="breakdown-row" *ngIf="homeForm; else homeFormLoading">
             <div class="form-badges compact">
@@ -203,7 +205,9 @@ import { PoissonService, Predictions } from '../services/poisson.service';
           </div>
         </div>
         <div class="profile-card">
-          <div class="breakdown-title">{{ h2hAway }} — Last 5 <span *ngIf="awayForm">({{ (awayForm?.recentResults?.length || 0) }} matches available)</span></div>
+          <div class="breakdown-title">{{ h2hAway }} — Last 5 <span *ngIf="awaySeasonResolved">({{ awaySeasonResolved }})</span>
+                      <span class="hint" *ngIf="awayMatchesAvailableText"> — {{ awayMatchesAvailableText }}</span>
+                    </div>
           <div class="section-desc">Recent head-to-head form vs {{ h2hHome }} (up to 5 matches). Points use W=3, D=1, L=0.</div>
           <div class="breakdown-row" *ngIf="awayForm; else awayFormLoading">
             <div class="form-badges compact">
@@ -460,6 +464,13 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   h2hAnyCount: number | null = null;
   homeForm: FormSummaryDto | null = null;
   awayForm: FormSummaryDto | null = null;
+  // New: resolved season and messages from backend Last 5 response
+  homeSeasonResolved: string | null = null;
+  awaySeasonResolved: string | null = null;
+  homeMatchesAvailableText: string | null = null;
+  awayMatchesAvailableText: string | null = null;
+  homeWarnings: string[] = [];
+  awayWarnings: string[] = [];
   // UI hints
   showTeamHint = false;
   showDataHint = false;
@@ -897,8 +908,53 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         }
       }
       if (seasonId == null || typeof seasonId !== 'number') {
-        console.warn('[PlayedMatches] No valid seasonId; skipping Last-5. Check league/season context.');
-        this.showDataHint = true;
+        // Attempt name-based autoSeason flow when seasonId is unavailable
+        if (typeof lid === 'number') {
+          console.warn('[PlayedMatches] No valid seasonId; using autoSeason name-based flow.');
+          this.matchService.getH2HFormByNamesWithAutoSeason(homeName, awayName, lid!, this.seasonName, 5).subscribe({
+            next: list => {
+              const safe: any[] = Array.isArray(list) ? list : [];
+              const mapTeam = (team: any, label: string): FormSummaryDto => {
+                const seqStr: string = team?.last5?.streak || '0';
+                const recent: string[] = [];
+                const matches = team?.matches || [];
+                for (let i = 0; i < Math.min(5, matches.length); i++) {
+                  const m = matches[i];
+                  const rs = (m?.result || '').split('-');
+                  if (rs.length === 2) {
+                    const hg = parseInt(rs[0], 10); const ag = parseInt(rs[1], 10);
+                    if (!Number.isNaN(hg) && !Number.isNaN(ag)) {
+                      const my = (m?.homeTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ((m?.awayTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : hg);
+                      const opp = (m?.homeTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : ((m?.awayTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ag);
+                      recent.push(my > opp ? 'W' : (my === opp ? 'D' : 'L'));
+                    }
+                  }
+                }
+                const winRate = team?.last5?.winRate ?? 0;
+                const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
+                return { recentResults: recent, currentStreak: seqStr, winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
+              };
+              const hEntry = safe.find(t => (t?.teamName || '').toLowerCase() === homeName.toLowerCase()) || safe[0] || null;
+              const aEntry = safe.find(t => (t?.teamName || '').toLowerCase() === awayName.toLowerCase()) || safe[1] || null;
+              this.homeForm = hEntry ? mapTeam(hEntry, homeName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+              this.awayForm = aEntry ? mapTeam(aEntry, awayName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+              // Map season context and messages
+              this.homeSeasonResolved = hEntry?.seasonResolved || null;
+              this.awaySeasonResolved = aEntry?.seasonResolved || null;
+              this.homeMatchesAvailableText = hEntry?.matchesAvailable || null;
+              this.awayMatchesAvailableText = aEntry?.matchesAvailable || null;
+            },
+            error: (err) => {
+              console.error('[PlayedMatches] getH2HFormByNamesWithAutoSeason failed', err);
+              this.showDataHint = true;
+              this.homeForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+              this.awayForm = { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+            }
+          });
+        } else {
+          console.warn('[PlayedMatches] No valid seasonId and no leagueId; cannot fetch Last-5.');
+          this.showDataHint = true;
+        }
       } else {
         // Resolve team IDs scoped to league
         let homeId: number | null = null;
@@ -937,8 +993,6 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
                   }
                 }
                 const winRate = team?.last5?.winRate ?? 0;
-                // Compute points precisely from recent results: W=3, D=1, L=0.
-                // Avoid using rounded PPG * count which can misestimate with partial data.
                 const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
                 return { recentResults: recent, currentStreak: seqStr, winRate: winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
               };
@@ -946,6 +1000,11 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
               const awayEntry = safe.find(t => Number(t?.teamId) === awayId) || safe.find(t => t?.teamName?.toLowerCase?.() === awayName.toLowerCase()) || null;
               this.homeForm = homeEntry ? toSummary(homeEntry, homeName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
               this.awayForm = awayEntry ? toSummary(awayEntry, awayName) : { recentResults: [], currentStreak: '0', winRate: 0, pointsEarned: 0 };
+              // Map season context and messages
+              this.homeSeasonResolved = homeEntry?.seasonResolved || null;
+              this.awaySeasonResolved = awayEntry?.seasonResolved || null;
+              this.homeMatchesAvailableText = homeEntry?.matchesAvailable || null;
+              this.awayMatchesAvailableText = awayEntry?.matchesAvailable || null;
             },
             error: (err) => {
               console.error('[PlayedMatches] getH2HFormByIds failed', err);

@@ -15,6 +15,13 @@ export interface AdminLeagueSummaryDto {
   lastUpdatedAt?: string | null;
 }
 
+export interface DeleteLeagueResult {
+  matchesDeleted: number;
+  fixturesDeleted: number;
+  seasonsDeleted: number;
+  leagueDeleted: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AdminService {
   private http = inject(HttpClient);
@@ -22,5 +29,9 @@ export class AdminService {
 
   getLeaguesSummary(): Observable<AdminLeagueSummaryDto[]> {
     return this.http.get<AdminLeagueSummaryDto[]>(`${this.baseUrl}/summary`);
+  }
+
+  deleteLeague(leagueId: number): Observable<DeleteLeagueResult> {
+    return this.http.delete<DeleteLeagueResult>(`${this.baseUrl}/${leagueId}`);
   }
 }

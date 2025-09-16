@@ -56,6 +56,9 @@ public class Match {
     @Column(name = "source_type", length = 32)
     private SourceType sourceType = SourceType.CURRENT;
 
+    @Column(name = "is_archived", nullable = false)
+    private boolean isArchived = false;
+
     @Column(name = "checksum", length = 128)
     private String checksum;
 
@@ -63,6 +66,9 @@ public class Match {
     @JoinColumn(name = "import_run_id", foreignKey = @ForeignKey(name = "fk_matches_import_run"))
     private ImportRun importRun;
 
+    @Column(name = "is_auto_corrected", nullable = false)
+    private boolean isAutoCorrected = false;
+    
     public Match() {}
 
     public Match(League league, Team homeTeam, Team awayTeam, LocalDate date, Integer round, Integer homeGoals, Integer awayGoals) {
@@ -119,4 +125,10 @@ public class Match {
 
     public ImportRun getImportRun() { return importRun; }
     public void setImportRun(ImportRun importRun) { this.importRun = importRun; }
+
+    public boolean isAutoCorrected() { return isAutoCorrected; }
+    public void setAutoCorrected(boolean autoCorrected) { isAutoCorrected = autoCorrected; }
+    
+    public boolean isArchived() { return isArchived; }
+    public void setArchived(boolean archived) { isArchived = archived; }
 }

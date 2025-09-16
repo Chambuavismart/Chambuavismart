@@ -53,6 +53,28 @@ public class MatchUploadService {
     public record SkipLog(String homeTeam, String awayTeam, String reason) {}
     public record WarnLog(String homeTeam, String awayTeam, String reason) {}
 
+    // Helper for smart date correction
+    private record DateCorrection(java.time.LocalDate date, boolean autoCorrected, String warning) {}
+
+    private DateCorrection correctDateIfMisInferred(java.time.LocalDate date, String seasonStr, Integer homeGoals, Integer awayGoals) {
+        if (date == null) return new DateCorrection(null, false, null);
+        String season = normalizeSeason(seasonStr);
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+        boolean split = season != null && !season.isBlank() && season.contains("/");
+        boolean scored = homeGoals != null && awayGoals != null;
+        int month = date.getMonthValue();
+        if (split && scored && date.isAfter(today) && month >= 1 && month <= 6) {
+            java.time.LocalDate newDate = date.minusYears(1);
+            String warn = "[Parsing][AutoCorrect] Shifted date: " + date + " -> " + newDate + " (" + season + ")";
+            return new DateCorrection(newDate, true, warn);
+        }
+        if (date.isAfter(today) && !scored) {
+            String warn = "[Parsing][Future] Match date=" + date + " > today; set UPCOMING";
+            return new DateCorrection(date, false, warn);
+        }
+        return new DateCorrection(date, false, null);
+    }
+
     @Transactional
     public UploadResult uploadCsv(String leagueName, String country, String season, Long seasonId, MultipartFile file, boolean fullReplace, boolean incrementalUpdate, boolean fixtureMode, boolean strict, boolean dryRun, boolean allowSeasonAutoCreate) {
         List<String> errors = new ArrayList<>();
@@ -328,6 +350,21 @@ public class MatchUploadService {
             String line = raw == null ? "" : raw.trim();
             if (line.isEmpty()) continue;
 
+            // Ignore non-match headers/sections (heuristic) in non-strict behavior (strict is handled at validation level)
+            if (isLikelyNonMatchHeader(line)) {
+                warnLogs.add(new WarnLog(null, null, "Ignored line: " + line));
+                continue;
+            }
+
+            // Playoff stages (e.g., Final, Semi-finals, Quarter-finals) are treated as round context
+            if (isPlayoffStage(line)) {
+                currentRound = mapStageToRound(line);
+                if (currentRound <= 0) {
+                    errors.add("Invalid playoff stage header: " + line);
+                }
+                continue;
+            }
+
             if (line.toLowerCase().startsWith("round")) {
                 currentRound = parseRoundNumber(line);
                 if (currentRound <= 0) {
@@ -378,6 +415,14 @@ public class MatchUploadService {
                     int j = i + 1;
                     int maxLookahead = 12;
                     int steps = 0;
+                    // Optional status marker directly after date
+                    if (j < lines.length) {
+                        String maybeStatus = lines[j] == null ? "" : lines[j].trim();
+                        if (isStatusMarker(maybeStatus)) {
+                            warnLogs.add(new WarnLog(null, null, "Ignored status marker '" + maybeStatus + "' after date " + line));
+                            j++; steps++;
+                        }
+                    }
                     while (j < lines.length && steps < maxLookahead) {
                         String lnRaw = lines[j];
                         String ln = lnRaw == null ? "" : lnRaw.trim();
@@ -578,7 +623,26 @@ public class MatchUploadService {
                     Team away = findOrCreateTeam(league, awayName);
                     String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
                     if (seenKeys.add(key)) {
+                        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
+                        boolean autoCorrectedNow = false;
+                        String seasonStr = (seasonEntity != null && seasonEntity.getName() != null) ? seasonEntity.getName() : normalizeSeason(season);
+                        if (date != null && seasonStr != null && seasonStr.contains("/") && date.isAfter(today) && date.getMonthValue() <= 6 && homeGoals != null && awayGoals != null) {
+                            java.time.LocalDate original = date;
+                            date = date.minusYears(1);
+                            autoCorrectedNow = true;
+                            warnLogs.add(new WarnLog(homeName, awayName, "[Parsing][AutoCorrect] Shifted date: " + original + " -> " + date + " (" + seasonStr + ")"));
+                        } else if (date != null && date.isAfter(today) && (homeGoals == null || awayGoals == null)) {
+                            warnLogs.add(new WarnLog(homeName, awayName, "[Parsing][Future] Match date=" + date + " > today; set UPCOMING"));
+                        }
                         inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
+                        if (autoCorrectedNow && date != null) {
+                            java.util.Optional<Match> created = matchRepository.findByLeagueIdAndHomeTeamIdAndAwayTeamIdAndDate(league.getId(), home.getId(), away.getId(), date);
+                            if (created.isPresent() && !created.get().isAutoCorrected()) {
+                                Match m = created.get();
+                                m.setAutoCorrected(true);
+                                matchRepository.save(m);
+                            }
+                        }
                     }
                 } else {
                     // Strict team validation for Raw Text Upload: ensure teams already exist in this league
@@ -587,15 +651,29 @@ public class MatchUploadService {
                     Optional<Team> homeOpt = teamRepository.findByNormalizedNameAndLeagueId(homeNorm, league.getId());
                     Optional<Team> awayOpt = teamRepository.findByNormalizedNameAndLeagueId(awayNorm, league.getId());
                     boolean missing = false;
+                    boolean homeMissing = false;
+                    boolean awayMissing = false;
                     if (homeOpt.isEmpty()) {
                         warnLogs.add(new WarnLog(homeName, "", "Skipped unrecognized team entry: " + homeName));
                         missing = true;
+                        homeMissing = true;
                     }
                     if (awayOpt.isEmpty()) {
                         warnLogs.add(new WarnLog(awayName, "", "Skipped unrecognized team entry: " + awayName));
                         missing = true;
+                        awayMissing = true;
                     }
                     if (missing) {
+                        // Record a skipped match with explicit reason so UI can show which one and why
+                        String reason;
+                        if (homeMissing && awayMissing) {
+                            reason = "Unrecognized teams (both home and away not found)";
+                        } else if (homeMissing) {
+                            reason = "Unrecognized home team";
+                        } else {
+                            reason = "Unrecognized away team";
+                        }
+                        skippedLogs.add(new SkipLog(homeName, awayName, reason));
                         // Skip saving this match since a team is unrecognized
                         continue;
                     }
@@ -608,14 +686,16 @@ public class MatchUploadService {
                 }
             }
         }
-        boolean ok = errors.isEmpty();
+        // Success: true if no errors OR partial success (some items parsed/persisted despite ignorable errors)
+        boolean partialOk = !errors.isEmpty() && (!items.isEmpty() || inserted > 0) && errors.size() < Math.max(1, (items.isEmpty() ? inserted : items.size()));
+        boolean ok = errors.isEmpty() || partialOk;
         return new UploadResult(ok, errors, inserted, deleted, updatedLogs, skippedLogs, warnLogs);
     }
 
     private static boolean isDayMonthTimeLine(String line) {
         String l = line.trim();
-        // Patterns like 01.09. 01:30 or 1.9. 1:30
-        return l.matches("^\\d{1,2}\\.\\d{1,2}\\.\\s*\\d{1,2}:\\d{2}$");
+        // Accept dd.MM. HH:mm, d.M. H:mm, or without the second dot before space
+        return l.matches("^\\d{1,2}\\.\\d{1,2}\\.?\\s*\\d{1,2}:\\d{2}$");
     }
 
     private static boolean isPureNumber(String line) {
@@ -768,6 +848,73 @@ public class MatchUploadService {
         return t;
     }
 
+    private static boolean isStatusMarker(String s) {
+        if (s == null) return false;
+        String t = s.trim().toUpperCase();
+        // Treat common short status markers as ignorable between date and teams
+        return t.matches("^[A-Z]{2,3}$") && (t.equals("AET") || t.equals("FT") || t.equals("HT") || t.equals("PEN") || t.equals("ET"));
+    }
+
+    private static boolean isLikelyNonMatchHeader(String s) {
+        if (s == null) return false;
+        String t = s.trim();
+        if (t.isEmpty()) return false;
+        if (t.toLowerCase().startsWith("round")) return false;
+        // Treat playoff stage labels (Final/Semi-finals/Quarter-finals) as valid round context, not headers
+        if (isPlayoffStage(t)) return false;
+        // country or section header with colon, standings/draw, group/play offs keywords
+        if (t.matches("^[A-Z][A-Z\u00C0-\u017F\s]+:?$")) return true;
+        String tl = t.toLowerCase();
+        if (tl.equals("standings") || tl.equals("draw")) return true;
+        if (tl.contains("group") || tl.contains("play off")) return true;
+        return false;
+    }
+
+    private static boolean isPlayoffStage(String s) {
+        if (s == null) return false;
+        String t = s.trim().toLowerCase();
+        // normalize hyphens and spaces
+        t = t.replace("–", "-").replace("—", "-");
+        t = t.replaceAll("\\s+", " ");
+        // Accept common stage names and fractional knockout rounds, and allow being part of a longer header (e.g., "Primera Nacional - Super final")
+        if (t.contains("super final")) return true;
+        if (t.contains("additional match") || t.contains("additional game") || t.contains("additional playoff")) return true;
+        if (t.contains("winners stage") || t.contains("losers stage")) return true; // qualification branches
+        if (t.contains("qualification")) return true; // general qualification header with stages
+        if (t.contains("final") && !t.contains("quarter") && !t.contains("semi") && !t.contains("1/")) return true; // plain "final" inside text
+        if (t.contains("semi-finals") || t.contains("semi finals") || t.contains("semifinals")) return true;
+        if (t.contains("quarter-finals") || t.contains("quarter finals") || t.contains("quarterfinals")) return true;
+        // Fractional rounds like 1/2-finals, 1/4-finals, 1/8-finals, 1/16-finals, etc.
+        if (t.matches(".*\\b1/2-?finals\\b.*")) return true;
+        if (t.matches(".*\\b1/4-?finals\\b.*")) return true;
+        if (t.matches(".*\\b1/8-?finals\\b.*")) return true;
+        if (t.matches(".*\\b1/16-?finals\\b.*")) return true;
+        if (t.matches(".*\\b1/32-?finals\\b.*")) return true;
+        if (t.matches(".*\\b1/64-?finals\\b.*")) return true;
+        return false;
+    }
+
+    private static int mapStageToRound(String s) {
+        if (s == null) return -1;
+        String t = s.trim().toLowerCase();
+        t = t.replace("–", "-").replace("—", "-");
+        t = t.replaceAll("\\s+", " ");
+        // Map extended stages to synthetic round numbers (higher = later stage)
+        if (t.contains("super final")) return 999; // treat as final
+        if (t.contains("final") && !t.contains("quarter") && !t.contains("semi") && !t.contains("1/")) return 999;
+        if (t.contains("semi-finals") || t.contains("semi finals") || t.contains("semifinals") || t.contains("1/2-finals")) return 998;
+        if (t.contains("quarter-finals") || t.contains("quarter finals") || t.contains("quarterfinals") || t.contains("1/4-finals")) return 997;
+        if (t.contains("1/8-finals")) return 996; // Round of 16
+        if (t.contains("1/16-finals")) return 995;
+        if (t.contains("1/32-finals")) return 994;
+        if (t.contains("1/64-finals")) return 993;
+        if (t.contains("additional match") || t.contains("additional game") || t.contains("additional playoff")) return 992; // tie-breaker/additional
+        if (t.contains("winners stage")) return 991; // qualification winners path
+        if (t.contains("losers stage")) return 990;  // qualification losers path
+        if (t.contains("qualification")) return 989; // generic qualification
+        return -1;
+    }
+
     /**
      * Upsert a match using canonical identity (league, date, home, away).
      * If date is null (should not happen after validation), fallback to (league, round, home, away).
@@ -776,8 +923,6 @@ public class MatchUploadService {
     private int upsertMatch(League league, Team home, Team away, LocalDate date, int round, Integer homeGoals, Integer awayGoals, Season season) {
         Integer hgToSave = homeGoals;
         Integer agToSave = awayGoals;
-        // Do not convert 0-0 to null, as some deployments have NOT NULL constraints on goal columns.
-        // Keep explicit 0-0 for future-dated fixtures to avoid SQLIntegrityConstraintViolationException.
         if (date != null) {
             final Integer fHg = hgToSave;
             final Integer fAg = agToSave;
@@ -795,10 +940,9 @@ public class MatchUploadService {
                             existing.setStatus(MatchStatus.SCHEDULED);
                         }
                         if (changed) { matchRepository.save(existing); }
-                        return 0; // not a new insert
+                        return 0;
                     })
                     .orElseGet(() -> {
-                        // Fallback: avoid violating unique (league, round, home, away) by updating existing row if present
                         return matchRepository
                                 .findByLeagueIdAndRoundAndHomeTeamIdAndAwayTeamId(league.getId(), round, home.getId(), away.getId())
                                 .map(existing -> {
@@ -808,10 +952,9 @@ public class MatchUploadService {
                                     if (!Objects.equals(fAg, existing.getAwayGoals())) { existing.setAwayGoals(fAg); changed = true; }
                                     if (fHg != null && fAg != null) { existing.setStatus(MatchStatus.PLAYED); } else { existing.setStatus(MatchStatus.SCHEDULED); }
                                     if (changed) { matchRepository.save(existing); }
-                                    return 0; // updated existing
+                                    return 0;
                                 })
                                 .orElseGet(() -> {
-                                    // Reject duplicates within same season before inserting
                                     if (season != null && date != null) {
                                         var existingSame = matchRepository.findBySeasonIdAndHomeTeamIdAndAwayTeamIdAndDate(season.getId(), home.getId(), away.getId(), date);
                                         if (existingSame.isPresent()) {
@@ -820,16 +963,14 @@ public class MatchUploadService {
                                     }
                                     Match m = new Match(league, home, away, date, round, fHg, fAg);
                                     if (season != null) m.setSeason(season);
-                                    // Match constructor already sets status based on goals; ensure not null
                                     if (m.getStatus() == null) {
                                         m.setStatus((fHg != null && fAg != null) ? MatchStatus.PLAYED : MatchStatus.SCHEDULED);
                                     }
                                     matchRepository.save(m);
-                                    return 1; // inserted
+                                    return 1;
                                 });
                     });
         }
-        // Fallback: round-based
         final Integer fHg2 = hgToSave;
         final Integer fAg2 = agToSave;
         return matchRepository
@@ -841,10 +982,9 @@ public class MatchUploadService {
                     if (season != null && (existing.getSeason() == null || !season.getId().equals(existing.getSeason().getId()))) { existing.setSeason(season); changed = true; }
                     if (fHg2 != null && fAg2 != null) { existing.setStatus(MatchStatus.PLAYED); } else { existing.setStatus(MatchStatus.SCHEDULED); }
                     if (changed) { matchRepository.save(existing); }
-                    return 0; // not a new insert
+                    return 0;
                 })
                 .orElseGet(() -> {
-                    // Reject duplicates within same season before inserting (round-based fallback)
                     if (season != null && date != null) {
                         var existingSame = matchRepository.findBySeasonIdAndHomeTeamIdAndAwayTeamIdAndDate(season.getId(), home.getId(), away.getId(), date);
                         if (existingSame.isPresent()) {
@@ -855,7 +995,7 @@ public class MatchUploadService {
                     if (season != null) m.setSeason(season);
                     if (m.getStatus() == null) { m.setStatus((fHg2 != null && fAg2 != null) ? MatchStatus.PLAYED : MatchStatus.SCHEDULED); }
                     matchRepository.save(m);
-                    return 1; // inserted
+                    return 1;
                 });
     }
 

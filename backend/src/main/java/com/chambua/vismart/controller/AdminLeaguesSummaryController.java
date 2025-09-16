@@ -24,15 +24,24 @@ public class AdminLeaguesSummaryController {
     private final SeasonRepository seasonRepository;
     private final SeasonService seasonService;
     private final MatchRepository matchRepository;
+    private final com.chambua.vismart.repository.FixtureRepository fixtureRepository;
+    private final com.chambua.vismart.repository.TeamRepository teamRepository;
+    private final com.chambua.vismart.repository.TeamAliasRepository teamAliasRepository;
 
     public AdminLeaguesSummaryController(LeagueRepository leagueRepository,
                                          SeasonRepository seasonRepository,
                                          SeasonService seasonService,
-                                         MatchRepository matchRepository) {
+                                         MatchRepository matchRepository,
+                                         com.chambua.vismart.repository.FixtureRepository fixtureRepository,
+                                         com.chambua.vismart.repository.TeamRepository teamRepository,
+                                         com.chambua.vismart.repository.TeamAliasRepository teamAliasRepository) {
         this.leagueRepository = leagueRepository;
         this.seasonRepository = seasonRepository;
         this.seasonService = seasonService;
         this.matchRepository = matchRepository;
+        this.fixtureRepository = fixtureRepository;
+        this.teamRepository = teamRepository;
+        this.teamAliasRepository = teamAliasRepository;
     }
 
     @GetMapping("/summary")
@@ -77,5 +86,34 @@ public class AdminLeaguesSummaryController {
             out.add(dto);
         }
         return out;
+    }
+
+    public static class DeleteLeagueResult {
+        public long matchesDeleted;
+        public long fixturesDeleted;
+        public long seasonsDeleted;
+        public boolean leagueDeleted;
+        public DeleteLeagueResult(long matchesDeleted, long fixturesDeleted, long seasonsDeleted, boolean leagueDeleted) {
+            this.matchesDeleted = matchesDeleted;
+            this.fixturesDeleted = fixturesDeleted;
+            this.seasonsDeleted = seasonsDeleted;
+            this.leagueDeleted = leagueDeleted;
+        }
+    }
+
+    @DeleteMapping("/{leagueId}")
+    @org.springframework.transaction.annotation.Transactional
+    public DeleteLeagueResult deleteLeague(@PathVariable("leagueId") Long leagueId) {
+        League league = leagueRepository.findById(leagueId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "League not found"));
+
+        long matches = matchRepository.deleteByLeague(league);
+        long fixtures = fixtureRepository.deleteByLeague_Id(leagueId);
+        // Remove dependent team aliases and teams to satisfy FK constraints before deleting the league
+        long aliases = teamAliasRepository.deleteByTeam_League_Id(leagueId);
+        long teams = teamRepository.deleteByLeague_Id(leagueId);
+        long seasons = seasonRepository.deleteByLeague_Id(leagueId);
+        leagueRepository.deleteById(leagueId);
+        return new DeleteLeagueResult(matches, fixtures, seasons, true);
     }
 }

@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface TeamRepository extends JpaRepository<Team, Long> {
+    // Deletion helper: remove all teams for a league (used when deleting a league)
+    long deleteByLeague_Id(Long leagueId);
     // Normalized-name based finders
     Optional<Team> findByNormalizedNameAndLeagueId(String normalizedName, Long leagueId);
     List<Team> findByNormalizedNameContainingAndLeagueId(String normalizedName, Long leagueId);

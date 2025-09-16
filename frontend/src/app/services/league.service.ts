@@ -13,6 +13,19 @@ export interface League {
 // Backward-compat alias used by MatchUploadComponent
 export type LeagueDto = League;
 
+// New DTOs for grouped leagues for fixtures upload
+export interface LeagueSeasonOptionDTO {
+  leagueId: number;
+  season: string;
+  label: string; // typically same as season
+}
+export interface GroupedLeagueDTO {
+  country: string;
+  leagueName: string;
+  groupLabel: string; // e.g., "England — English Premier League"
+  options: LeagueSeasonOptionDTO[]; // ordered latest -> oldest
+}
+
 // DTOs expected by Form Guide and League Table pages
 export interface FormGuideRowDTO {
   teamId: number;
@@ -79,6 +92,12 @@ export class LeagueService {
   // Back-compat aliases used by various pages
   getLeagues(): Observable<League[]> { return this.getAll(); }
   getAllLeagues(): Observable<League[]> { return this.getAll(); }
+
+  // Grouped leagues for fixtures upload
+  getGroupedLeaguesForUpload(): Observable<GroupedLeagueDTO[]> {
+    const base = getApiBase();
+    return this.http.get<GroupedLeagueDTO[]>(`${base}/leagues/grouped-upload`);
+  }
 
   // League detail by id
   getLeagueDetails(id: number | string): Observable<League> {
