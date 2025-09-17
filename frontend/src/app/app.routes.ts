@@ -35,5 +35,7 @@ export const routes: Routes = [
   { path: 'history', canActivate: [authGuard], component: MatchHistoryComponent, title: 'Match History' },
   { path: 'form-guide', canActivate: [authGuard], loadComponent: () => import('./pages/form-guide.component').then(m => m.FormGuideComponent), title: 'Form Guide' },
   { path: 'admin', canActivate: [authGuard], component: AdminUploadComponent, title: 'Admin Upload' },
+  { path: 'batch/:jobId', canActivate: [authGuard], loadComponent: () => import('./pages/batch-results.component').then(m => m.BatchResultsComponent), title: 'Chambua-Leo' },
+  { path: 'persisted-today', canActivate: [authGuard], loadComponent: () => import('./pages/persisted-today.component').then(m => m.PersistedTodayComponent), title: 'Chambua-Leo' },
   { path: '**', canActivate: [authGuard], component: NotFoundComponent, title: 'Not Found' }
 ];

@@ -5,6 +5,7 @@ import { FixturesService, LeagueFixturesResponse } from '../services/fixtures.se
 import { GlobalLeadersContainerComponent } from '../components/global-leaders-container/global-leaders-container.component';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
 import { forkJoin } from 'rxjs';
+import { BatchAnalysisService } from '../services/batch-analysis.service';
 
 @Component({
   selector: 'app-home',
@@ -17,6 +18,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   private fixturesApi = inject(FixturesService);
   private router = inject(Router);
   private leadersApi = inject(GlobalLeadersService);
+  private batchApi = inject(BatchAnalysisService);
 
   today = new Date();
   showCalendar = false;
@@ -355,5 +357,10 @@ export class HomeComponent implements OnInit, OnDestroy {
         ...(leagueId ? { leagueId } : {})
       }
     });
+  }
+
+  startChambuaLeo() {
+    // Repurposed: navigate to persisted daily analyses view (individual analyze results consolidated)
+    this.router.navigate(['/persisted-today']);
   }
 }
