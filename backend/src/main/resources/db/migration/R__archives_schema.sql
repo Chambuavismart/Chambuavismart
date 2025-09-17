@@ -92,6 +92,7 @@ CALL AddArchivesColumnsToMatches();
 DROP PROCEDURE IF EXISTS AddArchivesColumnsToMatches;
 
 -- 6) Indexes (idempotent via INFORMATION_SCHEMA + dynamic SQL)
+-- These indexes support querying runs and filtering matches by import metadata.
 SET @db := DATABASE();
 
 -- import_run(status)
