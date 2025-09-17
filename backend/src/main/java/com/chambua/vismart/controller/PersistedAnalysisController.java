@@ -5,8 +5,11 @@ import com.chambua.vismart.model.PersistedFixtureAnalysis;
 import com.chambua.vismart.repository.PersistedFixtureAnalysisRepository;
 import com.chambua.vismart.service.LaTeXService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.dao.InvalidDataAccessResourceUsageException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -25,6 +28,8 @@ import java.util.stream.Collectors;
 @CrossOrigin(origins = "*")
 public class PersistedAnalysisController {
 
+    private static final Logger log = LoggerFactory.getLogger(PersistedAnalysisController.class);
+
     private final PersistedFixtureAnalysisRepository repo;
     private final LaTeXService latexService;
     private final ObjectMapper objectMapper;
@@ -41,10 +46,15 @@ public class PersistedAnalysisController {
     @GetMapping("/today")
     public List<MatchAnalysisResponse> getTodayAnalyses() {
         if (!persistedDailyEnabled) return java.util.Collections.emptyList();
-        LocalDate today = LocalDate.now(ZoneId.of("Africa/Nairobi"));
-        return repo.findByAnalysisDate(today).stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        try {
+            LocalDate today = LocalDate.now(ZoneId.of("Africa/Nairobi"));
+            return repo.findByAnalysisDate(today).stream()
+                    .map(this::toResponse)
+                    .collect(Collectors.toList());
+        } catch (InvalidDataAccessResourceUsageException e) {
+            log.warn("[PersistedAnalysis][GetToday] Failed to fetch analyses: {}", e.getMessage());
+            return java.util.Collections.emptyList();
+        }
     }
 
     @GetMapping(value = "/today/pdf", produces = MediaType.APPLICATION_PDF_VALUE)

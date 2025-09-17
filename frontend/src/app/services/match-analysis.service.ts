@@ -25,6 +25,12 @@ export interface MatchAnalysisResponse {
   expectedGoals: { home: number; away: number };
   confidenceScore: number;
   advice: string;
+  // Explainability
+  h2hAlpha?: number;
+  leagueAdjustment?: number;
+  formHomeMatches?: number;
+  formAwayMatches?: number;
+  h2hMatches?: number;
   // Optional summaries for UI visualization
   formSummary?: { homeWin: number; draw: number; awayWin: number; btts: number; over25: number };
   h2hSummary?: { lastN: number; ppgHome: number; ppgAway: number; bttsPct: number; over25Pct: number; matches?: H2HMatchItem[] };

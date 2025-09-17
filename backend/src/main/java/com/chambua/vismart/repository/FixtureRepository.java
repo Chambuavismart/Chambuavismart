@@ -49,4 +49,15 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
 
     // Finder for incremental upsert
     java.util.Optional<Fixture> findByLeague_IdAndHomeTeamIgnoreCaseAndAwayTeamIgnoreCaseAndDateTime(Long leagueId, String homeTeam, String awayTeam, java.time.LocalDateTime dateTime);
+
+    // Eagerly fetch league for a given day using a time range (avoids LazyInitializationException)
+    @Query("select f from Fixture f join fetch f.league l where f.dateTime >= :start and f.dateTime < :end order by l.name asc, f.dateTime asc")
+    List<Fixture> findByDateRangeFetchLeague(@Param("start") LocalDateTime startInclusive,
+                                             @Param("end") LocalDateTime endExclusive);
+
+    // Same as above but with season filter
+    @Query("select f from Fixture f join fetch f.league l where f.dateTime >= :start and f.dateTime < :end and l.season = :season order by l.name asc, f.dateTime asc")
+    List<Fixture> findByDateRangeAndSeasonFetchLeague(@Param("start") LocalDateTime startInclusive,
+                                                      @Param("end") LocalDateTime endExclusive,
+                                                      @Param("season") String season);
 }

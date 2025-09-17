@@ -8,14 +8,28 @@ public class MatchAnalysisResponse {
     private WinProbabilities winProbabilities;
     private int bttsProbability;
     private int over25Probability;
+    // New for Fixture Analysis format
+    private Integer over15Probability; // optional; 0-100
+    private Integer over35Probability; // optional; 0-100
+    private String notes; // optional fixture analysis notes
+    private java.util.List<CorrectScorePrediction> correctScores; // optional top-N scores
     private ExpectedGoals expectedGoals;
     private int confidenceScore;
     private String advice;
+    // Flag indicating whether this response came from cache (for batch reporting)
+    private Boolean cacheHit;
+    // Explainability fields
+    private Double h2hAlpha; // weight applied to H2H blending (0..0.3 per new curve)
+    private Integer leagueAdjustment; // net points shifted due to league rank delta (positive favors home, negative favors away)
     // Optional: expose unblended form stats and H2H summary for UI visualization
     private FormSummary formSummary; // may be null
     private H2HSummary h2hSummary;   // may be null
     // New: flat list of raw H2H matches for UI (date, competition, teams, goals)
     private java.util.List<HeadToHeadMatchDto> headToHeadMatches;
+    // Explainability counts
+    private Integer formHomeMatches;
+    private Integer formAwayMatches;
+    private Integer h2hMatches;
 
     public MatchAnalysisResponse() {}
 
@@ -48,18 +62,40 @@ public class MatchAnalysisResponse {
     public void setBttsProbability(int bttsProbability) { this.bttsProbability = bttsProbability; }
     public int getOver25Probability() { return over25Probability; }
     public void setOver25Probability(int over25Probability) { this.over25Probability = over25Probability; }
+    public Integer getOver15Probability() { return over15Probability; }
+    public void setOver15Probability(Integer over15Probability) { this.over15Probability = over15Probability; }
+    public Integer getOver35Probability() { return over35Probability; }
+    public void setOver35Probability(Integer over35Probability) { this.over35Probability = over35Probability; }
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+    public java.util.List<CorrectScorePrediction> getCorrectScores() { return correctScores; }
+    public void setCorrectScores(java.util.List<CorrectScorePrediction> correctScores) { this.correctScores = correctScores; }
     public ExpectedGoals getExpectedGoals() { return expectedGoals; }
     public void setExpectedGoals(ExpectedGoals expectedGoals) { this.expectedGoals = expectedGoals; }
     public int getConfidenceScore() { return confidenceScore; }
     public void setConfidenceScore(int confidenceScore) { this.confidenceScore = confidenceScore; }
     public String getAdvice() { return advice; }
     public void setAdvice(String advice) { this.advice = advice; }
+
+    public Boolean getCacheHit() { return cacheHit; }
+    public void setCacheHit(Boolean cacheHit) { this.cacheHit = cacheHit; }
+
+    public Double getH2hAlpha() { return h2hAlpha; }
+    public void setH2hAlpha(Double h2hAlpha) { this.h2hAlpha = h2hAlpha; }
+    public Integer getLeagueAdjustment() { return leagueAdjustment; }
+    public void setLeagueAdjustment(Integer leagueAdjustment) { this.leagueAdjustment = leagueAdjustment; }
     public FormSummary getFormSummary() { return formSummary; }
     public void setFormSummary(FormSummary formSummary) { this.formSummary = formSummary; }
     public H2HSummary getH2hSummary() { return h2hSummary; }
     public void setH2hSummary(H2HSummary h2hSummary) { this.h2hSummary = h2hSummary; }
     public java.util.List<HeadToHeadMatchDto> getHeadToHeadMatches() { return headToHeadMatches; }
     public void setHeadToHeadMatches(java.util.List<HeadToHeadMatchDto> headToHeadMatches) { this.headToHeadMatches = headToHeadMatches; }
+    public Integer getFormHomeMatches() { return formHomeMatches; }
+    public void setFormHomeMatches(Integer formHomeMatches) { this.formHomeMatches = formHomeMatches; }
+    public Integer getFormAwayMatches() { return formAwayMatches; }
+    public void setFormAwayMatches(Integer formAwayMatches) { this.formAwayMatches = formAwayMatches; }
+    public Integer getH2hMatches() { return h2hMatches; }
+    public void setH2hMatches(Integer h2hMatches) { this.h2hMatches = h2hMatches; }
 
     public static class WinProbabilities {
         private int homeWin;
@@ -168,5 +204,17 @@ public class MatchAnalysisResponse {
         public void setAway(String away) { this.away = away; }
         public String getScore() { return score; }
         public void setScore(String score) { this.score = score; }
+    }
+
+    // New: correct score prediction item
+    public static class CorrectScorePrediction {
+        private String score; // e.g., "1-1"
+        private double probability; // 0..1 fraction or 0..100 if consumer uses as percent
+        public CorrectScorePrediction() {}
+        public CorrectScorePrediction(String score, double probability) { this.score = score; this.probability = probability; }
+        public String getScore() { return score; }
+        public void setScore(String score) { this.score = score; }
+        public double getProbability() { return probability; }
+        public void setProbability(double probability) { this.probability = probability; }
     }
 }

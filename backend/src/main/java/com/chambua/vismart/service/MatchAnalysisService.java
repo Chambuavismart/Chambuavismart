@@ -20,7 +20,7 @@ import java.util.*;
 public class MatchAnalysisService {
 
     private static final int DEFAULT_FORM_LIMIT = 6;
-    private static final int DEFAULT_H2H_LIMIT = 6;
+    private static final int DEFAULT_H2H_LIMIT = 2;
 
     private final MatchAnalysisResultRepository cacheRepo;
     private final ObjectMapper objectMapper;
@@ -78,12 +78,23 @@ public class MatchAnalysisService {
         org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MatchAnalysisService.class);
         long t0 = System.currentTimeMillis();
         logger.info("[ANALYZE][REQ] leagueId={} seasonId={} homeId={} awayId={} home='{}' away='{}' refresh={}", leagueId, seasonId, homeTeamId, awayTeamId, homeTeamName, awayTeamName, refresh);
+        // Companion log tag for clarity in batch fixture logs
+        logger.info("[FixtureAnalysis][REQ] leagueId={} seasonId={} homeId={} awayId={} home='{}' away='{}' refresh={}", leagueId, seasonId, homeTeamId, awayTeamId, homeTeamName, awayTeamName, refresh);
+
+        // League context correction: known cases where UI passes Champions League (36) for 3. Liga teams
+        if (leagueId != null && leagueId == 36L && isThirdLigaTeam(homeTeamId, awayTeamId)) {
+            logger.warn("[FixtureAnalysis] Incorrect leagueId=36 for {} vs {}; falling back to leagueId=45 (3. Liga)", homeTeamName, awayTeamName);
+            leagueId = 45L;
+        }
+        
         // If we have IDs, no explicit season context, and not refreshing, try cache first
         if (!refresh && seasonId == null && leagueId != null && homeTeamId != null && awayTeamId != null) {
             Optional<MatchAnalysisResult> cached = cacheRepo.findByLeagueIdAndHomeTeamIdAndAwayTeamId(leagueId, homeTeamId, awayTeamId);
             if (cached.isPresent()) {
                 try {
-                    return objectMapper.readValue(cached.get().getResultJson(), MatchAnalysisResponse.class);
+                    MatchAnalysisResponse r = objectMapper.readValue(cached.get().getResultJson(), MatchAnalysisResponse.class);
+                    if (r != null) r.setCacheHit(true);
+                    return r;
                 } catch (Exception ignored) { /* fall through to recompute on JSON error */ }
             }
         }
@@ -112,6 +123,10 @@ public class MatchAnalysisService {
         int baseHome = 33, baseDraw = 34, baseAway = 33; // sensible defaults
         int baseBtts = btts;
         int baseOver25 = over25;
+        // For confidence inputs
+        int formHomeSplitMatches = 0;
+        int formAwaySplitMatches = 0;
+        Integer h2hHomeProb = null, h2hDrawProb = null, h2hAwayProb = null;
         try {
             Long sid = (seasonId != null) ? seasonId : seasonService.findCurrentSeason(leagueId).map(Season::getId).orElse(null);
             if (sid != null) {
@@ -132,10 +147,12 @@ public class MatchAnalysisService {
                 if (haveHome) {
                     int hm = homeRow.getWeightedHomeMatches();
                     homePpg = (hm >= 2 ? homeRow.getWeightedHomePPG() : homeRow.getPpg());
+                    formHomeSplitMatches = hm;
                 }
                 if (haveAway) {
                     int am = awayRow.getWeightedAwayMatches();
                     awayPpg = (am >= 2 ? awayRow.getWeightedAwayPPG() : awayRow.getPpg());
+                    formAwaySplitMatches = am;
                 }
 
                 if (!haveHome || !haveAway) {
@@ -190,6 +207,7 @@ public class MatchAnalysisService {
         
         // Integrate Head-to-Head (H2H) recency-weighted adjustments over last N matches
         int h2hWindow = 0; double h2hPpgHome = 0.0, h2hPpgAway = 0.0; int h2hBttsPct = 0, h2hOv25Pct = 0;
+        double h2hAlphaForResponse = 0.0; // explainability: actual alpha used for blending
         java.util.List<com.chambua.vismart.model.Match> h2hUsed = null;
         try {
             // Allow H2H retrieval if we have a league and either IDs or names for both teams
@@ -283,7 +301,7 @@ public class MatchAnalysisService {
                 if (h2h != null && !h2h.isEmpty()) {
                     h2hUsed = h2h;
                     int window = Math.min(DEFAULT_H2H_LIMIT, h2h.size());
-                    logger.info("[ANALYZE][H2H] pairsFound={} usingWindow={}", h2h.size(), window);
+                    logger.info("[FixtureAnalysis][H2H] pairsFound={} usingWindow={}", h2h.size(), window);
                     double sumW = 0.0, wHome = 0.0, wDraw = 0.0, wAway = 0.0, wBtts = 0.0, wOv25 = 0.0, wOv15 = 0.0;
                     for (int i = 0; i < window; i++) {
                         var m = h2h.get(i); // already sorted desc by date
@@ -316,12 +334,15 @@ public class MatchAnalysisService {
                             h2hDrawPct = 100 - (h2hHomePct + h2hAwayPct);
                             if (h2hDrawPct < 0) h2hDrawPct = 0;
                         }
+                        // capture for confidence comparison
+                        h2hHomeProb = h2hHomePct; h2hDrawProb = h2hDrawPct; h2hAwayProb = h2hAwayPct;
                         h2hBttsPct = (int) Math.round((wBtts * 100.0) / sumW);
                         h2hOv25Pct = (int) Math.round((wOv25 * 100.0) / sumW);
 
-                        // Blend factor alpha based on number of H2H considered (up to 50% influence at N matches)
-                        double alpha = Math.min(0.5, (window / (double) DEFAULT_H2H_LIMIT) * 0.5);
-                        logger.info("[ANALYZE][H2H_BLEND] alpha={} form={{H:{},D:{},A:{}}} h2h={{H:{},D:{},A:{}}}", String.format("%.2f", alpha), home, draw, away, h2hHomePct, h2hDrawPct, h2hAwayPct);
+                        // Blend factor alpha tightened for small samples: N<3 → 0, cap at 0.3; linear alpha=min(0.3, 0.03*N)
+                        double alpha = (window < 3) ? 0.0 : Math.min(0.3, 0.03 * window);
+                        h2hAlphaForResponse = alpha;
+                        logger.info("[FixtureAnalysis][H2H] leagueId={} seasonId={} h2hMatches={} alpha={}", String.valueOf(leagueId), String.valueOf(seasonId), window, String.format("%.2f", alpha));
                         // Blend W/D/L
                         double bHome = (1 - alpha) * home + alpha * h2hHomePct;
                         double bAway = (1 - alpha) * away + alpha * h2hAwayPct;
@@ -339,6 +360,7 @@ public class MatchAnalysisService {
         } catch (Exception ignored) { /* fallback: keep form-only values */ }
         
         // League position/strength adjustment (season-scoped)
+        int leagueAdjDelta = 0; // net points shifted toward home (negative means toward away)
         try {
             if (leagueId != null) {
                 Long sid = (seasonId != null) ? seasonId : seasonService.findCurrentSeason(leagueId).map(Season::getId).orElse(null);
@@ -375,10 +397,12 @@ public class MatchAnalysisService {
                                     int take = Math.min(maxShift, away);
                                     int[] trip = normalizeTriplet(home + take, draw, away - take);
                                     home = trip[0]; draw = trip[1]; away = trip[2];
+                                    leagueAdjDelta += take;
                                 } else if (delta < 0) {
                                     int take = Math.min(maxShift, home);
                                     int[] trip = normalizeTriplet(home - take, draw, away + take);
                                     home = trip[0]; draw = trip[1]; away = trip[2];
+                                    leagueAdjDelta -= take;
                                 }
                             }
                             // If teams are very close (|delta| < 0.1), slightly increase draw by up to 2 points, borrowed evenly
@@ -437,7 +461,25 @@ public class MatchAnalysisService {
         xgHome = Math.round(xgHome * 100.0) / 100.0;
         xgAway = Math.round(xgAway * 100.0) / 100.0;
 
-        int confidence = 60 + random.nextInt(21); // 60..80
+        // Compute confidence score based on sample sizes and agreement between final and H2H probabilities
+        int effectiveSample = Math.max(0, formHomeSplitMatches) + Math.max(0, formAwaySplitMatches) + Math.max(0, h2hWindow);
+        // Use final blended probabilities (home/draw/away) compared against H2H-derived ones
+        double fH = home / 100.0, fD = draw / 100.0, fA = away / 100.0;
+        double hHn = (h2hHomeProb != null ? h2hHomeProb : home) / 100.0;
+        double hDn = (h2hDrawProb != null ? h2hDrawProb : draw) / 100.0;
+        double hAn = (h2hAwayProb != null ? h2hAwayProb : away) / 100.0;
+        double maxProbDiff = Math.max(Math.abs(fH - hHn), Math.max(Math.abs(fD - hDn), Math.abs(fA - hAn)));
+        // Debug inputs for confidence as requested
+        logger.info("[FixtureAnalysis][ConfidenceInputs] formHomeMatches={}, formAwayMatches={}, h2hMatches={}, finalProbs={},{}{}, h2hProbs={},{}{}",
+                Math.max(0, formHomeSplitMatches), Math.max(0, formAwaySplitMatches), Math.max(0, h2hWindow),
+                String.format(java.util.Locale.ROOT, "%.2f", fH), String.format(java.util.Locale.ROOT, "%.2f", fD), String.format(java.util.Locale.ROOT, "%.2f", fA),
+                String.format(java.util.Locale.ROOT, "%.2f", hHn), String.format(java.util.Locale.ROOT, "%.2f", hDn), String.format(java.util.Locale.ROOT, "%.2f", hAn));
+        logger.info("[FixtureAnalysis][ConfidenceDebug] maxProbDiff={}", String.format(java.util.Locale.ROOT, "%.3f", maxProbDiff));
+        double confidenceD = Math.min(90.0, 50.0 + 10.0 * Math.log10(Math.max(1, effectiveSample)) - 20.0 * maxProbDiff);
+        int confidence = (int) Math.round(confidenceD);
+        logger.info("[FixtureAnalysis][Confidence] teamIds={},{} effectiveSample={} maxProbDiff={} confidence={}",
+                String.valueOf(homeTeamId), String.valueOf(awayTeamId), effectiveSample,
+                String.format(java.util.Locale.ROOT, "%.3f", maxProbDiff), String.format(java.util.Locale.ROOT, "%.1f", confidenceD));
         String advice = (over25 >= 52 ? "Likely Over 2.5" : "Under 2.5 risk") +
                 ", " + (btts >= 55 ? "BTTS Yes" : "BTTS Lean No");
 
@@ -452,6 +494,26 @@ public class MatchAnalysisService {
                 confidence,
                 advice
         );
+        // Summary response log for parity with UI and tests
+        try {
+            logger.info("[FixtureAnalysis][Response] teamIds={},{} , winProbs={},{},{} , confidence={} , h2hAlpha={}",
+                    String.valueOf(homeTeamId), String.valueOf(awayTeamId),
+                    String.format(java.util.Locale.ROOT, "%.2f", home / 100.0),
+                    String.format(java.util.Locale.ROOT, "%.2f", draw / 100.0),
+                    String.format(java.util.Locale.ROOT, "%.2f", away / 100.0),
+                    confidence,
+                    String.format(java.util.Locale.ROOT, "%.2f", h2hAlphaForResponse));
+        } catch (Exception ignored) {}
+        // set explainability fields
+        try { response.setH2hAlpha(h2hAlphaForResponse); } catch (Exception ignored) {}
+        try { response.setLeagueAdjustment(leagueAdjDelta); } catch (Exception ignored) {}
+        try { response.setFormHomeMatches(formHomeSplitMatches); } catch (Exception ignored) {}
+        try { response.setFormAwayMatches(formAwaySplitMatches); } catch (Exception ignored) {}
+        try { response.setH2hMatches(h2hWindow); } catch (Exception ignored) {}
+        logger.info("[FixtureAnalysis][Metadata] formHomeMatches={} formAwayMatches={} h2hMatches={} h2hAlpha={} leagueAdjustment={}",
+                formHomeSplitMatches, formAwaySplitMatches, h2hWindow,
+                String.format(java.util.Locale.ROOT, "%.3f", h2hAlphaForResponse),
+                leagueAdjDelta);
         // attach summaries for UI (optional)
         response.setFormSummary(new MatchAnalysisResponse.FormSummary(baseHome, baseDraw, baseAway, baseBtts, baseOver25));
         if (h2hWindow > 0) {
@@ -567,7 +629,7 @@ public class MatchAnalysisService {
                 }
                 int compactCount = (response.getH2hSummary() != null && response.getH2hSummary().getMatches() != null) ? response.getH2hSummary().getMatches().size() : 0;
                 int flatCount = (response.getHeadToHeadMatches() != null) ? response.getHeadToHeadMatches().size() : 0;
-                logger.info("[ANALYZE][H2H][OUT] h2hUsed={} compact={} flat={}", srcCount, compactCount, flatCount);
+                logger.info("[FixtureAnalysis][H2H][OUT] h2hUsed={} compact={} flat={}", srcCount, compactCount, flatCount);
             } catch (Exception ignored2) {}
         }
 
@@ -723,5 +785,12 @@ public class MatchAnalysisService {
                 }
                 fs.setPpgSeries(ppg);
                 return fs;
+    }
+    private boolean isThirdLigaTeam(Long homeTeamId, Long awayTeamId) {
+        java.util.Set<Long> ids = new java.util.HashSet<>();
+        // Known 3. Liga team IDs (extend as needed)
+        ids.add(1212L); // Hansa Rostock (example)
+        ids.add(1207L); // 1860 Munich (example)
+        return (homeTeamId != null && ids.contains(homeTeamId)) || (awayTeamId != null && ids.contains(awayTeamId));
     }
 }

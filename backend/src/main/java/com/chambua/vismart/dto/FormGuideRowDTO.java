@@ -52,6 +52,9 @@ public class FormGuideRowDTO {
     private String sourceLeague;
     // How many matches available in computed list (for Last 5 window)
     private int matchesAvailable;
+    // Multi-season fallback indicators
+    private boolean multiSeason;
+    private String sourceSeasons;
 
     public FormGuideRowDTO() {}
 
@@ -116,6 +119,10 @@ public class FormGuideRowDTO {
     public boolean isFallback() { return fallback; }
     public String getSourceLeague() { return sourceLeague; }
     public int getMatchesAvailable() { return matchesAvailable; }
+    public boolean isMultiSeason() { return multiSeason; }
+    public void setMultiSeason(boolean multiSeason) { this.multiSeason = multiSeason; }
+    public String getSourceSeasons() { return sourceSeasons; }
+    public void setSourceSeasons(String sourceSeasons) { this.sourceSeasons = sourceSeasons; }
 
     public void setTeamId(Long teamId) { this.teamId = teamId; }
     public void setTeamName(String teamName) { this.teamName = teamName; }

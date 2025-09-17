@@ -38,17 +38,17 @@ public class FixtureService {
     }
 
     public List<Fixture> getFixturesByDate(LocalDate date, String season) {
-        // Align with calendar/availability logic: use DATE(date_time) to select fixtures for the exact
-        // calendar day regardless of timezone offsets. This matches native queries used elsewhere and
-        // avoids edge cases where a LocalDateTime range might miss rows around midnight.
+        // Use time-range queries with JOIN FETCH (see FixtureRepository) to eagerly load League and avoid LazyInitializationException
+        LocalDateTime start = date.atStartOfDay();
+        LocalDateTime end = start.plusDays(1);
         List<Fixture> results;
         if (season != null && !season.isBlank()) {
-            results = fixtureRepository.findByDateOnlyAndSeason(date, season.trim());
+            results = fixtureRepository.findByDateRangeAndSeasonFetchLeague(start, end, season.trim());
         } else {
-            results = fixtureRepository.findByDateOnly(date);
+            results = fixtureRepository.findByDateRangeFetchLeague(start, end);
         }
         if (log.isDebugEnabled()) {
-            log.debug("[FixtureService] getFixturesByDate date={} season={} -> {} fixtures", date, season, results != null ? results.size() : 0);
+            log.debug("[FixtureService] getFixturesByDate date={} season={} -> {} fixtures (eager league)", date, season, results != null ? results.size() : 0);
         }
         return results;
     }

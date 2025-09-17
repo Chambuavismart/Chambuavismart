@@ -25,6 +25,13 @@ public class FormGuideService {
 
     private final com.chambua.vismart.repository.TeamRepository teamRepository;
 
+    // Optional injection for league averages used in shrinkage
+    private com.chambua.vismart.service.LeagueTableService leagueTableService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeagueTableService(com.chambua.vismart.service.LeagueTableService leagueTableService) {
+        this.leagueTableService = leagueTableService;
+    }
+
     // Additional constructor for tests or manual wiring
     public FormGuideService(EntityManager em) {
         this.em = em;
@@ -50,6 +57,10 @@ public class FormGuideService {
         if (seasonId == null) throw new IllegalArgumentException("seasonId is required");
         if (limit <= 0) limit = 6;
         if (scope == null) scope = Scope.OVERALL;
+
+        // Pre-compute league averages for shrinkage if service available
+        com.chambua.vismart.service.LeagueTableService.LeagueAverages leagueAvg = null;
+        try { if (leagueTableService != null) leagueAvg = leagueTableService.computeAveragesBySeason(leagueId, seasonId); } catch (Exception ignored) {}
 
         // Strict filtering: do not include NULL season rows or merge by date bounds
         String baseHome =
@@ -302,12 +313,33 @@ public class FormGuideService {
             dto.setWeightedAwayGoalsAgainst(awaySplit.avgGa);
             dto.setWeightedHomePPG(round2(homeSplit.ppg));
             dto.setWeightedAwayPPG(round2(awaySplit.ppg));
-            dto.setWeightedHomeBTTSPercent(homeSplit.bttsPct);
-            dto.setWeightedAwayBTTSPercent(awaySplit.bttsPct);
-            dto.setWeightedHomeOver15Percent(homeSplit.over15Pct);
-            dto.setWeightedAwayOver15Percent(awaySplit.over15Pct);
-            dto.setWeightedHomeOver25Percent(homeSplit.over25Pct);
-            dto.setWeightedAwayOver25Percent(awaySplit.over25Pct);
+            // Apply shrinkage to league averages when split match counts are sparse (<4)
+            int hBtts = homeSplit.bttsPct;
+            int aBtts = awaySplit.bttsPct;
+            int hOv15 = homeSplit.over15Pct;
+            int aOv15 = awaySplit.over15Pct;
+            int hOv25 = homeSplit.over25Pct;
+            int aOv25 = awaySplit.over25Pct;
+            if (leagueAvg != null) {
+                if (homeSplit.matchCount < 4) {
+                    hBtts = (int) Math.round(0.5 * hBtts + 0.5 * leagueAvg.getBttsPct());
+                    hOv15 = (int) Math.round(0.5 * hOv15 + 0.5 * leagueAvg.getOver15Pct());
+                    hOv25 = (int) Math.round(0.5 * hOv25 + 0.5 * leagueAvg.getOver25Pct());
+                    log.info("[FormGuide][Shrinkage] teamId={} splitMatches={} btts={} leagueAvgBtts={}", first.teamId, homeSplit.matchCount, hBtts, leagueAvg.getBttsPct());
+                }
+                if (awaySplit.matchCount < 4) {
+                    aBtts = (int) Math.round(0.5 * aBtts + 0.5 * leagueAvg.getBttsPct());
+                    aOv15 = (int) Math.round(0.5 * aOv15 + 0.5 * leagueAvg.getOver15Pct());
+                    aOv25 = (int) Math.round(0.5 * aOv25 + 0.5 * leagueAvg.getOver25Pct());
+                    log.info("[FormGuide][Shrinkage] teamId={} splitMatches={} btts={} leagueAvgBtts={}", first.teamId, awaySplit.matchCount, aBtts, leagueAvg.getBttsPct());
+                }
+            }
+            dto.setWeightedHomeBTTSPercent(hBtts);
+            dto.setWeightedAwayBTTSPercent(aBtts);
+            dto.setWeightedHomeOver15Percent(hOv15);
+            dto.setWeightedAwayOver15Percent(aOv15);
+            dto.setWeightedHomeOver25Percent(hOv25);
+            dto.setWeightedAwayOver25Percent(aOv25);
             dto.setWeightedHomeOver35Percent(homeSplit.over35Pct);
             dto.setWeightedAwayOver35Percent(awaySplit.over35Pct);
             dto.setWeightedHomeMatches(homeSplit.matchCount);
@@ -440,24 +472,27 @@ public class FormGuideService {
             }
 
             boolean usedFallback = false;
-            if (list.size() < 3) {
-                // Global fallback for this team (all competitions)
+            String sourceSeasons = null;
+            if (list.size() < 5) {
+                // Multi-season/global fallback for this team (all competitions across seasons) to fill up to 'limit'
                 String gHome =
-                        "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name, m.id AS match_id " +
-                        "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id " +
+                        "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.home_goals AS gf, m.away_goals AS ga, 1 AS is_home, opp.name AS opp_name, m.id AS match_id, s.name AS season_name " +
+                        "FROM matches m JOIN teams t ON t.id = m.home_team_id JOIN teams opp ON opp.id = m.away_team_id LEFT JOIN seasons s ON s.id = m.season_id " +
                         "WHERE (m.home_team_id = ?1) AND m.status = 'PLAYED' AND m.match_date IS NOT NULL AND m.match_date <= ?2";
                 String gAway =
-                        "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name, m.id AS match_id " +
-                        "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id " +
+                        "SELECT m.match_date AS md, m.round AS rnd, t.id AS team_id, t.name AS team_name, m.away_goals AS gf, m.home_goals AS ga, 0 AS is_home, opp.name AS opp_name, m.id AS match_id, s.name AS season_name " +
+                        "FROM matches m JOIN teams t ON t.id = m.away_team_id JOIN teams opp ON opp.id = m.home_team_id LEFT JOIN seasons s ON s.id = m.season_id " +
                         "WHERE (m.away_team_id = ?1) AND m.status = 'PLAYED' AND m.match_date IS NOT NULL AND m.match_date <= ?2";
                 String gsql = "SELECT * FROM (" + gHome + " UNION ALL " + gAway + ") x ORDER BY md DESC, CASE WHEN rnd IS NULL THEN 1 ELSE 0 END ASC, rnd DESC, match_id DESC";
-                log.info("[FormGuide][Fallback] Scoped matches <3 for teamId={}; using global recent.", teamId);
+                log.info("[FormGuide][MultiSeasonFallback] teamId={} matches={} fetching prior seasons", teamId, list.size());
                 @SuppressWarnings("unchecked")
                 List<Object[]> gRows = em.createNativeQuery(gsql)
                         .setParameter(1, teamId)
                         .setParameter(2, java.sql.Date.valueOf(today))
                         .getResultList();
-                list.clear();
+                java.util.LinkedHashSet<String> seasonsSet = new java.util.LinkedHashSet<>();
+                // If we already have some season-scoped matches, keep them and append from global to reach the limit
+                List<Row> combined = new ArrayList<>(list);
                 for (Object[] r : gRows) {
                     Object dateObj = r[0];
                     java.sql.Date date = (dateObj instanceof java.sql.Date)
@@ -470,10 +505,20 @@ public class FormGuideService {
                     int ga = ((Number) r[5]).intValue();
                     boolean isHome = ((Number) r[6]).intValue() == 1;
                     String oppName = (String) r[7];
-                    list.add(new Row(tId, tName, date, round, gf, ga, isHome, oppName));
-                    if (list.size() >= Math.max(limit, 5)) { /* cap for computation */ }
+                    String seasonName = null;
+                    try { seasonName = (r.length > 8 && r[8] != null) ? r[8].toString() : null; } catch (Exception ignored) {}
+                    if (seasonName != null && !seasonName.isBlank()) seasonsSet.add(seasonName.trim());
+                    combined.add(new Row(tId, tName, date, round, gf, ga, isHome, oppName));
+                    if (combined.size() >= Math.max(limit, 5)) { break; }
                 }
-                usedFallback = !list.isEmpty();
+                list = combined;
+                usedFallback = list.size() > 0;
+                if (!seasonsSet.isEmpty()) {
+                    // Join in natural iteration order, sorted lexicographically for stability
+                    java.util.List<String> ss = new java.util.ArrayList<>(seasonsSet);
+                    java.util.Collections.sort(ss);
+                    sourceSeasons = String.join(",", ss);
+                }
             }
 
             if (list.isEmpty()) {
@@ -517,6 +562,14 @@ public class FormGuideService {
             dto.setLastResultsDetails(details);
             dto.setFallback(usedFallback);
             dto.setMatchesAvailable(list.size());
+            if (usedFallback) {
+                dto.setMultiSeason(true);
+                if (sourceSeasons != null && !sourceSeasons.isBlank()) {
+                    dto.setSourceSeasons(sourceSeasons);
+                } else {
+                    dto.setSourceSeasons("prior seasons");
+                }
+            }
             if (usedFallback && teamRepository != null) {
                 try {
                     var proj = teamRepository.findTeamProjectionById(teamId);

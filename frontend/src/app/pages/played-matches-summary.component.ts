@@ -8,6 +8,7 @@ import { ActivatedRoute } from '@angular/router';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil } from 'rxjs';
 import { LeagueContextService } from '../services/league-context.service';
 import { PoissonService, Predictions } from '../services/poisson.service';
+import { MatchAnalysisService, MatchAnalysisResponse } from '../services/match-analysis.service';
 
 @Component({
   selector: 'app-played-matches-summary',
@@ -331,7 +332,31 @@ import { PoissonService, Predictions } from '../services/poisson.service';
             title="Download analysis as PDF with watermark"
           >Download as PDF</button>
         </div>
+        
+        <!-- Sample context & badges -->
+        <div class="badges-row">
+          <div *ngIf="(h2hMatches?.length || 0) < 3" class="badge warning">Low H2H data (N={{ h2hMatches?.length || 0 }})</div>
+          <div *ngIf="(homeForm?.matchesAvailable || 0) < 4 || (awayForm?.matchesAvailable || 0) < 4" class="badge warning">Limited form data</div>
+          <div *ngIf="homeForm?.multiSeason" class="badge info">Multi-season form ({{ homeForm?.sourceSeasons || 'prior seasons' }})</div>
+          <div *ngIf="awayForm?.multiSeason" class="badge info">Multi-season form ({{ awayForm?.sourceSeasons || 'prior seasons' }})</div>
+        </div>
+        <div class="section-desc">Sample context: H2H weight = {{ calcH2hAlpha() | percent:'1.0-0' }} based on N={{ h2hMatches?.length || 0 }} H2H matches.</div>
         <div class="section-desc">Computes win/draw/loss, BTTS, Over 1.5 and Over 2.5 probabilities using a Poisson model based on the head-to-head goal averages and each team's overall sample size.</div>
+        <div class="prediction-section" *ngIf="analysis">
+          <p>Prediction Confidence: {{ analysis?.confidenceScore }}%</p>
+          <div class="prediction">
+            {{ h2hHome }} Win: {{ analysis?.winProbabilities?.homeWin }}%
+            <span class="tooltip" [title]="'Based on ' + (analysis?.formHomeMatches||0) + ' home matches, ' + (analysis?.formAwayMatches||0) + ' away matches, ' + (analysis?.h2hMatches||0) + ' H2H matches (weight=' + (analysis?.h2hAlpha | percent) + '), league adjustment=' + (analysis?.leagueAdjustment||0) + ' pts'"> ⓘ</span>
+          </div>
+          <div class="prediction">
+            Draw: {{ analysis?.winProbabilities?.draw }}%
+            <span class="tooltip" [title]="'Based on ' + (analysis?.formHomeMatches||0) + ' home matches, ' + (analysis?.formAwayMatches||0) + ' away matches, ' + (analysis?.h2hMatches||0) + ' H2H matches (weight=' + (analysis?.h2hAlpha | percent) + '), league adjustment=' + (analysis?.leagueAdjustment||0) + ' pts'"> ⓘ</span>
+          </div>
+          <div class="prediction">
+            {{ h2hAway }} Win: {{ analysis?.winProbabilities?.awayWin }}%
+            <span class="tooltip" [title]="'Based on ' + (analysis?.formHomeMatches||0) + ' home matches, ' + (analysis?.formAwayMatches||0) + ' away matches, ' + (analysis?.h2hMatches||0) + ' H2H matches (weight=' + (analysis?.h2hAlpha | percent) + '), league adjustment=' + (analysis?.leagueAdjustment||0) + ' pts'"> ⓘ</span>
+          </div>
+        </div>
 
         <ng-container *ngIf="predictions; else noPreds">
           <div class="kpi-card" data-test="predictions-table">
@@ -390,6 +415,11 @@ import { PoissonService, Predictions } from '../services/poisson.service';
     .stat-equal { color:#f59e0b; font-weight:700; }
     .stat-equal .pct { color:#f59e0b; }
     .container { max-width: 1000px; margin: 0 auto; padding: 16px; color: #e6eef8; }
+        .badges-row { margin: 8px 0; }
+        .badge { display:inline-block; padding:4px 8px; border-radius:8px; font-size:12px; margin-right:6px; }
+        .badge.warning { background:#fef3c7; color:#92400e; }
+        .badge.info { background:#dbeafe; color:#1e3a8a; }
+        .tooltip { border-bottom: 1px dotted #9fb6d4; cursor: help; }
     h1 { margin: 0 0 16px; font-size: 22px; font-weight: 700; }
     .kpi-card, .search-card, .profile-card { background: #0b1220; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.25); margin-top: 16px; }
     .kpi-title { color: #9fb6d4; font-weight: 600; margin-bottom: 8px; }
@@ -507,8 +537,10 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
 
   // Predictions via Poisson
   predictions: Predictions | null = null;
+  analysis: MatchAnalysisResponse | null = null;
   private poisson = inject(PoissonService);
-    private leagueContext = inject(LeagueContextService);
+  private matchAnalysis = inject(MatchAnalysisService);
+  private leagueContext = inject(LeagueContextService);
 
   // Expose Math if needed in template calculations
   Math = Math;
@@ -544,16 +576,46 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     return w > 100 ? 100 : w;
   }
 
+  // MatchAnalysis parity: compute H2H alpha locally for transparency in UI
+  calcH2hAlpha(): number {
+    const n = (this.h2hMatches?.length ?? 0);
+    if (n < 3) return 0;
+    const a = Math.min(0.3, 0.03 * n);
+    return a; // expressed as 0..1; percent pipe will format
+  }
+
   analyseFixture(): void {
     if (!(this.h2hHome && this.h2hAway)) {
       this.predictions = null;
+      this.analysis = null;
       return;
     }
+    // Client-side Poisson predictions (existing behavior)
     const teamA = { id: this.h2hHomeId, name: this.h2hHome, matchesInvolved: this.homeCount || (this.homeBreakdown as any)?.total || 1 };
     const teamB = { id: this.h2hAwayId, name: this.h2hAway, matchesInvolved: this.awayCount || (this.awayBreakdown as any)?.total || 1 };
     const h2hData = (this.h2hMatchesAll && this.h2hMatchesAll.length > 0) ? this.h2hMatchesAll : this.h2hMatches;
     const preds = this.poisson.calculatePredictions(teamA as any, teamB as any, h2hData as any[], {});
     this.predictions = preds;
+
+    // Backend deterministic analysis for confidence and explainability (guarded)
+    this.analysis = null;
+    const lid = this.leagueId;
+    const sid = this.seasonIdResolved;
+    if (lid && sid) {
+      const req: any = { leagueId: lid, seasonId: sid, refresh: false };
+      if (typeof this.h2hHomeId === 'number' && typeof this.h2hAwayId === 'number') {
+        req.homeTeamId = this.h2hHomeId;
+        req.awayTeamId = this.h2hAwayId;
+      } else {
+        req.homeTeamName = this.h2hHome;
+        req.awayTeamName = this.h2hAway;
+      }
+      this.matchAnalysis.analyze(req).subscribe({
+        next: (resp) => { this.analysis = resp || null; },
+        error: (err) => { console.warn('[PlayedMatches][AnalyseFixture] analyze() failed', err); this.analysis = null; }
+      });
+    }
+
     if ((preds as any)?.usedFallback) {
       const msg = 'Limited H2H data; using league averages for Poisson model.';
       console.warn('[PlayedMatches][AnalyseFixture]', msg, { h2hCount: h2hData?.length ?? 0, home: this.h2hHome, away: this.h2hAway });

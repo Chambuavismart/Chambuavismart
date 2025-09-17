@@ -13,7 +13,10 @@ import com.chambua.vismart.service.MatchAnalysisService;
 import com.chambua.vismart.util.TeamNameNormalizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.InvalidDataAccessResourceUsageException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -33,6 +36,8 @@ public class MatchAnalysisController {
     private final MatchAnalysisService matchAnalysisService;
     private final PersistedFixtureAnalysisRepository persistedRepo;
     private final ObjectMapper objectMapper;
+
+    private static final Logger log = LoggerFactory.getLogger(MatchAnalysisController.class);
 
     @Value("${chambua.persistedDaily.enabled:false}")
     private boolean persistedDailyEnabled;
@@ -155,9 +160,12 @@ public class MatchAnalysisController {
                         .build();
                 persistedRepo.save(entity);
             }
+        } catch (org.springframework.dao.InvalidDataAccessResourceUsageException e) {
+            log.warn("[MatchAnalysis][Persist] Failed to persist analysis for {} vs {}: {}",
+                    homeName, awayName, e.getMessage());
         } catch (JsonProcessingException e) {
-            // Swallow persistence failure to not break user flow
-            // Optionally log via a logger if available
+            log.warn("[MatchAnalysis][Persist] JSON serialization error for {} vs {}: {}",
+                    homeName, awayName, e.getMessage());
         }
     }
 }

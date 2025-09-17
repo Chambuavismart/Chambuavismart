@@ -1,5 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule, DatePipe, NgFor, NgIf } from '@angular/common';
+import { Router } from '@angular/router';
 import { PersistedAnalysesService } from '../services/persisted-analyses.service';
 import { MatchAnalysisResponse } from '../services/match-analysis.service';
 
@@ -11,7 +12,10 @@ import { MatchAnalysisResponse } from '../services/match-analysis.service';
     <div class="panel" style="padding:12px;">
       <h2>Today's Persisted Analyses ({{ today | date:'yyyy-MM-dd' }})</h2>
       <div *ngIf="loading" class="muted">Loading...</div>
-      <div *ngIf="!loading && analyses.length === 0" class="muted">No analyses persisted for today. Analyze fixtures individually first.</div>
+      <div *ngIf="!loading && analyses.length === 0" class="muted">
+        No analyses persisted for today.
+        <button (click)="goToFixtures()" class="btn secondary" style="margin-left:8px;">Analyze fixtures individually first</button>
+      </div>
       <div *ngIf="!loading && analyses.length > 0" style="overflow:auto;">
         <table class="table" style="width:100%; border-collapse:collapse;">
           <thead>
@@ -46,6 +50,7 @@ import { MatchAnalysisResponse } from '../services/match-analysis.service';
 })
 export class PersistedTodayComponent implements OnInit {
   private persistedService = inject(PersistedAnalysesService);
+  private router = inject(Router);
 
   analyses: MatchAnalysisResponse[] = [];
   pdfUrl: string = '';
@@ -59,6 +64,11 @@ export class PersistedTodayComponent implements OnInit {
       next: (analyses) => { this.analyses = analyses || []; this.loading = false; },
       error: () => { this.analyses = []; this.loading = false; }
     });
+  }
+
+  goToFixtures(): void {
+    const iso = this.today.toISOString().split('T')[0];
+    this.router.navigate(['/fixtures'], { queryParams: { date: iso } });
   }
 
   pct(v: number | undefined | null): string {

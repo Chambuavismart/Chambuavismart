@@ -232,4 +232,41 @@ public class LeagueTableService {
                 apiTable
         );
     }
+
+    // League-wide averages for BTTS and Over goals for a given season
+    public static class LeagueAverages {
+        private final int bttsPct; private final int over15Pct; private final int over25Pct;
+        public LeagueAverages(int bttsPct, int over15Pct, int over25Pct) { this.bttsPct = bttsPct; this.over15Pct = over15Pct; this.over25Pct = over25Pct; }
+        public int getBttsPct() { return bttsPct; }
+        public int getOver15Pct() { return over15Pct; }
+        public int getOver25Pct() { return over25Pct; }
+    }
+
+    public LeagueAverages computeAveragesBySeason(Long leagueId, Long seasonId) {
+        if (leagueId == null || seasonId == null) return new LeagueAverages(50, 60, 45);
+        try {
+            String sql =
+                    "SELECT COUNT(*) AS total, " +
+                    "SUM(CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL AND m.home_goals>0 AND m.away_goals>0 THEN 1 ELSE 0 END) AS btts, " +
+                    "SUM(CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL AND (m.home_goals + m.away_goals) >= 2 THEN 1 ELSE 0 END) AS ov15, " +
+                    "SUM(CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL AND (m.home_goals + m.away_goals) >= 3 THEN 1 ELSE 0 END) AS ov25 " +
+                    "FROM matches m WHERE m.league_id = ?1 AND m.season_id = ?2 AND (m.status = 'PLAYED' OR (m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL))";
+            Object[] row = (Object[]) em.createNativeQuery(sql)
+                    .setParameter(1, leagueId)
+                    .setParameter(2, seasonId)
+                    .getSingleResult();
+            int total = ((Number) row[0]).intValue();
+            int btts = ((Number) row[1]).intValue();
+            int ov15 = ((Number) row[2]).intValue();
+            int ov25 = ((Number) row[3]).intValue();
+            if (total <= 0) return new LeagueAverages(50, 60, 45);
+            int bttsPct = (int) Math.round(btts * 100.0 / total);
+            int over15Pct = (int) Math.round(ov15 * 100.0 / total);
+            int over25Pct = (int) Math.round(ov25 * 100.0 / total);
+            return new LeagueAverages(bttsPct, over15Pct, over25Pct);
+        } catch (Exception ex) {
+            log.warn("[LeagueAvg] Failed to compute league averages: {}", ex.toString());
+            return new LeagueAverages(50, 60, 45);
+        }
+    }
 }
