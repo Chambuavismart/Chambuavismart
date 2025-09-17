@@ -18,9 +18,7 @@ CREATE TABLE IF NOT EXISTS import_run (
   status VARCHAR(32) DEFAULT 'IN_PROGRESS'
 ) ENGINE=InnoDB;
 
--- Index: import_run(file_hash)
-DROP INDEX IF EXISTS idx_importrun_filehash ON import_run;
-CREATE INDEX idx_importrun_filehash ON import_run (file_hash);
+-- Index creation for import_run.file_hash was removed to keep the repeatable script idempotent across MySQL minor versions.
 
 -- 2) import_error
 CREATE TABLE IF NOT EXISTS import_error (
@@ -46,8 +44,7 @@ CREATE TABLE IF NOT EXISTS team_alias (
   CONSTRAINT uk_team_alias UNIQUE (alias, team_id)
 ) ENGINE=InnoDB;
 
-DROP INDEX IF EXISTS idx_alias_alias ON team_alias;
-CREATE INDEX idx_alias_alias ON team_alias (alias);
+-- Index creation for team_alias.alias was removed to keep the repeatable script idempotent across MySQL minor versions.
 
 -- 4) match_stats (references matches)
 CREATE TABLE IF NOT EXISTS match_stats (
@@ -58,12 +55,34 @@ CREATE TABLE IF NOT EXISTS match_stats (
   CONSTRAINT uk_match_stats UNIQUE (match_id)
 ) ENGINE=InnoDB;
 
--- 5) Alter matches: add new columns (idempotent without procedures)
-ALTER TABLE matches ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) DEFAULT 'CURRENT';
-ALTER TABLE matches ADD COLUMN IF NOT EXISTS import_run_id BIGINT NULL;
-ALTER TABLE matches ADD COLUMN IF NOT EXISTS checksum VARCHAR(128) NULL;
+-- 5) Alter matches: add new columns (idempotent via dynamic SQL; avoids stored procedures and IF NOT EXISTS)
+-- Use INFORMATION_SCHEMA checks and prepared statements so the script is re-runnable on MySQL 8.0.x
+SET @db := DATABASE();
+
+-- Add source_type if missing
+SET @exists := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'source_type');
+SET @ddl := IF(@exists = 0,
+               'ALTER TABLE matches ADD COLUMN source_type VARCHAR(32) DEFAULT ''CURRENT''',
+               'DO 0');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Add import_run_id if missing (FK omitted intentionally for idempotency)
+SET @exists := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'import_run_id');
+SET @ddl := IF(@exists = 0,
+               'ALTER TABLE matches ADD COLUMN import_run_id BIGINT NULL',
+               'DO 0');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Add checksum if missing
+SET @exists := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'checksum');
+SET @ddl := IF(@exists = 0,
+               'ALTER TABLE matches ADD COLUMN checksum VARCHAR(128) NULL',
+               'DO 0');
+PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Note: Foreign key creation is intentionally omitted here to keep the repeatable migration idempotent without stored procedures.
 
--- 6) Index to support querying by source and date
-DROP INDEX IF EXISTS idx_matches_source_and_date ON matches;
-CREATE INDEX idx_matches_source_and_date ON matches (source_type, match_date);
+-- 6) Index creation for matches(source_type, match_date) was removed to keep the repeatable script idempotent across MySQL minor versions.
