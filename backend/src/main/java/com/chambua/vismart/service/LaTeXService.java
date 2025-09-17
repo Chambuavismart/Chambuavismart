@@ -324,6 +324,11 @@ public class LaTeXService {
                 "xref\n0 7\n0000000000 65535 f \n0000000010 00000 n \n0000000053 00000 n \n0000000131 00000 n \n0000000265 00000 n \n0000000323 00000 n \n0000000390 00000 n \ntrailer<< /Size 7 /Root 6 0 R >>\nstartxref\n447\n%%EOF";
     }
 
+    // Public wrapper to get a minimal PDF as bytes with a message
+    public byte[] minimalMessagePdf(String title) {
+        return minimalPdf(title).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     // iText 8 rich fallback PDF generation with sections, tables, and watermark
     private byte[] buildRichPdfFallback(AnalysisRequest req) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -496,5 +501,175 @@ public class LaTeXService {
             t.addCell(new Cell().add(new Paragraph(String.format(java.util.Locale.US, "%.1f%%", s.getProbability()))));
         }
         return t;
+    }
+
+    // === Chambua-Leo consolidated report (MVP using iText fallback) ===
+    public byte[] buildConsolidatedDailyReport(java.util.List<com.chambua.vismart.dto.MatchAnalysisResponse> items,
+                                               java.time.LocalDate date) throws java.io.IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document doc = new Document(pdf, PageSize.A4);
+        doc.add(new Paragraph("Chambua-Leo — Fixtures for " + date + " EAT").setBold().setFontSize(16).setTextAlignment(TextAlignment.CENTER));
+        doc.add(new Paragraph("Total fixtures: " + (items!=null? items.size():0)).setTextAlignment(TextAlignment.CENTER));
+        doc.add(new Paragraph(" "));
+        if (items != null) {
+            // group by league name
+            java.util.Map<String, java.util.List<com.chambua.vismart.dto.MatchAnalysisResponse>> grouped = items.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(m -> m.getLeague()!=null? m.getLeague(): "League"));
+            java.util.List<String> leagues = new java.util.ArrayList<>(grouped.keySet());
+            java.util.Collections.sort(leagues);
+            for (String league : leagues) {
+                doc.add(new Paragraph(league).setBold().setFontSize(14));
+                Table t = new Table(new float[]{2.6f,2.6f,1.4f,1.4f,1.4f,1.3f,1.3f,2.0f});
+                t.setWidth(UnitValue.createPercentValue(100));
+                t.addHeaderCell(new Cell().add(new Paragraph("Home")));
+                t.addHeaderCell(new Cell().add(new Paragraph("Away")));
+                t.addHeaderCell(new Cell().add(new Paragraph("Home%")));
+                t.addHeaderCell(new Cell().add(new Paragraph("Draw%")));
+                t.addHeaderCell(new Cell().add(new Paragraph("Away%")));
+                t.addHeaderCell(new Cell().add(new Paragraph("BTTS%")));
+                t.addHeaderCell(new Cell().add(new Paragraph("O2.5%")));
+                t.addHeaderCell(new Cell().add(new Paragraph("Advice")));
+                for (com.chambua.vismart.dto.MatchAnalysisResponse r : grouped.get(league)) {
+                    String home = r.getHomeTeam();
+                    String away = r.getAwayTeam();
+                    double hw = r.getWinProbabilities()!=null? r.getWinProbabilities().getHomeWin(): 0;
+                    double dw = r.getWinProbabilities()!=null? r.getWinProbabilities().getDraw(): 0;
+                    double aw = r.getWinProbabilities()!=null? r.getWinProbabilities().getAwayWin(): 0;
+                    int btts = r.getBttsProbability();
+                    int o25 = r.getOver25Probability();
+                    t.addCell(new Cell().add(new Paragraph(home!=null? home: "")));
+                    t.addCell(new Cell().add(new Paragraph(away!=null? away: "")));
+                    t.addCell(new Cell().add(new Paragraph(String.format("%.0f", (hw <= 1.0 ? hw*100.0 : hw)))));
+                    t.addCell(new Cell().add(new Paragraph(String.format("%.0f", (dw <= 1.0 ? dw*100.0 : dw)))));
+                    t.addCell(new Cell().add(new Paragraph(String.format("%.0f", (aw <= 1.0 ? aw*100.0 : aw)))));
+                    t.addCell(new Cell().add(new Paragraph(String.valueOf(btts))));
+                    t.addCell(new Cell().add(new Paragraph(String.valueOf(o25))));
+                    t.addCell(new Cell().add(new Paragraph(r.getAdvice()!=null? r.getAdvice(): "")));
+                }
+                doc.add(t);
+                doc.add(new Paragraph(" "));
+            }
+        }
+        doc.close();
+        return baos.toByteArray();
+    }
+
+    public byte[] buildZipOfPerFixturePdfs(java.util.List<com.chambua.vismart.batch.JobModels.FixtureAnalysisResult> items) throws java.io.IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(baos);
+        if (items != null) {
+            for (com.chambua.vismart.batch.JobModels.FixtureAnalysisResult r : items) {
+                if (!r.success || r.payload == null) continue;
+                String safeLeague = (r.leagueName != null ? r.leagueName : "league").replaceAll("[^A-Za-z0-9]+","-");
+                String safeHome = (r.homeTeam != null ? r.homeTeam : "home").replaceAll("[^A-Za-z0-9]+","-");
+                String safeAway = (r.awayTeam != null ? r.awayTeam : "away").replaceAll("[^A-Za-z0-9]+","-");
+                String fname = String.format("%s_%s_vs_%s.pdf", safeLeague, safeHome, safeAway);
+                zos.putNextEntry(new java.util.zip.ZipEntry(fname));
+                byte[] pdf = buildSingleSummaryPdf(r.payload);
+                zos.write(pdf);
+                zos.closeEntry();
+            }
+        }
+        zos.finish();
+        zos.close();
+        return baos.toByteArray();
+    }
+
+    private byte[] buildSingleSummaryPdf(com.chambua.vismart.dto.MatchAnalysisResponse r) throws java.io.IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document doc = new Document(pdf, PageSize.A4);
+        String title = String.format("%s: %s vs %s", r.getLeague()!=null? r.getLeague():"League", r.getHomeTeam(), r.getAwayTeam());
+        doc.add(new Paragraph(title).setBold().setFontSize(16));
+        Table table = new Table(new float[]{3,3,2,2,2,2});
+        table.setWidth(UnitValue.createPercentValue(100));
+        table.addHeaderCell("Home");
+        table.addHeaderCell("Away");
+        table.addHeaderCell("Home%");
+        table.addHeaderCell("Draw%");
+        table.addHeaderCell("Away%");
+        table.addHeaderCell("Advice");
+        double hw = r.getWinProbabilities()!=null? r.getWinProbabilities().getHomeWin(): 0;
+        double dw = r.getWinProbabilities()!=null? r.getWinProbabilities().getDraw(): 0;
+        double aw = r.getWinProbabilities()!=null? r.getWinProbabilities().getAwayWin(): 0;
+        table.addCell(r.getHomeTeam()!=null? r.getHomeTeam(): "");
+        table.addCell(r.getAwayTeam()!=null? r.getAwayTeam(): "");
+        table.addCell(String.format("%.0f", (hw <= 1.0 ? hw*100.0 : hw)));
+        table.addCell(String.format("%.0f", (dw <= 1.0 ? dw*100.0 : dw)));
+        table.addCell(String.format("%.0f", (aw <= 1.0 ? aw*100.0 : aw)));
+        table.addCell(r.getAdvice()!=null? r.getAdvice(): "");
+        doc.add(table);
+        doc.close();
+        return baos.toByteArray();
+    }
+
+    // Overload: Build consolidated report directly from batch results to include failed fixtures with friendly messages
+    public byte[] buildConsolidatedDailyReportFromResults(java.util.List<com.chambua.vismart.batch.JobModels.FixtureAnalysisResult> results,
+                                                          java.time.LocalDate date) throws java.io.IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        com.itextpdf.kernel.pdf.PdfWriter writer = new com.itextpdf.kernel.pdf.PdfWriter(baos);
+        com.itextpdf.kernel.pdf.PdfDocument pdf = new com.itextpdf.kernel.pdf.PdfDocument(writer);
+        com.itextpdf.layout.Document doc = new com.itextpdf.layout.Document(pdf, com.itextpdf.kernel.geom.PageSize.A4);
+        doc.add(new com.itextpdf.layout.element.Paragraph("Chambua-Leo — Fixtures for " + date + " EAT").setBold().setFontSize(16).setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER));
+        int total = results != null ? results.size() : 0;
+        int ok = (results == null) ? 0 : (int) results.stream().filter(r -> r.success && r.payload != null).count();
+        int failed = total - ok;
+        doc.add(new com.itextpdf.layout.element.Paragraph("Total fixtures: " + total + " • Successful: " + ok + " • Failed: " + failed).setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER));
+        doc.add(new com.itextpdf.layout.element.Paragraph(" "));
+        if (results != null && !results.isEmpty()) {
+            java.util.Map<String, java.util.List<com.chambua.vismart.batch.JobModels.FixtureAnalysisResult>> grouped = results.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(r -> r.leagueName != null ? r.leagueName : "League"));
+            java.util.List<String> leagues = new java.util.ArrayList<>(grouped.keySet());
+            java.util.Collections.sort(leagues);
+            for (String league : leagues) {
+                doc.add(new com.itextpdf.layout.element.Paragraph(league).setBold().setFontSize(14));
+                com.itextpdf.layout.element.Table t = new com.itextpdf.layout.element.Table(new float[]{2.4f,2.4f,1.2f,1.2f,1.2f,1.1f,1.1f,2.3f});
+                t.setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(100));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("Home")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("Away")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("Home%")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("Draw%")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("Away%")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("BTTS%")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("O2.5%")));
+                t.addHeaderCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("Advice / Notes")));
+                for (com.chambua.vismart.batch.JobModels.FixtureAnalysisResult r : grouped.get(league)) {
+                    if (r.success && r.payload != null) {
+                        com.chambua.vismart.dto.MatchAnalysisResponse p = r.payload;
+                        String home = p.getHomeTeam();
+                        String away = p.getAwayTeam();
+                        double hw = p.getWinProbabilities() != null ? p.getWinProbabilities().getHomeWin() : 0;
+                        double dw = p.getWinProbabilities() != null ? p.getWinProbabilities().getDraw() : 0;
+                        double aw = p.getWinProbabilities() != null ? p.getWinProbabilities().getAwayWin() : 0;
+                        int btts = p.getBttsProbability();
+                        int o25 = p.getOver25Probability();
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(home != null ? home : "")));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(away != null ? away : "")));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(String.format("%.0f", (hw <= 1.0 ? hw * 100.0 : hw)))));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(String.format("%.0f", (dw <= 1.0 ? dw * 100.0 : dw)))));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(String.format("%.0f", (aw <= 1.0 ? aw * 100.0 : aw)))));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(String.valueOf(btts))));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(String.valueOf(o25))));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(p.getAdvice() != null ? p.getAdvice() : (p.getNotes() != null ? p.getNotes() : ""))));
+                    } else {
+                        // Failed: include friendly message
+                        String home = r.homeTeam != null ? r.homeTeam : "";
+                        String away = r.awayTeam != null ? r.awayTeam : "";
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(home)));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph(away)));
+                        String msg = (r.error != null && !r.error.isBlank()) ? r.error : "Skipped: Analysis not available";
+                        t.addCell(new com.itextpdf.layout.element.Cell(1, 5).add(new com.itextpdf.layout.element.Paragraph(msg)));
+                        t.addCell(new com.itextpdf.layout.element.Cell().add(new com.itextpdf.layout.element.Paragraph("")));
+                    }
+                }
+                doc.add(t);
+                doc.add(new com.itextpdf.layout.element.Paragraph(" "));
+            }
+        }
+        doc.close();
+        return baos.toByteArray();
     }
 }
