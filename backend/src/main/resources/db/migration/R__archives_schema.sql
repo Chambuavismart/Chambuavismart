@@ -19,23 +19,8 @@ CREATE TABLE IF NOT EXISTS import_run (
 ) ENGINE=InnoDB;
 
 -- Index: import_run(file_hash)
-DELIMITER //
-DROP PROCEDURE IF EXISTS CreateIndexIfNotExists;
-CREATE PROCEDURE CreateIndexIfNotExists(IN v_table VARCHAR(64), IN v_index VARCHAR(128), IN v_stmt TEXT)
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.statistics
-     WHERE table_schema = DATABASE() AND table_name = v_table AND index_name = v_index
-  ) THEN
-    SET @sql = v_stmt;
-    PREPARE stmt1 FROM @sql;
-    EXECUTE stmt1;
-    DEALLOCATE PREPARE stmt1;
-  END IF;
-END //
-DELIMITER ;
-
-CALL CreateIndexIfNotExists('import_run','idx_importrun_filehash','CREATE INDEX idx_importrun_filehash ON import_run (file_hash)');
+DROP INDEX IF EXISTS idx_importrun_filehash ON import_run;
+CREATE INDEX idx_importrun_filehash ON import_run (file_hash);
 
 -- 2) import_error
 CREATE TABLE IF NOT EXISTS import_error (
@@ -61,7 +46,8 @@ CREATE TABLE IF NOT EXISTS team_alias (
   CONSTRAINT uk_team_alias UNIQUE (alias, team_id)
 ) ENGINE=InnoDB;
 
-CALL CreateIndexIfNotExists('team_alias','idx_alias_alias','CREATE INDEX idx_alias_alias ON team_alias (alias)');
+DROP INDEX IF EXISTS idx_alias_alias ON team_alias;
+CREATE INDEX idx_alias_alias ON team_alias (alias);
 
 -- 4) match_stats (references matches)
 CREATE TABLE IF NOT EXISTS match_stats (
@@ -72,43 +58,12 @@ CREATE TABLE IF NOT EXISTS match_stats (
   CONSTRAINT uk_match_stats UNIQUE (match_id)
 ) ENGINE=InnoDB;
 
--- 5) Alter matches: add new columns (idempotent using procedure)
-DELIMITER //
-DROP PROCEDURE IF EXISTS AddArchivesColumnsToMatches;
-CREATE PROCEDURE AddArchivesColumnsToMatches()
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'source_type'
-  ) THEN
-    ALTER TABLE matches ADD COLUMN source_type VARCHAR(32) DEFAULT 'CURRENT';
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'import_run_id'
-  ) THEN
-    ALTER TABLE matches ADD COLUMN import_run_id BIGINT NULL;
-    -- Add FK only if not exists
-    IF NOT EXISTS (
-      SELECT 1 FROM information_schema.KEY_COLUMN_USAGE
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND CONSTRAINT_NAME = 'fk_matches_import_run'
-    ) THEN
-      ALTER TABLE matches ADD CONSTRAINT fk_matches_import_run FOREIGN KEY (import_run_id) REFERENCES import_run(id);
-    END IF;
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'checksum'
-  ) THEN
-    ALTER TABLE matches ADD COLUMN checksum VARCHAR(128) NULL;
-  END IF;
-END //
-DELIMITER ;
-
-CALL AddArchivesColumnsToMatches();
-DROP PROCEDURE IF EXISTS AddArchivesColumnsToMatches;
+-- 5) Alter matches: add new columns (idempotent without procedures)
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) DEFAULT 'CURRENT';
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS import_run_id BIGINT NULL;
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS checksum VARCHAR(128) NULL;
+-- Note: Foreign key creation is intentionally omitted here to keep the repeatable migration idempotent without stored procedures.
 
 -- 6) Index to support querying by source and date
-CALL CreateIndexIfNotExists('matches','idx_matches_source_and_date','CREATE INDEX idx_matches_source_and_date ON matches (source_type, match_date)');
+DROP INDEX IF EXISTS idx_matches_source_and_date ON matches;
+CREATE INDEX idx_matches_source_and_date ON matches (source_type, match_date);
