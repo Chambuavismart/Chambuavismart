@@ -22,6 +22,7 @@ export interface MatchAnalysisResponse {
   winProbabilities: { homeWin: number; draw: number; awayWin: number };
   bttsProbability: number;
   over25Probability: number;
+  over35Percentage?: number; // new optional field for Over 3.5 as percentage
   expectedGoals: { home: number; away: number };
   confidenceScore: number;
   advice: string;

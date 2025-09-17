@@ -7,6 +7,8 @@ import com.chambua.vismart.model.TeamAlias;
 import com.chambua.vismart.repository.MatchAnalysisResultRepository;
 import com.chambua.vismart.repository.TeamAliasRepository;
 import com.chambua.vismart.repository.TeamRepository;
+import com.chambua.vismart.model.Match;
+import com.chambua.vismart.model.MatchStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -85,6 +87,8 @@ public class FixtureAnalysisService {
             double lambdaAway = matchResp.getExpectedGoals() != null ? matchResp.getExpectedGoals().getAway() : 1.2;
             if (matchResp.getOver15Probability() == null) matchResp.setOver15Probability((int)Math.round(calculateOverGoals(lambdaHome, lambdaAway, 1.5) * 100.0));
             if (matchResp.getOver35Probability() == null) matchResp.setOver35Probability((int)Math.round(calculateOverGoals(lambdaHome, lambdaAway, 3.5) * 100.0));
+            // Also expose alias over35Percentage for clients expecting that field
+            if (matchResp.getOver35Percentage() == null) matchResp.setOver35Percentage(matchResp.getOver35Probability());
             if (matchResp.getCorrectScores() == null || matchResp.getCorrectScores().isEmpty()) {
                 matchResp.setCorrectScores(calculateCorrectScores(lambdaHome, lambdaAway).stream()
                         .map(s -> new MatchAnalysisResponse.CorrectScorePrediction(s.getScore(), s.getProbability()))
@@ -119,7 +123,10 @@ public class FixtureAnalysisService {
         double lambdaAway = matchResp.getExpectedGoals() != null ? matchResp.getExpectedGoals().getAway() : 1.2;
         resp.setOver25Probability(matchResp.getOver25Probability()/100.0);
         resp.setOver15Probability(calculateOverGoals(lambdaHome, lambdaAway, 1.5));
-        resp.setOver35Probability(calculateOverGoals(lambdaHome, lambdaAway, 3.5));
+        double o35Prob = calculateOverGoals(lambdaHome, lambdaAway, 3.5);
+        resp.setOver35Probability(o35Prob);
+        // percentage with 1 decimal place
+        resp.setOver35Percentage(Math.round(o35Prob * 1000.0) / 10.0);
         resp.setExpectedGoals(new double[]{lambdaHome, lambdaAway});
         resp.setNotes(matchResp.getNotes() != null ? matchResp.getNotes() : "Based on form, H2H, and league adjustments");
         if (matchResp.getCorrectScores() != null) {
@@ -259,5 +266,25 @@ public class FixtureAnalysisService {
             }
         }
         return prob;
+    }
+
+    // New: Calculate Over 3.5 percentage from a list of played matches
+    // Counts matches with total goals >= 4 divided by total played matches.
+    // Returns percentage rounded to 1 decimal place. Gracefully returns 0.0 when no played matches.
+    public double calculateOver35Probability(java.util.List<Match> matches) {
+        if (matches == null || matches.isEmpty()) return 0.0;
+        long played = 0L;
+        long over35 = 0L;
+        for (Match m : matches) {
+            Integer hg = m != null ? m.getHomeGoals() : null;
+            Integer ag = m != null ? m.getAwayGoals() : null;
+            if (hg != null && ag != null) {
+                played++;
+                if ((hg + ag) >= 4) over35++;
+            }
+        }
+        if (played == 0L) return 0.0;
+        double pct = (over35 * 100.0) / played;
+        return Math.round(pct * 10.0) / 10.0;
     }
 }

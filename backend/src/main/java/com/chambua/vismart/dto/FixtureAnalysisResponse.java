@@ -8,6 +8,7 @@ public class FixtureAnalysisResponse {
     private double over15Probability;
     private double over25Probability;
     private double over35Probability;
+    private double over35Percentage; // new: percentage form (0..100), 1-dec rounding suggested by callers
     private double[] expectedGoals;
     private String notes;
     private List<CorrectScorePrediction> correctScores;
@@ -28,6 +29,9 @@ public class FixtureAnalysisResponse {
 
     public double getOver35Probability() { return over35Probability; }
     public void setOver35Probability(double over35Probability) { this.over35Probability = over35Probability; }
+
+    public double getOver35Percentage() { return over35Percentage; }
+    public void setOver35Percentage(double over35Percentage) { this.over35Percentage = over35Percentage; }
 
     public double[] getExpectedGoals() { return expectedGoals; }
     public void setExpectedGoals(double[] expectedGoals) { this.expectedGoals = expectedGoals; }

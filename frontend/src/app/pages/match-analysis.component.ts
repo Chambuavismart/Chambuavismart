@@ -223,6 +223,12 @@ import { map, catchError } from 'rxjs/operators';
                     <td style="padding:6px;">{{ analysis?.h2hSummary ? safePct(analysis?.h2hSummary?.over25Pct) + '%' : '—' }}</td>
                     <td style="padding:6px;" [title]="weightTip">{{ safePct(analysis?.over25Probability) }}%</td>
                   </tr>
+                  <tr>
+                    <td style="padding:6px;">Over 3.5 %</td>
+                    <td style="padding:6px;">—</td>
+                    <td style="padding:6px;">—</td>
+                    <td style="padding:6px;" [title]="weightTip">{{ safePct(analysis?.over35Percentage) }}%</td>
+                  </tr>
                   <tr *ngIf="analysis?.h2hSummary">
                     <td style="padding:6px;">H2H PPG (Home, Away)</td>
                     <td style="padding:6px;">—</td>

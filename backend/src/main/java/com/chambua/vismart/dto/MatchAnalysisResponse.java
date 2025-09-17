@@ -11,6 +11,7 @@ public class MatchAnalysisResponse {
     // New for Fixture Analysis format
     private Integer over15Probability; // optional; 0-100
     private Integer over35Probability; // optional; 0-100
+    private Integer over35Percentage; // alias for clients expecting "over35Percentage"
     private String notes; // optional fixture analysis notes
     private java.util.List<CorrectScorePrediction> correctScores; // optional top-N scores
     private ExpectedGoals expectedGoals;
@@ -66,6 +67,9 @@ public class MatchAnalysisResponse {
     public void setOver15Probability(Integer over15Probability) { this.over15Probability = over15Probability; }
     public Integer getOver35Probability() { return over35Probability; }
     public void setOver35Probability(Integer over35Probability) { this.over35Probability = over35Probability; }
+
+    public Integer getOver35Percentage() { return over35Percentage; }
+    public void setOver35Percentage(Integer over35Percentage) { this.over35Percentage = over35Percentage; }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
     public java.util.List<CorrectScorePrediction> getCorrectScores() { return correctScores; }
