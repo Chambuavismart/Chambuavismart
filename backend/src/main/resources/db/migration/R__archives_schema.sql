@@ -18,7 +18,24 @@ CREATE TABLE IF NOT EXISTS import_run (
   status VARCHAR(32) DEFAULT 'IN_PROGRESS'
 ) ENGINE=InnoDB;
 
-CREATE INDEX IF NOT EXISTS idx_importrun_filehash ON import_run (file_hash);
+-- Index: import_run(file_hash)
+DELIMITER //
+DROP PROCEDURE IF EXISTS CreateIndexIfNotExists;
+CREATE PROCEDURE CreateIndexIfNotExists(IN v_table VARCHAR(64), IN v_index VARCHAR(128), IN v_stmt TEXT)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = v_table AND index_name = v_index
+  ) THEN
+    SET @sql = v_stmt;
+    PREPARE stmt1 FROM @sql;
+    EXECUTE stmt1;
+    DEALLOCATE PREPARE stmt1;
+  END IF;
+END //
+DELIMITER ;
+
+CALL CreateIndexIfNotExists('import_run','idx_importrun_filehash','CREATE INDEX idx_importrun_filehash ON import_run (file_hash)');
 
 -- 2) import_error
 CREATE TABLE IF NOT EXISTS import_error (
@@ -44,7 +61,7 @@ CREATE TABLE IF NOT EXISTS team_alias (
   CONSTRAINT uk_team_alias UNIQUE (alias, team_id)
 ) ENGINE=InnoDB;
 
-CREATE INDEX IF NOT EXISTS idx_alias_alias ON team_alias (alias);
+CALL CreateIndexIfNotExists('team_alias','idx_alias_alias','CREATE INDEX idx_alias_alias ON team_alias (alias)');
 
 -- 4) match_stats (references matches)
 CREATE TABLE IF NOT EXISTS match_stats (
@@ -57,7 +74,8 @@ CREATE TABLE IF NOT EXISTS match_stats (
 
 -- 5) Alter matches: add new columns (idempotent using procedure)
 DELIMITER //
-CREATE PROCEDURE IF NOT EXISTS AddArchivesColumnsToMatches()
+DROP PROCEDURE IF EXISTS AddArchivesColumnsToMatches;
+CREATE PROCEDURE AddArchivesColumnsToMatches()
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
@@ -93,4 +111,4 @@ CALL AddArchivesColumnsToMatches();
 DROP PROCEDURE IF EXISTS AddArchivesColumnsToMatches;
 
 -- 6) Index to support querying by source and date
-CREATE INDEX IF NOT EXISTS idx_matches_source_and_date ON matches (source_type, match_date);
+CALL CreateIndexIfNotExists('matches','idx_matches_source_and_date','CREATE INDEX idx_matches_source_and_date ON matches (source_type, match_date)');
