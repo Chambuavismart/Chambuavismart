@@ -10,6 +10,8 @@ import com.chambua.vismart.dto.FormGuideRowDTO;
 import com.chambua.vismart.dto.AnalysisRequest;
 import com.chambua.vismart.service.LaTeXService;
 import com.chambua.vismart.repository.AdminAuditRepository;
+import com.chambua.vismart.service.PdfArchiveService;
+import com.chambua.vismart.model.PdfArchive;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +31,7 @@ public class MatchController {
     private final FormGuideService formGuideService;
     private final SeasonRepository seasonRepository;
     private final LaTeXService laTeXService;
+    private final PdfArchiveService pdfArchiveService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private AdminAuditRepository adminAuditRepository;
@@ -37,18 +40,24 @@ public class MatchController {
     private com.chambua.vismart.repository.TeamRepository teamRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags, FormGuideService formGuideService, SeasonRepository seasonRepository, LaTeXService laTeXService) {
+    public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags, FormGuideService formGuideService, SeasonRepository seasonRepository, LaTeXService laTeXService, PdfArchiveService pdfArchiveService) {
         this.matchRepository = matchRepository;
         this.h2hService = h2hService;
         this.featureFlags = featureFlags;
         this.formGuideService = formGuideService;
         this.seasonRepository = seasonRepository;
         this.laTeXService = laTeXService;
+        this.pdfArchiveService = pdfArchiveService;
+    }
+
+    // Overload for tests without PdfArchiveService
+    public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags, FormGuideService formGuideService, SeasonRepository seasonRepository, LaTeXService laTeXService) {
+        this(matchRepository, h2hService, featureFlags, formGuideService, seasonRepository, laTeXService, null);
     }
 
     // Backward-compatible constructor for existing tests (H2H form endpoint will be unavailable)
     public MatchController(MatchRepository matchRepository, H2HService h2hService, com.chambua.vismart.config.FeatureFlags featureFlags) {
-        this(matchRepository, h2hService, featureFlags, null, null, null);
+        this(matchRepository, h2hService, featureFlags, null, null, null, null);
     }
 
     @GetMapping("/played/total")
@@ -481,33 +490,44 @@ public class MatchController {
             dto.put("result", result);
             matches.add(dto);
         }
-        // If season-scoped list is sparse and backend flagged fallback, fetch global recent matches across all competitions for this team
+        // If season-scoped list is sparse and backend flagged fallback, fetch recent matches from the team's domestic league (strict domestic fallback)
         if (matches.size() < Math.min(3, limit) && row.isFallback()) {
             try {
-                List<Match> global = matchRepository.findRecentPlayedByTeamId(row.getTeamId());
-                for (Match m : global) {
-                    if (matches.size() >= limit) break;
-                    if (m == null || m.getId() == null) continue;
-                    if (seen.contains(m.getId())) continue; // avoid duplicates if any
-                    java.time.LocalDate md = m.getDate();
-                    if (md == null || md.isAfter(now)) {
-                        excludedIds.add(m.getId());
-                        continue;
+                Long domesticLeagueId = null;
+                String domesticLeagueName = null;
+                if (teamRepository != null) {
+                    var proj = teamRepository.findTeamProjectionById(row.getTeamId());
+                    if (proj != null) {
+                        domesticLeagueId = proj.getLeagueId();
+                        domesticLeagueName = proj.getLeagueName();
                     }
-                    String result = (m.getHomeGoals() != null && m.getAwayGoals() != null) ? (m.getHomeGoals() + "-" + m.getAwayGoals()) : "-";
-                    Map<String, Object> dto = new LinkedHashMap<>();
-                    dto.put("year", md.getYear());
-                    dto.put("date", md.toString());
-                    String homeName = null;
-                    String awayName = null;
-                    try { homeName = (m.getHomeTeam() != null ? m.getHomeTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] homeTeam name not initialized for matchId={}", m.getId()); }
-                    try { awayName = (m.getAwayTeam() != null ? m.getAwayTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] awayTeam name not initialized for matchId={}", m.getId()); }
-                    dto.put("homeTeam", homeName);
-                    dto.put("awayTeam", awayName);
-                    dto.put("result", result);
-                    matches.add(dto);
                 }
-                logger.info("[Last5][FallbackMatches] Used global recent matches for teamId={} (added {} entries)", row.getTeamId(), Math.max(0, matches.size()));
+                if (domesticLeagueId != null) {
+                    List<Match> domestic = matchRepository.findRecentPlayedByTeamIdAndLeague(row.getTeamId(), domesticLeagueId);
+                    for (Match m : domestic) {
+                        if (matches.size() >= limit) break;
+                        if (m == null || m.getId() == null) continue;
+                        if (seen.contains(m.getId())) continue; // avoid duplicates if any
+                        java.time.LocalDate md = m.getDate();
+                        if (md == null || md.isAfter(now)) {
+                            excludedIds.add(m.getId());
+                            continue;
+                        }
+                        String result = (m.getHomeGoals() != null && m.getAwayGoals() != null) ? (m.getHomeGoals() + "-" + m.getAwayGoals()) : "-";
+                        Map<String, Object> dto = new LinkedHashMap<>();
+                        dto.put("year", md.getYear());
+                        dto.put("date", md.toString());
+                        String homeName = null;
+                        String awayName = null;
+                        try { homeName = (m.getHomeTeam() != null ? m.getHomeTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] homeTeam name not initialized for matchId={}", m.getId()); }
+                        try { awayName = (m.getAwayTeam() != null ? m.getAwayTeam().getName() : null); } catch (Exception ex) { logger.warn("[Last5][Lazy] awayTeam name not initialized for matchId={}", m.getId()); }
+                        dto.put("homeTeam", homeName);
+                        dto.put("awayTeam", awayName);
+                        dto.put("result", result);
+                        matches.add(dto);
+                    }
+                    logger.info("[Last5][FallbackMatches] Used domestic league recent matches for teamId={} (leagueId={}, added {} entries)", row.getTeamId(), domesticLeagueId, Math.max(0, matches.size()));
+                }
             } catch (Exception ex) {
                 logger.warn("[Last5][FallbackMatches][Error] teamId={}, err={}", row.getTeamId(), ex.toString());
             }
@@ -520,7 +540,10 @@ public class MatchController {
 
         // Response includes both teamId and teamName for display
         Map<String, Object> last5 = new LinkedHashMap<>();
-        last5.put("streak", formatFormString(row.getLastResults()));
+        // Streak must be based on the most recent match and extend backwards until broken (e.g., 3W, 1D, 2L)
+        last5.put("streak", streak);
+        // Provide compact recent-sequence for UI badges (most recent first), with fillers handled client-side if needed
+        last5.put("recent", row.getLastResults());
         last5.put("winRate", winRate);
         last5.put("pointsPerGame", ppg);
         last5.put("bttsPercent", btts);
@@ -528,31 +551,34 @@ public class MatchController {
         last5.put("fallback", row.isFallback());
         String teamIdStr = row.getTeamId() != null ? String.valueOf(row.getTeamId()) : null;
         String teamName = row.getTeamName();
+        // Ensure sourceLeague is set without triggering lazy initialization (needed for note text)
+        String sourceLeague = row.getSourceLeague();
+        Long sourceLeagueId = null;
+        if ((sourceLeague == null || sourceLeague.isBlank()) && teamRepository != null) {
+            try {
+                var proj = teamRepository.findTeamProjectionById(row.getTeamId());
+                if (proj != null) { sourceLeague = proj.getLeagueName(); sourceLeagueId = proj.getLeagueId(); }
+                logger.info("[Last5][SourceLeague] teamId={}, resolved='{}' via projection", row.getTeamId(), sourceLeague);
+            } catch (Exception ex) {
+                logger.warn("[Last5][SourceLeague][Error] teamId={}, err={}", row.getTeamId(), ex.toString());
+            }
+        }
         String note;
         if (row.isFallback()) {
-            note = "Recent form for " + teamName + " — last up to 5 played matches across all competitions (fallback due to limited data in season). Points use W=3, D=1, L=0.";
+            // Use domestic league phrasing to avoid implying cross-competition mixing
+            String leagueLabel = (sourceLeague != null && !sourceLeague.isBlank()) ? sourceLeague : "domestic league";
+            note = "Recent form for " + teamName + " — last up to 5 played matches from " + leagueLabel + " (fallback due to limited data in this season). Points use W=3, D=1, L=0.";
             try {
                 if (adminAuditRepository != null) {
                     com.chambua.vismart.model.AdminAudit audit = new com.chambua.vismart.model.AdminAudit();
-                    audit.setAction("last5_fallback");
-                    audit.setParams("{\"teamId\": " + teamIdStr + ", \"seasonId\": " + seasonId + "}");
+                    audit.setAction("last5_fallback_domestic");
+                    audit.setParams("{\"teamId\": " + teamIdStr + ", \"seasonId\": " + seasonId + ", \"league\": \"" + leagueLabel + "\"}");
                     audit.setAffectedCount(1L);
                     adminAuditRepository.save(audit);
                 }
             } catch (Exception ignoredAudit) {}
         } else {
             note = "Recent form for " + teamName + " — last up to 5 played matches in season " + (seasonResolved != null ? seasonResolved : String.valueOf(seasonId)) + ". Points use W=3, D=1, L=0.";
-        }
-        // Ensure sourceLeague is set without triggering lazy initialization
-        String sourceLeague = row.getSourceLeague();
-        if ((sourceLeague == null || sourceLeague.isBlank()) && teamRepository != null) {
-            try {
-                var proj = teamRepository.findTeamProjectionById(row.getTeamId());
-                if (proj != null) sourceLeague = proj.getLeagueName();
-                logger.info("[Last5][SourceLeague] teamId={}, resolved='{}' via projection", row.getTeamId(), sourceLeague);
-            } catch (Exception ex) {
-                logger.warn("[Last5][SourceLeague][Error] teamId={}, err={}", row.getTeamId(), ex.toString());
-            }
         }
         logger.info("[Last5][Response] teamId={}, matches={}, sourceLeague={}", row.getTeamId(), matches.size(), sourceLeague);
         return new H2HFormTeamResponse(teamIdStr, teamName, last5, matches, seasonResolved, matchesAvailable, note, sourceLeague);
@@ -690,19 +716,104 @@ public class MatchController {
 
     public record H2HFormTeamResponse(String teamId, String teamName, Map<String, Object> last5, List<Map<String, Object>> matches, String seasonResolved, String matchesAvailable, String note, String sourceLeague) {}
 
+    private String computeStreakInsightText(String teamName, String targetPattern) {
+        if (teamName == null || teamName.isBlank() || targetPattern == null || targetPattern.isBlank() || "0".equals(targetPattern)) {
+            return teamName + ": no active streak detected.";
+        }
+        java.util.List<Match> list;
+        try { list = matchRepository.findRecentPlayedByTeamName(teamName.trim()); } catch (Exception ex) { list = java.util.Collections.emptyList(); }
+        if (list == null || list.isEmpty()) return teamName + ": no match history found for streak insight.";
+        java.util.List<Match> chron = new java.util.ArrayList<>(list);
+        java.util.Collections.reverse(chron);
+        String prevType = null; int prevCount = 0;
+        int totalInstances = 0, nextW = 0, nextD = 0, nextL = 0, nextBTTS = 0, nextOv15 = 0, nextOv25 = 0, nextOv35 = 0;
+        for (Match m : chron) {
+            Integer hg = m.getHomeGoals(); Integer ag = m.getAwayGoals(); if (hg == null || ag == null) continue;
+            boolean isHome = false; try { isHome = m.getHomeTeam() != null && m.getHomeTeam().getName() != null && m.getHomeTeam().getName().equalsIgnoreCase(teamName); } catch (Exception ignored) {}
+            int my = isHome ? hg : ag; int opp = isHome ? ag : hg;
+            String res = (my > opp) ? "W" : (my == opp ? "D" : "L");
+            String pre = (prevType == null) ? "0" : (prevCount + prevType);
+            if (!"0".equals(pre) && pre.equalsIgnoreCase(targetPattern)) {
+                totalInstances++;
+                if ("W".equals(res)) nextW++; else if ("D".equals(res)) nextD++; else nextL++;
+                int total = my + opp; if (my > 0 && opp > 0) nextBTTS++; if (total >= 2) nextOv15++; if (total >= 3) nextOv25++; if (total >= 4) nextOv35++;
+            }
+            if (prevType == null || !prevType.equals(res)) { prevType = res; prevCount = 1; } else { prevCount++; }
+        }
+        if (totalInstances <= 0) return teamName + " has had 0 prior instances of a " + targetPattern + " streak across recorded matches.";
+        int wPct = (int) Math.round((nextW * 100.0) / totalInstances);
+        int dPct = (int) Math.round((nextD * 100.0) / totalInstances);
+        int lPct = Math.max(0, 100 - (wPct + dPct));
+        int bttsPct = (int) Math.round((nextBTTS * 100.0) / totalInstances);
+        int o15Pct = (int) Math.round((nextOv15 * 100.0) / totalInstances);
+        int o25Pct = (int) Math.round((nextOv25 * 100.0) / totalInstances);
+        int o35Pct = (int) Math.round((nextOv35 * 100.0) / totalInstances);
+        return teamName + " has had " + totalInstances + " instances of a " + targetPattern +
+                " streak. Of the matches that followed: " + wPct + "% were wins, " + dPct + "% were draws, " + lPct + "% were losses. " +
+                o35Pct + "% were Over 3.5, " + o25Pct + "% were Over 2.5, " + o15Pct + "% were Over 1.5, and " + bttsPct + "% were BTTS.";
+    }
+
     // --- PDF generation endpoint ---
     @PostMapping("/generate-analysis-pdf")
     public ResponseEntity<byte[]> generateAnalysisPdf(@RequestBody AnalysisRequest request) {
         try {
+            // Enrich request with streak insight summaries if last-5 streaks and team names are present
+            try {
+                if (request != null && request.getH2h() != null) {
+                    var h2h = request.getH2h();
+                    String teamA = (request.getTeamA() != null) ? request.getTeamA().getName() : null;
+                    String teamB = (request.getTeamB() != null) ? request.getTeamB().getName() : null;
+                    String patA = (h2h.getLast5TeamA() != null) ? h2h.getLast5TeamA().getStreak() : null;
+                    String patB = (h2h.getLast5TeamB() != null) ? h2h.getLast5TeamB().getStreak() : null;
+                    if (teamA != null && patA != null && !patA.isBlank() && !"0".equals(patA)) {
+                        String txt = computeStreakInsightText(teamA, patA);
+                        h2h.setStreakInsightA(txt);
+                    }
+                    if (teamB != null && patB != null && !patB.isBlank() && !"0".equals(patB)) {
+                        String txt = computeStreakInsightText(teamB, patB);
+                        h2h.setStreakInsightB(txt);
+                    }
+                }
+            } catch (Exception ignored) {}
             byte[] pdf = laTeXService.generateAnalysisPdf(request);
-            String home = request.getTeamA()!=null? request.getTeamA().getName() : "TeamA";
-            String away = request.getTeamB()!=null? request.getTeamB().getName() : "TeamB";
-            String filename = String.format("analysis-%s-vs-%s.pdf",
-                    (home!=null? home.replaceAll("[^A-Za-z0-9]+","_") : "A"),
-                    (away!=null? away.replaceAll("[^A-Za-z0-9]+","_") : "B"));
+            String homeRaw = request.getTeamA()!=null? request.getTeamA().getName() : "Team A";
+            String awayRaw = request.getTeamB()!=null? request.getTeamB().getName() : "Team B";
+            String home = homeRaw != null ? homeRaw.trim() : "Team A";
+            String away = awayRaw != null ? awayRaw.trim() : "Team B";
+            java.time.ZoneId tz = java.time.ZoneId.systemDefault();
+            // Analysis date-time for filename (local tz)
+            String analysisStamp = java.time.ZonedDateTime.now(tz).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm"));
+            // Optional fixture date (date-only preferred)
+            String fixturePart = null;
+            try {
+                String src = request.getSource();
+                String fx = request.getFixtureDate();
+                if (fx != null && !fx.isBlank() && src != null && (src.equalsIgnoreCase("fixtures") || src.equalsIgnoreCase("home") || src.equalsIgnoreCase("home-today") || src.equalsIgnoreCase("today"))) {
+                    java.time.OffsetDateTime odt;
+                    try { odt = java.time.OffsetDateTime.parse(fx); }
+                    catch (Exception e1) {
+                        try { odt = java.time.LocalDateTime.parse(fx).atOffset(java.time.ZoneOffset.UTC); } catch (Exception e2) {
+                            try { odt = java.time.LocalDate.parse(fx).atStartOfDay().atOffset(java.time.ZoneOffset.UTC); } catch (Exception e3) { odt = null; }
+                        }
+                    }
+                    if (odt != null) {
+                        String d = odt.atZoneSameInstant(tz).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                        fixturePart = " - Fixture " + d;
+                    }
+                }
+            } catch (Exception ignored) {}
+            java.util.function.Function<String,String> clean = (s) -> s == null ? "" : s.replaceAll("[\\\\/:*?\"<>|]+", " ").replaceAll("\n|\r", " ").trim();
+            String teamsTitle = (clean.apply(home) + " VS " + clean.apply(away)).replaceAll("\\s+", " ").trim();
+            String baseName = teamsTitle + " - Analysis " + analysisStamp + (fixturePart != null ? fixturePart : "");
+            // Final sanitize for filename: collapse spaces to single, replace spaces with underscores or hyphens as preferred
+            String filenameSafe = baseName.replaceAll("\u00A0", " ").replaceAll("\\s+", " ").replace('"', ' ').trim();
+            // Replace spaces with underscores to be URL/FS friendly
+            String filename = filenameSafe.replace(' ', '_') + ".pdf";
+            // Persist generated PDF to archive (best-effort; do not fail the response if DB fails)
+            try { if (pdfArchiveService != null) { pdfArchiveService.save(request, pdf, filename, "application/pdf"); } } catch (Exception ignore) {}
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_PDF);
-            headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename);
+            headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"");
             return ResponseEntity.ok().headers(headers).body(pdf);
         } catch (Exception ex) {
             HttpHeaders headers = new HttpHeaders();
@@ -711,5 +822,57 @@ public class MatchController {
             byte[] fallback = ("PDF generation error: " + ex.getMessage()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
             return ResponseEntity.status(500).headers(headers).body(fallback);
         }
+    }
+
+    // --- Analysis PDFs: archive list and retrieval ---
+    @GetMapping("/analysis-pdfs")
+    public Map<String, Object> listAnalysisPdfs(@RequestParam(name = "page", defaultValue = "0") int page,
+                                                @RequestParam(name = "size", defaultValue = "20") int size) {
+        Map<String, Object> resp = new LinkedHashMap<>();
+        if (pdfArchiveService == null) { resp.put("content", List.of()); resp.put("page", 0); resp.put("size", 0); resp.put("totalElements", 0); resp.put("totalPages", 0); return resp; }
+        var pg = pdfArchiveService.list(page, size);
+        java.util.List<Map<String,Object>> items = new ArrayList<>();
+        for (com.chambua.vismart.model.PdfArchive a : pg.getContent()) {
+            Map<String,Object> m = new LinkedHashMap<>();
+            m.put("id", a.getId());
+            m.put("filename", a.getFilename());
+            m.put("homeTeam", a.getHomeTeam());
+            m.put("awayTeam", a.getAwayTeam());
+            m.put("generatedAt", a.getGeneratedAt());
+            m.put("sizeBytes", a.getSizeBytes());
+            items.add(m);
+        }
+        resp.put("content", items);
+        resp.put("page", pg.getNumber());
+        resp.put("size", pg.getSize());
+        resp.put("totalElements", pg.getTotalElements());
+        resp.put("totalPages", pg.getTotalPages());
+        return resp;
+    }
+
+    @GetMapping("/analysis-pdfs/{id}")
+    public ResponseEntity<byte[]> downloadAnalysisPdf(@PathVariable("id") Long id) {
+        if (pdfArchiveService == null) return ResponseEntity.notFound().build();
+        return pdfArchiveService.get(id)
+                .map(a -> {
+                    HttpHeaders h = new HttpHeaders();
+                    h.setContentType(MediaType.APPLICATION_PDF);
+                    h.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + a.getFilename());
+                    return ResponseEntity.ok().headers(h).body(a.getBytes());
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/analysis-pdfs/{id}/inline")
+    public ResponseEntity<byte[]> inlineAnalysisPdf(@PathVariable("id") Long id) {
+        if (pdfArchiveService == null) return ResponseEntity.notFound().build();
+        return pdfArchiveService.get(id)
+                .map(a -> {
+                    HttpHeaders h = new HttpHeaders();
+                    h.setContentType(MediaType.APPLICATION_PDF);
+                    h.set(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=" + a.getFilename());
+                    return ResponseEntity.ok().headers(h).body(a.getBytes());
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

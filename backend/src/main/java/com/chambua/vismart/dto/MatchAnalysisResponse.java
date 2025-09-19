@@ -16,6 +16,9 @@ public class MatchAnalysisResponse {
     private H2HSummary h2hSummary;   // may be null
     // New: flat list of raw H2H matches for UI (date, competition, teams, goals)
     private java.util.List<HeadToHeadMatchDto> headToHeadMatches;
+    // New: historical streak insights for each team
+    private com.chambua.vismart.dto.StreakInsight homeStreakInsight;
+    private com.chambua.vismart.dto.StreakInsight awayStreakInsight;
 
     public MatchAnalysisResponse() {}
 
@@ -60,6 +63,10 @@ public class MatchAnalysisResponse {
     public void setH2hSummary(H2HSummary h2hSummary) { this.h2hSummary = h2hSummary; }
     public java.util.List<HeadToHeadMatchDto> getHeadToHeadMatches() { return headToHeadMatches; }
     public void setHeadToHeadMatches(java.util.List<HeadToHeadMatchDto> headToHeadMatches) { this.headToHeadMatches = headToHeadMatches; }
+    public com.chambua.vismart.dto.StreakInsight getHomeStreakInsight() { return homeStreakInsight; }
+    public void setHomeStreakInsight(com.chambua.vismart.dto.StreakInsight homeStreakInsight) { this.homeStreakInsight = homeStreakInsight; }
+    public com.chambua.vismart.dto.StreakInsight getAwayStreakInsight() { return awayStreakInsight; }
+    public void setAwayStreakInsight(com.chambua.vismart.dto.StreakInsight awayStreakInsight) { this.awayStreakInsight = awayStreakInsight; }
 
     public static class WinProbabilities {
         private int homeWin;

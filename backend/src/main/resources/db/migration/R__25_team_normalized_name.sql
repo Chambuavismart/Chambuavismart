@@ -1,6 +1,10 @@
 -- Add normalized_name column to teams, backfill, and enforce unique constraint per league
-ALTER TABLE teams
-    ADD COLUMN IF NOT EXISTS normalized_name VARCHAR(255) NOT NULL DEFAULT '' AFTER name;
+SET @col_exists := (
+  SELECT COUNT(1) FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'teams' AND COLUMN_NAME = 'normalized_name'
+);
+SET @sql := IF(@col_exists = 0, 'ALTER TABLE teams ADD COLUMN normalized_name VARCHAR(255) NOT NULL DEFAULT '''' AFTER name', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Backfill normalized_name using trim + collapse spaces + lower-case
 UPDATE teams

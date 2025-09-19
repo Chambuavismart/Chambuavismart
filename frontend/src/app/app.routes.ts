@@ -18,6 +18,7 @@ export const routes: Routes = [
   { path: 'match-analysis', canActivate: [authGuard], loadComponent: () => import('./pages/match-analysis.component').then(m => m.MatchAnalysisComponent), title: 'Match Analysis' },
   { path: 'fixture-predictions', canActivate: [authGuard], loadComponent: () => import('./pages/fixture-predictions.component').then(m => m.FixturePredictionsComponent), title: 'Fixture Predictions' },
   { path: 'analyzed-fixtures', canActivate: [authGuard], loadComponent: () => import('./pages/analyzed-fixtures.component').then(m => m.AnalyzedFixturesComponent), title: 'Analyzed Fixtures' },
+  { path: 'analysis-pdfs', canActivate: [authGuard], loadComponent: () => import('./pages/analysis-pdfs.component').then(m => m.AnalysisPdfsComponent), title: 'Fixture Analysis History' },
   { path: 'data-management', canActivate: [authGuard], loadComponent: () => import('./pages/data-management.component').then(m => m.DataManagementComponent), title: 'Data Management' },
   { path: 'data-management/match-upload', canActivate: [authGuard], loadComponent: () => import('./pages/match-upload.component').then(m => m.MatchUploadComponent), title: 'Match Upload' },
   { path: 'data-management/archives', canActivate: [authGuard], loadComponent: () => import('./pages/archives-upload.component').then(m => m.ArchivesUploadComponent), title: 'Archives' },

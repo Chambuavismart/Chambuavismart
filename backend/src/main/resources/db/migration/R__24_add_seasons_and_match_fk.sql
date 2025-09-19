@@ -21,7 +21,25 @@ SET @sql := IF(@idx_exists = 0, 'CREATE INDEX idx_seasons_league_id ON seasons(l
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- add season_id to matches (nullable initially)
-ALTER TABLE matches ADD COLUMN IF NOT EXISTS season_id BIGINT NULL;
+SET @col_exists := (
+  SELECT COUNT(1)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'season_id'
+);
+SET @sql := IF(@col_exists = 0, 'ALTER TABLE matches ADD COLUMN season_id BIGINT NULL', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ensure season_id is nullable if column exists but is NOT NULL (required for ON DELETE SET NULL)
+SET @nullable := (
+  SELECT IFNULL(
+    (SELECT CASE WHEN IS_NULLABLE = 'YES' THEN 1 ELSE 0 END
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'matches' AND COLUMN_NAME = 'season_id'),
+    1
+  )
+);
+SET @sql := IF(@nullable = 0, 'ALTER TABLE matches MODIFY COLUMN season_id BIGINT NULL', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- add FK if not exists (MySQL lacks IF NOT EXISTS for FK; check in INFORMATION_SCHEMA)
 SET @fk_exists := (

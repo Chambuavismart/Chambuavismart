@@ -10,6 +10,8 @@ import com.chambua.vismart.repository.TeamAliasRepository;
 import com.chambua.vismart.repository.TeamRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -64,26 +66,48 @@ public class MatchAnalysisService {
         this.leagueRepository = leagueRepository;
     }
 
+    // Backward-compatible overloads (default analysisType = "match")
     public MatchAnalysisResponse analyzeDeterministic(Long leagueId, Long homeTeamId, Long awayTeamId,
                                                      String leagueName, String homeTeamName, String awayTeamName,
                                                      boolean refresh) {
-        // Delegate to season-aware overload with null seasonId (backward compatibility)
-        return analyzeDeterministic(leagueId, homeTeamId, awayTeamId, null, leagueName, homeTeamName, awayTeamName, refresh);
+        return analyzeDeterministic(leagueId, homeTeamId, awayTeamId, null, leagueName, homeTeamName, awayTeamName, refresh, "match");
     }
 
     public MatchAnalysisResponse analyzeDeterministic(Long leagueId, Long homeTeamId, Long awayTeamId,
                                                      Long seasonId,
                                                      String leagueName, String homeTeamName, String awayTeamName,
                                                      boolean refresh) {
+        return analyzeDeterministic(leagueId, homeTeamId, awayTeamId, seasonId, leagueName, homeTeamName, awayTeamName, refresh, "match");
+    }
+
+    // New overload with analysisType parameter
+    public MatchAnalysisResponse analyzeDeterministic(Long leagueId, Long homeTeamId, Long awayTeamId,
+                                                     String leagueName, String homeTeamName, String awayTeamName,
+                                                     boolean refresh, String analysisType) {
+        // Delegate to season-aware overload with null seasonId (backward compatibility)
+        return analyzeDeterministic(leagueId, homeTeamId, awayTeamId, null, leagueName, homeTeamName, awayTeamName, refresh, analysisType);
+    }
+
+    public MatchAnalysisResponse analyzeDeterministic(Long leagueId, Long homeTeamId, Long awayTeamId,
+                                                     Long seasonId,
+                                                     String leagueName, String homeTeamName, String awayTeamName,
+                                                     boolean refresh, String analysisType) {
         org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MatchAnalysisService.class);
         long t0 = System.currentTimeMillis();
-        logger.info("[ANALYZE][REQ] leagueId={} seasonId={} homeId={} awayId={} home='{}' away='{}' refresh={}", leagueId, seasonId, homeTeamId, awayTeamId, homeTeamName, awayTeamName, refresh);
-        // If we have IDs, no explicit season context, and not refreshing, try cache first
-        if (!refresh && seasonId == null && leagueId != null && homeTeamId != null && awayTeamId != null) {
+        String at = (analysisType == null || analysisType.isBlank()) ? "match" : analysisType.trim().toLowerCase();
+        boolean fixturesMode = "fixtures".equals(at);
+        logger.info("[ANALYZE][REQ] type={} leagueId={} seasonId={} homeId={} awayId={} home='{}' away='{}' refresh={}", at, leagueId, seasonId, homeTeamId, awayTeamId, homeTeamName, awayTeamName, refresh);
+        // If we have IDs, no explicit season context, and not refreshing, try cache first (disabled for fixtures mode to avoid mixing)
+        if (!fixturesMode && !refresh && seasonId == null && leagueId != null && homeTeamId != null && awayTeamId != null) {
             Optional<MatchAnalysisResult> cached = cacheRepo.findByLeagueIdAndHomeTeamIdAndAwayTeamId(leagueId, homeTeamId, awayTeamId);
             if (cached.isPresent()) {
                 try {
-                    return objectMapper.readValue(cached.get().getResultJson(), MatchAnalysisResponse.class);
+                    String json = cached.get().getResultJson();
+                    JsonNode node = objectMapper.readTree(json);
+                    String variant = node.has("modelVariant") ? node.get("modelVariant").asText(null) : null;
+                    if ("v2.1".equals(variant)) {
+                        return objectMapper.treeToValue(node, MatchAnalysisResponse.class);
+                    }
                 } catch (Exception ignored) { /* fall through to recompute on JSON error */ }
             }
         }
@@ -132,10 +156,12 @@ public class MatchAnalysisService {
                 if (haveHome) {
                     int hm = homeRow.getWeightedHomeMatches();
                     homePpg = (hm >= 2 ? homeRow.getWeightedHomePPG() : homeRow.getPpg());
+                    if (fixturesMode) { homePpg = homeRow.getPpg(); }
                 }
                 if (haveAway) {
                     int am = awayRow.getWeightedAwayMatches();
                     awayPpg = (am >= 2 ? awayRow.getWeightedAwayPPG() : awayRow.getPpg());
+                    if (fixturesMode) { awayPpg = awayRow.getPpg(); }
                 }
 
                 if (!haveHome || !haveAway) {
@@ -149,28 +175,37 @@ public class MatchAnalysisService {
                     } else {
                         double homeWeight = homePpg / total;
                         double awayWeight = awayPpg / total;
-                        home = (int) Math.round(homeWeight * 100.0 * 0.75);
-                        away = (int) Math.round(awayWeight * 100.0 * 0.75);
+                        double scale = fixturesMode ? 0.65 : 0.75;
+                        home = (int) Math.round(homeWeight * 100.0 * scale);
+                        away = (int) Math.round(awayWeight * 100.0 * scale);
                         draw = 100 - (home + away);
                         if (draw < 0) draw = 0; // safety
                     }
                 }
 
-                // BTTS/Over2.5 from weighted home/away splits with fallbacks
+                // BTTS/Over2.5: use weighted splits for match mode; simpler overall averages for fixtures mode
                 if (haveHome && haveAway) {
-                    Integer hBtts = homeRow.getWeightedHomeBTTSPercent();
-                    Integer aBtts = awayRow.getWeightedAwayBTTSPercent();
-                    Integer hOv25 = homeRow.getWeightedHomeOver25Percent();
-                    Integer aOv25 = awayRow.getWeightedAwayOver25Percent();
+                    Integer hBtts = fixturesMode ? homeRow.getBttsPct() : homeRow.getWeightedHomeBTTSPercent();
+                    Integer aBtts = fixturesMode ? awayRow.getBttsPct() : awayRow.getWeightedAwayBTTSPercent();
+                    Integer hOv25 = fixturesMode ? homeRow.getOver25Pct() : homeRow.getWeightedHomeOver25Percent();
+                    Integer aOv25 = fixturesMode ? awayRow.getOver25Pct() : awayRow.getWeightedAwayOver25Percent();
 
-                    int hBttsEff = (homeRow.getWeightedHomeMatches() >= 2 && hBtts != null && hBtts > 0) ? hBtts : homeRow.getBttsPct();
-                    int aBttsEff = (awayRow.getWeightedAwayMatches() >= 2 && aBtts != null && aBtts > 0) ? aBtts : awayRow.getBttsPct();
-                    int hOv25Eff = (homeRow.getWeightedHomeMatches() >= 2 && hOv25 != null && hOv25 > 0) ? hOv25 : homeRow.getOver25Pct();
-                    int aOv25Eff = (awayRow.getWeightedAwayMatches() >= 2 && aOv25 != null && aOv25 > 0) ? aOv25 : awayRow.getOver25Pct();
+                    // Fallback to overall averages if weighted splits are unavailable or zero in match mode
+                    if (!fixturesMode) {
+                        if (hBtts == null || hBtts <= 0) hBtts = homeRow.getBttsPct();
+                        if (aBtts == null || aBtts <= 0) aBtts = awayRow.getBttsPct();
+                        if (hOv25 == null || hOv25 <= 0) hOv25 = homeRow.getOver25Pct();
+                        if (aOv25 == null || aOv25 <= 0) aOv25 = awayRow.getOver25Pct();
+                    }
+
+                    int hBttsEff = (hBtts != null && hBtts > 0) ? hBtts : 0;
+                    int aBttsEff = (aBtts != null && aBtts > 0) ? aBtts : 0;
+                    int hOv25Eff = (hOv25 != null && hOv25 > 0) ? hOv25 : 0;
+                    int aOv25Eff = (aOv25 != null && aOv25 > 0) ? aOv25 : 0;
 
                     if (hBttsEff > 0 && aBttsEff > 0) {
                         btts = (int) Math.round((hBttsEff + aBttsEff) / 2.0);
-                    } // else keep default 50
+                    }
                     if (hOv25Eff > 0 && aOv25Eff > 0) {
                         over25 = (int) Math.round((hOv25Eff + aOv25Eff) / 2.0);
                     }
@@ -319,9 +354,11 @@ public class MatchAnalysisService {
                         h2hBttsPct = (int) Math.round((wBtts * 100.0) / sumW);
                         h2hOv25Pct = (int) Math.round((wOv25 * 100.0) / sumW);
 
-                        // Blend factor alpha based on number of H2H considered (up to 50% influence at N matches)
-                        double alpha = Math.min(0.5, (window / (double) DEFAULT_H2H_LIMIT) * 0.5);
-                        logger.info("[ANALYZE][H2H_BLEND] alpha={} form={{H:{},D:{},A:{}}} h2h={{H:{},D:{},A:{}}}", String.format("%.2f", alpha), home, draw, away, h2hHomePct, h2hDrawPct, h2hAwayPct);
+                        // Blend factor alpha based on number of H2H considered.
+                        // Fixtures mode: softer cap (35%) to keep simpler model; Match mode: stronger cap (60%) to reflect recency.
+                        double alphaCap = fixturesMode ? 0.35 : 0.60;
+                        double alpha = Math.min(alphaCap, (window / (double) DEFAULT_H2H_LIMIT) * alphaCap);
+                        logger.info("[ANALYZE][H2H_BLEND] type={} alpha={} form={{H:{},D:{},A:{}}} h2h={{H:{},D:{},A:{}}}", fixturesMode?"fixtures":"match", String.format("%.2f", alpha), home, draw, away, h2hHomePct, h2hDrawPct, h2hAwayPct);
                         // Blend W/D/L
                         double bHome = (1 - alpha) * home + alpha * h2hHomePct;
                         double bAway = (1 - alpha) * away + alpha * h2hAwayPct;
@@ -337,6 +374,57 @@ public class MatchAnalysisService {
                 }
             }
         } catch (Exception ignored) { /* fallback: keep form-only values */ }
+        
+        // Fixtures-mode simple bias: use aggregate H2H GD and overall win-rate delta to tilt W/D/L slightly
+        try {
+            if (fixturesMode) {
+                int gdAgg = 0; int countGd = 0;
+                if (h2hUsed != null && !h2hUsed.isEmpty()) {
+                    for (com.chambua.vismart.model.Match m : h2hUsed) {
+                        Integer hg = m.getHomeGoals(); Integer ag = m.getAwayGoals();
+                        if (hg == null || ag == null) continue;
+                        boolean perspectiveHomeIsHome = (m.getHomeTeam() != null && m.getHomeTeam().getId() != null && m.getHomeTeam().getId().equals(homeTeamId));
+                        int scored = perspectiveHomeIsHome ? hg : ag;
+                        int conceded = perspectiveHomeIsHome ? ag : hg;
+                        gdAgg += (scored - conceded);
+                        countGd++;
+                    }
+                }
+                double shiftGd = 0.0;
+                if (countGd >= 3) {
+                    // up to +/-6 points based on GD magnitude (e.g., +17 -> about +4)
+                    shiftGd = Math.max(-6.0, Math.min(6.0, gdAgg / 4.0));
+                }
+                // Overall win-rate delta influence up to +/-4
+                try {
+                    Long sid2 = (seasonId != null) ? seasonId : seasonService.findCurrentSeason(leagueId).map(Season::getId).orElse(null);
+                    if (sid2 != null) {
+                        java.util.List<FormGuideRowDTO> rows2 = formGuideService.compute(leagueId, sid2, DEFAULT_FORM_LIMIT, FormGuideService.Scope.OVERALL);
+                        FormGuideRowDTO hr = findTeamRow(rows2, homeTeamId, homeTeamName);
+                        FormGuideRowDTO ar = findTeamRow(rows2, awayTeamId, awayTeamName);
+                        if (hr != null && ar != null && hr.getMp() > 0 && ar.getMp() > 0) {
+                            double hWR = hr.getW() / (double) Math.max(1, hr.getMp());
+                            double aWR = ar.getW() / (double) Math.max(1, ar.getMp());
+                            double deltaWR = hWR - aWR; // -1..+1
+                            double shiftWr = Math.max(-4.0, Math.min(4.0, deltaWR * 10.0));
+                            int totalShift = (int) Math.round(shiftGd + shiftWr);
+                            if (totalShift != 0) {
+                                if (totalShift > 0) {
+                                    int take = Math.min(totalShift, away);
+                                    int[] trip = normalizeTriplet(home + take, draw, away - take);
+                                    home = trip[0]; draw = trip[1]; away = trip[2];
+                                } else {
+                                    int mag = -totalShift;
+                                    int take = Math.min(mag, home);
+                                    int[] trip = normalizeTriplet(home - take, draw, away + take);
+                                    home = trip[0]; draw = trip[1]; away = trip[2];
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignoredBias) { /* keep without bias */ }
+            }
+        } catch (Exception ignoredBiasOuter) { /* ignore */ }
         
         // League position/strength adjustment (season-scoped)
         try {
@@ -395,7 +483,9 @@ public class MatchAnalysisService {
             }
         } catch (Exception ignored) { /* on any failure, skip league adjustment */ }
         
-        // Compute xG using weighted split GF/GA with per-team fallbacks
+        // Compute xG using mode-specific logic:
+        // - fixtures: overall per-match GF/GA averages (simpler, less reactive)
+        // - match: weighted split GF/GA (home vs away) emphasizing recent form
         double xgHome = 1.5; // neutral default per spec when no valid data
         double xgAway = 1.5; // neutral default per spec when no valid data
         try {
@@ -424,8 +514,27 @@ public class MatchAnalysisService {
 
                     boolean haveHomeX = homeGF > 0 && awayGA > 0;
                     boolean haveAwayX = awayGF > 0 && homeGA > 0;
-                    if (haveHomeX) xgHome = (homeGF + awayGA) / 2.0;
-                    if (haveAwayX) xgAway = (awayGF + homeGA) / 2.0;
+                    if (fixturesMode) {
+                        // Overall per-match averages
+                        double hGfPer = homeRow.getMp() > 0 ? ((double) homeRow.getGf()) / Math.max(1, homeRow.getMp()) : 0.0;
+                        double hGaPer = homeRow.getMp() > 0 ? ((double) homeRow.getGa()) / Math.max(1, homeRow.getMp()) : 0.0;
+                        double aGfPer = awayRow.getMp() > 0 ? ((double) awayRow.getGf()) / Math.max(1, awayRow.getMp()) : 0.0;
+                        double aGaPer = awayRow.getMp() > 0 ? ((double) awayRow.getGa()) / Math.max(1, awayRow.getMp()) : 0.0;
+                        boolean haveH = hGfPer > 0 && aGaPer > 0;
+                        boolean haveA = aGfPer > 0 && hGaPer > 0;
+                        if (haveH) xgHome = (hGfPer + aGaPer) / 2.0;
+                        if (haveA) xgAway = (aGfPer + hGaPer) / 2.0;
+                    } else {
+                        if (haveHomeX) xgHome = (homeGF + awayGA) / 2.0;
+                        if (haveAwayX) xgAway = (awayGF + homeGA) / 2.0;
+                        // Damp BTTS slightly if away attack is weak in recent away splits
+                        try {
+                            double aGFw = awayRow.getWeightedAwayGoalsFor();
+                            int aBttsW = awayRow.getWeightedAwayBTTSPercent();
+                            if (aGFw > 0 && aGFw < 1.0) { btts = clampPercent(btts - 4); }
+                            else if (aBttsW > 0 && aBttsW < 45) { btts = clampPercent(btts - 3); }
+                        } catch (Exception ignoredMatchBTTS) {}
+                    }
                 }
             }
         } catch (Exception ignored) {
@@ -441,13 +550,57 @@ public class MatchAnalysisService {
         String advice = (over25 >= 52 ? "Likely Over 2.5" : "Under 2.5 risk") +
                 ", " + (btts >= 55 ? "BTTS Yes" : "BTTS Lean No");
 
+        // Recompute probabilities using independent Poisson model from expected goals (xG)
+        final int MAX_GOALS = 10;
+        java.util.function.BiFunction<Double, Integer, Double> pmf = (lambda, k) -> {
+            double f = 1.0d;
+            for (int i = 2; i <= k; i++) f *= i;
+            return (Math.exp(-lambda) * Math.pow(lambda, k)) / f;
+        };
+        double[] ph = new double[MAX_GOALS + 1];
+        double[] pa = new double[MAX_GOALS + 1];
+        for (int i = 0; i <= MAX_GOALS; i++) { ph[i] = pmf.apply(xgHome, i); pa[i] = pmf.apply(xgAway, i); }
+        double pHomeWinD = 0.0;
+        for (int h = 0; h <= MAX_GOALS; h++) {
+            double phh = ph[h];
+            for (int a2 = 0; a2 < h; a2++) pHomeWinD += phh * pa[a2];
+        }
+        double pDrawD = 0.0;
+        for (int k2 = 0; k2 <= MAX_GOALS; k2++) pDrawD += ph[k2] * pa[k2];
+        double pAwayWinD = Math.max(0.0, 1.0 - pHomeWinD - pDrawD);
+        double pHome0 = ph[0];
+        double pAway0 = pa[0];
+        double pBttsD = 1.0 - pHome0 - pAway0 + (pHome0 * pAway0);
+        double p00 = pHome0 * pAway0;
+        double p10 = ph[1] * pAway0;
+        double p01 = pHome0 * pa[1];
+        double pOver15D = 1.0 - (p00 + p10 + p01);
+        double pOver25D = 0.0;
+        double pOver35D = 0.0;
+        for (int h = 0; h <= MAX_GOALS; h++) {
+            for (int a2 = 0; a2 <= MAX_GOALS; a2++) {
+                double p = ph[h] * pa[a2];
+                int total = h + a2;
+                if (total > 2) pOver25D += p;
+                if (total > 3) pOver35D += p;
+            }
+        }
+        int pHomeWin = (int) Math.round(pHomeWinD * 100.0);
+        int pDraw = (int) Math.round(pDrawD * 100.0);
+        int pAwayWin = Math.max(0, 100 - (pHomeWin + pDraw));
+        int pBtts = (int) Math.round(pBttsD * 100.0);
+        int pOv25 = (int) Math.round(pOver25D * 100.0);
+        // Keep existing confidence/advice for now; over25 in advice updated from Poisson
+        int pOv15 = (int) Math.round(pOver15D * 100.0);
+        int pOv35 = (int) Math.round(pOver35D * 100.0);
+        // Build response using Poisson-based probabilities
         MatchAnalysisResponse response = new MatchAnalysisResponse(
                 homeTeamName,
                 awayTeamName,
                 leagueName,
-                new MatchAnalysisResponse.WinProbabilities(home, draw, away),
-                btts,
-                over25,
+                new MatchAnalysisResponse.WinProbabilities(pHomeWin, pDraw, pAwayWin),
+                pBtts,
+                pOv25,
                 new MatchAnalysisResponse.ExpectedGoals(xgHome, xgAway),
                 confidence,
                 advice
@@ -480,12 +633,52 @@ public class MatchAnalysisService {
                     com.chambua.vismart.dto.GoalDifferentialSummary gd = h2hService != null ? h2hService.computeGoalDifferentialByNames(homeTeamName, awayTeamName) : null;
                     if (gd != null) sum.setGoalDifferential(gd);
                 } catch (Exception ignoredGd) {}
-                // Attach last-5 form for each team across all available matches
+                // Attach last-5 form for each team with competition-aware context per requirement
                 try {
-                    sum.setHomeForm(computeFormLastFive(homeTeamId, homeTeamName));
+                    // Always use each team's domestic league when teams come from different leagues.
+                    // Use fixture league only if it matches both teams' domestic league (i.e., a domestic fixture).
+                    Long homeDomestic = determineDomesticLeagueId(homeTeamId);
+                    Long awayDomestic = determineDomesticLeagueId(awayTeamId);
+                    Long homeFormLeague;
+                    Long awayFormLeague;
+                    boolean fixtureIsDomesticForBoth = (leagueId != null)
+                            && java.util.Objects.equals(homeDomestic, leagueId)
+                            && java.util.Objects.equals(awayDomestic, leagueId);
+                    if (fixtureIsDomesticForBoth) {
+                        homeFormLeague = leagueId;
+                        awayFormLeague = leagueId;
+                    } else {
+                        homeFormLeague = homeDomestic;
+                        awayFormLeague = awayDomestic;
+                    }
+                    sum.setHomeForm(computeFormLastFive(homeTeamId, homeTeamName, homeFormLeague));
+                    try {
+                        String hPat = sum.getHomeForm() != null ? sum.getHomeForm().getCurrentStreak() : null;
+                        if (hPat == null || hPat.isBlank()) { hPat = computeFormLastFive(homeTeamId, homeTeamName, homeFormLeague).getCurrentStreak(); }
+                        if (hPat != null && !"0".equals(hPat)) {
+                            var hInsight = computeStreakInsight(homeTeamId, homeTeamName, hPat);
+                            response.setHomeStreakInsight(hInsight);
+                        }
+                    } catch (Exception ignoredHomeInsight) {}
                 } catch (Exception ignoredHomeForm) {}
                 try {
-                    sum.setAwayForm(computeFormLastFive(awayTeamId, awayTeamName));
+                    // away: same rule as above — use domestic league unless this is a domestic fixture for both teams
+                    Long homeDomestic2 = determineDomesticLeagueId(homeTeamId);
+                    Long awayDomestic2 = determineDomesticLeagueId(awayTeamId);
+                    boolean fixtureIsDomesticForBoth2 = (leagueId != null)
+                            && java.util.Objects.equals(homeDomestic2, leagueId)
+                            && java.util.Objects.equals(awayDomestic2, leagueId);
+                    Long awayFormLeague = fixtureIsDomesticForBoth2 ? leagueId : awayDomestic2;
+
+                    sum.setAwayForm(computeFormLastFive(awayTeamId, awayTeamName, awayFormLeague));
+                    try {
+                        String aPat = sum.getAwayForm() != null ? sum.getAwayForm().getCurrentStreak() : null;
+                        if (aPat == null || aPat.isBlank()) { aPat = computeFormLastFive(awayTeamId, awayTeamName, awayFormLeague).getCurrentStreak(); }
+                        if (aPat != null && !"0".equals(aPat)) {
+                            var aInsight = computeStreakInsight(awayTeamId, awayTeamName, aPat);
+                            response.setAwayStreakInsight(aInsight);
+                        }
+                    } catch (Exception ignoredAwayInsight) {}
                 } catch (Exception ignoredAwayForm) {}
             }
             // Attach H2H summary whenever we have an H2H window; matches list can be empty and UI will fallback to detailed list
@@ -494,7 +687,57 @@ public class MatchAnalysisService {
             // Insights text combining GD, streaks, PPG trend
             if (phase1) {
                 try {
-                    if (h2hService != null) {
+                    // Prefer composing insights from the already computed domestic-context forms to ensure consistency
+                    String composed = null;
+                    try {
+                        MatchAnalysisResponse.H2HSummary s = response.getH2hSummary();
+                        if (s != null) {
+                            StringBuilder sb2 = new StringBuilder();
+                            boolean any = false;
+                            // GD (was attached above via H2HService.computeGoalDifferentialByNames)
+                            try {
+                                com.chambua.vismart.dto.GoalDifferentialSummary gd2 = s.getGoalDifferential();
+                                if (gd2 != null && gd2.getAggregateGD() != null) {
+                                    int agg = gd2.getAggregateGD();
+                                    String signed = (agg > 0 ? "+" + agg : String.valueOf(agg));
+                                    sb2.append(homeTeamName).append(" has ").append(signed).append(" GD in H2H");
+                                    any = true;
+                                }
+                            } catch (Exception ignoredGd2) {}
+                            // Streaks from domestic-context last-5
+                            java.util.function.Function<com.chambua.vismart.dto.FormSummary, String> streakText = (fs) -> {
+                                if (fs == null) return null;
+                                String st = fs.getCurrentStreak();
+                                if (st == null || st.equals("0")) return null;
+                                if (st.toUpperCase().endsWith("W")) return st.substring(0, st.length()-1) + "W in a row";
+                                if (st.toUpperCase().endsWith("D")) return st.substring(0, st.length()-1) + "D in a row";
+                                if (st.toUpperCase().endsWith("L")) return st.substring(0, st.length()-1) + "L in a row";
+                                return st;
+                            };
+                            String hs2 = streakText.apply(s.getHomeForm());
+                            String as2 = streakText.apply(s.getAwayForm());
+                            if (hs2 != null) { if (any) sb2.append("; "); sb2.append(homeTeamName).append(" on ").append(hs2); any = true; }
+                            if (as2 != null) { if (any) sb2.append("; "); sb2.append(awayTeamName).append(" on ").append(as2); any = true; }
+                            // PPG trends from same series
+                            java.util.function.Function<com.chambua.vismart.dto.FormSummary, String> ppgTrend = (fs) -> {
+                                if (fs == null) return null;
+                                java.util.List<Double> ser = fs.getPpgSeries();
+                                if (ser == null || ser.size() < 2) return null;
+                                double start = ser.get(ser.size()-1) != null ? ser.get(ser.size()-1) : 0.0;
+                                double end = ser.get(0) != null ? ser.get(0) : 0.0;
+                                return String.format("%.1f → %.1f", start, end);
+                            };
+                            String hpt2 = ppgTrend.apply(s.getHomeForm());
+                            String apt2 = ppgTrend.apply(s.getAwayForm());
+                            if (hpt2 != null) { if (any) sb2.append("; "); sb2.append(homeTeamName).append(" improved from ").append(hpt2).append(" PPG"); any = true; }
+                            if (apt2 != null) { if (any) sb2.append("; "); sb2.append(awayTeamName).append(" improved from ").append(apt2).append(" PPG"); any = true; }
+                            if (any) composed = sb2.toString();
+                        }
+                    } catch (Exception ignoredCompose) {}
+                    if (composed != null) {
+                        response.setInsightsText(composed);
+                    } else if (h2hService != null) {
+                        // Fallback to legacy generator if composition failed
                         String insights = h2hService.generateInsightsText(homeTeamName, awayTeamName);
                         response.setInsightsText(insights);
                     }
@@ -571,10 +814,35 @@ public class MatchAnalysisService {
             } catch (Exception ignored2) {}
         }
 
+        // Ensure streak insights are available for UI even if no H2H window or predictive flags are off
+        try {
+            if (response.getHomeStreakInsight() == null) {
+                com.chambua.vismart.dto.FormSummary hf = computeFormLastFive(homeTeamId, homeTeamName);
+                String hPat = (hf != null) ? hf.getCurrentStreak() : null;
+                if (hPat != null && !hPat.isBlank() && !"0".equals(hPat)) {
+                    var hi = computeStreakInsight(homeTeamId, homeTeamName, hPat);
+                    response.setHomeStreakInsight(hi);
+                }
+            }
+            if (response.getAwayStreakInsight() == null) {
+                com.chambua.vismart.dto.FormSummary af = computeFormLastFive(awayTeamId, awayTeamName);
+                String aPat = (af != null) ? af.getCurrentStreak() : null;
+                if (aPat != null && !aPat.isBlank() && !"0".equals(aPat)) {
+                    var ai = computeStreakInsight(awayTeamId, awayTeamName, aPat);
+                    response.setAwayStreakInsight(ai);
+                }
+            }
+        } catch (Exception ignoredEnsureSI) { /* non-fatal */ }
+
         // Save to cache only for non-season-specific calls if IDs are available
-        if (seasonId == null && leagueId != null && homeTeamId != null && awayTeamId != null) {
+        if (!fixturesMode && seasonId == null && leagueId != null && homeTeamId != null && awayTeamId != null) {
             try {
-                String json = objectMapper.writeValueAsString(response);
+                // Inject modelVariant into cached JSON to prevent cross-version mixing
+                JsonNode node = objectMapper.valueToTree(response);
+                if (node instanceof ObjectNode) {
+                    ((ObjectNode) node).put("modelVariant", "v2.1");
+                }
+                String json = objectMapper.writeValueAsString(node);
                 MatchAnalysisResult entity = cacheRepo.findByLeagueIdAndHomeTeamIdAndAwayTeamId(leagueId, homeTeamId, awayTeamId)
                         .orElse(new MatchAnalysisResult(leagueId, homeTeamId, awayTeamId, json, Instant.now()));
                 entity.setResultJson(json);
@@ -639,47 +907,184 @@ public class MatchAnalysisService {
         return Math.round(v * 100.0) / 100.0;
     }
 
+    // Determine the likely domestic league for a team in the latest season: pick the league with the most played matches
+    private Long determineDomesticLeagueId(Long teamId) {
+        if (teamId == null) return null;
+        java.util.List<com.chambua.vismart.model.Match> recentAll;
+        try { recentAll = matchRepository.findRecentPlayedByTeamId(teamId); } catch (Exception e) { return null; }
+        if (recentAll == null || recentAll.isEmpty()) return null;
+        Long latestSeasonId = null;
+        try {
+            com.chambua.vismart.model.Season s = recentAll.get(0).getSeason();
+            if (s != null) latestSeasonId = s.getId();
+        } catch (Exception ignored) {}
+        java.util.Map<Long, Integer> counts = new java.util.HashMap<>();
+        for (com.chambua.vismart.model.Match m : recentAll) {
+            try {
+                if (latestSeasonId != null) {
+                    if (m.getSeason() == null || m.getSeason().getId() == null || !java.util.Objects.equals(m.getSeason().getId(), latestSeasonId)) continue;
+                }
+                if (m.getLeague() == null || m.getLeague().getId() == null) continue;
+                Long lid = m.getLeague().getId();
+                counts.put(lid, 1 + counts.getOrDefault(lid, 0));
+            } catch (Exception ignored2) {}
+        }
+        if (counts.isEmpty()) return null;
+        Long best = null; int max = -1;
+        for (java.util.Map.Entry<Long,Integer> e : counts.entrySet()) {
+            if (e.getValue() > max) { max = e.getValue(); best = e.getKey(); }
+        }
+        return best;
+    }
+
+    // --- Historical streak insight computation across all seasons/leagues ---
+    private com.chambua.vismart.dto.StreakInsight computeStreakInsight(Long teamId, String teamName, String targetPattern) {
+        com.chambua.vismart.dto.StreakInsight out = new com.chambua.vismart.dto.StreakInsight();
+        out.setTeamName(teamName);
+        out.setPattern(targetPattern != null ? targetPattern : "0");
+        if (targetPattern == null || targetPattern.equals("0") || targetPattern.isBlank()) {
+            out.setSummaryText(teamName + ": no active streak detected.");
+            return out;
+        }
+        // Fetch full history (played) most-recent-first
+        java.util.List<com.chambua.vismart.model.Match> list;
+        try {
+            if (teamId != null) list = matchRepository.findRecentPlayedByTeamId(teamId);
+            else if (teamName != null && !teamName.isBlank()) list = matchRepository.findRecentPlayedByTeamName(teamName.trim());
+            else list = java.util.Collections.emptyList();
+        } catch (Exception ex) { list = java.util.Collections.emptyList(); }
+        if (list == null || list.isEmpty()) {
+            out.setSummaryText(teamName + ": no match history found for streak insight.");
+            return out;
+        }
+        // Build chronological order (oldest -> newest)
+        java.util.List<com.chambua.vismart.model.Match> chron = new java.util.ArrayList<>(list);
+        java.util.Collections.reverse(chron);
+        int prevCount = 0; String prevType = null; // current streak before each match
+        int totalInstances = 0;
+        int nextW = 0, nextD = 0, nextL = 0, nextBTTS = 0, nextOv15 = 0, nextOv25 = 0, nextOv35 = 0;
+        for (com.chambua.vismart.model.Match m : chron) {
+            Integer hg = m.getHomeGoals();
+            Integer ag = m.getAwayGoals();
+            if (hg == null || ag == null) continue;
+            boolean isHome = false;
+            try {
+                if (teamId != null && m.getHomeTeam() != null && m.getHomeTeam().getId() != null) {
+                    isHome = m.getHomeTeam().getId().equals(teamId);
+                } else if (teamId == null && teamName != null && m.getHomeTeam() != null && m.getHomeTeam().getName() != null) {
+                    isHome = m.getHomeTeam().getName().equalsIgnoreCase(teamName);
+                }
+            } catch (Exception ignored) {}
+            int my = isHome ? hg : ag;
+            int opp = isHome ? ag : hg;
+            String res = (my > opp) ? "W" : (my == opp ? "D" : "L");
+            // Before processing this match, check if current pre-match streak equals target
+            String pre = (prevType == null) ? "0" : (prevCount + prevType);
+            if (!"0".equals(pre) && pre.equalsIgnoreCase(targetPattern)) {
+                totalInstances++;
+                // Count next outcome and totals for this match
+                if ("W".equals(res)) nextW++; else if ("D".equals(res)) nextD++; else nextL++;
+                int total = my + opp;
+                if (my > 0 && opp > 0) nextBTTS++;
+                if (total >= 2) nextOv15++;
+                if (total >= 3) nextOv25++;
+                if (total >= 4) nextOv35++;
+            }
+            // Update streak with this result
+            if (prevType == null || !prevType.equals(res)) { prevType = res; prevCount = 1; }
+            else { prevCount++; }
+        }
+        out.setInstances(totalInstances);
+        if (totalInstances > 0) {
+            int wPct = (int) Math.round((nextW * 100.0) / totalInstances);
+            int dPct = (int) Math.round((nextD * 100.0) / totalInstances);
+            int lPct = Math.max(0, 100 - (wPct + dPct)); // ensure sums to ~100
+            int bttsPct = (int) Math.round((nextBTTS * 100.0) / totalInstances);
+            int o15Pct = (int) Math.round((nextOv15 * 100.0) / totalInstances);
+            int o25Pct = (int) Math.round((nextOv25 * 100.0) / totalInstances);
+            int o35Pct = (int) Math.round((nextOv35 * 100.0) / totalInstances);
+            out.setNextWinPct(wPct);
+            out.setNextDrawPct(dPct);
+            out.setNextLossPct(lPct);
+            out.setBttsPct(bttsPct);
+            out.setOver15Pct(o15Pct);
+            out.setOver25Pct(o25Pct);
+            out.setOver35Pct(o35Pct);
+            // Compose readable summary
+            String readable = (teamName != null ? teamName : "This team") + " has had " + totalInstances +
+                    " instances of a " + targetPattern + " streak. Of the matches that followed: " +
+                    wPct + "% were wins, " + dPct + "% were draws, " + lPct + "% were losses. " +
+                    o35Pct + "% were Over 3.5, " + o25Pct + "% were Over 2.5, " + o15Pct + "% were Over 1.5, and " + bttsPct + "% were BTTS.";
+            out.setSummaryText(readable);
+        } else {
+            out.setSummaryText((teamName != null ? teamName : "This team") + " has had 0 prior instances of a " + targetPattern + " streak across recorded matches.");
+        }
+        return out;
+    }
+
     // --- Last-5 form computation ---
     private com.chambua.vismart.dto.FormSummary computeFormLastFive(Long teamId, String teamName) {
+        return computeFormLastFive(teamId, teamName, null);
+    }
+
+    // Competition-aware variant: when leagueContextId is provided, STRICTLY use that league only (no cross-competition fallback)
+    private com.chambua.vismart.dto.FormSummary computeFormLastFive(Long teamId, String teamName, Long leagueContextId) {
         java.util.List<com.chambua.vismart.model.Match> list = java.util.Collections.emptyList();
         try {
             if (teamId != null) {
-                // Determine latest season by teamId via recent matches' season (first match's season is latest due to ordering)
-                List<com.chambua.vismart.model.Match> recentAll = matchRepository.findRecentPlayedByTeamId(teamId);
-                Long latestSeasonId = null;
-                if (recentAll != null && !recentAll.isEmpty()) {
-                    com.chambua.vismart.model.Season s = recentAll.get(0).getSeason();
-                    if (s != null) latestSeasonId = s.getId();
-                }
-                if (latestSeasonId != null) {
-                    // Filter to that season using name-based method only if necessary; prefer id path by filtering in-memory
-                    list = new java.util.ArrayList<>();
-                    for (com.chambua.vismart.model.Match m : recentAll) {
-                        if (m.getSeason() != null && java.util.Objects.equals(m.getSeason().getId(), latestSeasonId)) {
-                            list.add(m);
-                        }
-                    }
+                if (leagueContextId != null) {
+                    // Strict: only matches from the specified league (domestic context for cross-league fixtures)
+                    java.util.List<com.chambua.vismart.model.Match> byLeague = matchRepository.findRecentPlayedByTeamIdAndLeague(teamId, leagueContextId);
+                    list = (byLeague != null) ? byLeague : java.util.Collections.emptyList();
                 } else {
-                    list = recentAll;
+                    // No league context: default to latest season for the team across competitions
+                    List<com.chambua.vismart.model.Match> recentAll = matchRepository.findRecentPlayedByTeamId(teamId);
+                    Long latestSeasonId = null;
+                    if (recentAll != null && !recentAll.isEmpty()) {
+                        com.chambua.vismart.model.Season s = recentAll.get(0).getSeason();
+                        if (s != null) latestSeasonId = s.getId();
+                    }
+                    if (latestSeasonId != null) {
+                        list = new java.util.ArrayList<>();
+                        for (com.chambua.vismart.model.Match m : recentAll) {
+                            if (m.getSeason() != null && java.util.Objects.equals(m.getSeason().getId(), latestSeasonId)) {
+                                list.add(m);
+                            }
+                        }
+                    } else {
+                        list = recentAll;
+                    }
                 }
             } else if (teamName != null && !teamName.isBlank()) {
-                // Use repository helpers to constrain to the most recent season that actually has matches for this team
                 String q = teamName.trim();
-                java.util.List<Long> seasonIds = matchRepository.findSeasonIdsForTeamNameOrdered(q);
-                java.util.List<com.chambua.vismart.model.Match> chosen = java.util.Collections.emptyList();
-                if (seasonIds != null && !seasonIds.isEmpty()) {
-                    for (Long sid : seasonIds) {
-                        if (sid == null) continue;
-                        try {
-                            java.util.List<com.chambua.vismart.model.Match> attempt = matchRepository.findRecentPlayedByTeamNameAndSeason(q, sid);
-                            if (attempt != null && !attempt.isEmpty()) { chosen = attempt; break; }
-                        } catch (Exception ignored2) {}
+                if (leagueContextId != null) {
+                    // Strict name-based: only matches from the specified league
+                    java.util.List<com.chambua.vismart.model.Match> chosen = matchRepository.findRecentPlayedByTeamName(q);
+                    java.util.List<com.chambua.vismart.model.Match> flt = new java.util.ArrayList<>();
+                    for (com.chambua.vismart.model.Match m : chosen) {
+                        if (m.getLeague() != null && m.getLeague().getId() != null && java.util.Objects.equals(m.getLeague().getId(), leagueContextId)) {
+                            flt.add(m);
+                        }
                     }
+                    list = flt; // may be empty; strict
+                } else {
+                    // Default: latest season for the named team
+                    java.util.List<Long> seasonIds = matchRepository.findSeasonIdsForTeamNameOrdered(q);
+                    java.util.List<com.chambua.vismart.model.Match> chosen = java.util.Collections.emptyList();
+                    if (seasonIds != null && !seasonIds.isEmpty()) {
+                        for (Long sid : seasonIds) {
+                            if (sid == null) continue;
+                            try {
+                                java.util.List<com.chambua.vismart.model.Match> attempt = matchRepository.findRecentPlayedByTeamNameAndSeason(q, sid);
+                                if (attempt != null && !attempt.isEmpty()) { chosen = attempt; break; }
+                            } catch (Exception ignored2) {}
+                        }
+                    }
+                    if (chosen == null || chosen.isEmpty()) {
+                        chosen = matchRepository.findRecentPlayedByTeamName(q);
+                    }
+                    list = chosen;
                 }
-                if (chosen == null || chosen.isEmpty()) {
-                    chosen = matchRepository.findRecentPlayedByTeamName(q);
-                }
-                list = chosen;
             }
         } catch (Exception ignored) {}
         if (list == null || list.isEmpty()) return new com.chambua.vismart.dto.FormSummary();

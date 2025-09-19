@@ -15,6 +15,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     interface TeamProjection {
         Long getId();
         String getName();
+        Long getLeagueId();
         String getLeagueName();
     }
     // Deletion helper: remove all teams for a league (used when deleting a league)
@@ -96,7 +97,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     List<Team> findByNameOrAliasWithLeague(@Param("normalized") String normalized, @Param("raw") String raw);
 
     // Projection by id to get league name without initializing entity graph
-    @Query("select t.id as id, t.name as name, l.name as leagueName from Team t join t.league l where t.id = :teamId")
+    @Query("select t.id as id, t.name as name, l.id as leagueId, l.name as leagueName from Team t join t.league l where t.id = :teamId")
     TeamProjection findTeamProjectionById(@Param("teamId") Long teamId);
 
     // Default overload for backward compatibility

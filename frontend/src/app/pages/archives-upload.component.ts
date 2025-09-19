@@ -18,6 +18,7 @@ import { HttpClient } from '@angular/common/http';
         <p class="text-gray-700 text-sm">Paste past season match data in the supported formats below.</p>
       </div>
 
+
       <div class="grid gap-4 md:grid-cols-2">
       <div class="rounded shadow p-4 bg-white">
         <!-- Raw Text Upload for Archives -->
@@ -152,25 +153,31 @@ Nublense
   `
 })
 export class ArchivesUploadComponent {
+  private http = inject(HttpClient);
+  apiBase: string = '';
+  archives: any[] = [];
+  archivesLoading: boolean = false;
+  archivesError: string = '';
+
   constructor(){
-    const http = inject(HttpClient);
     // Dynamically load contexts (countries + competitions) with fallback to static COUNTRIES
-    http.get<any>('/api/matches/upload/api/options/contexts').subscribe({
+    this.http.get<any>('/api/matches/upload/api/options/contexts').subscribe({
       next: (res) => {
         try {
-          let countries = Array.isArray(res?.countries) ? (res.countries as string[]) : (COUNTRIES as string[]);
+          const backendCountries = Array.isArray(res?.countries) ? (res.countries as string[]) : [];
+          const countries = [...backendCountries, ...(COUNTRIES as string[])];
           const compGroups = res?.competitions || {};
           const flatComps: string[] = [];
           for (const k of Object.keys(compGroups)) {
             const arr = compGroups[k];
             if (Array.isArray(arr)) flatComps.push(...arr);
           }
-          if (!countries || countries.length === 0) countries = COUNTRIES as string[];
           this.competitions = flatComps;
           const merged = [...countries, ...this.competitions];
           const seen = new Set<string>();
           const deduped = merged.filter(v => {
             const key = (v || '').trim();
+            if (!key) return false;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -231,12 +238,28 @@ export class ArchivesUploadComponent {
   // Upload type: incremental removed for archives
   rawType: 'NEW_LEAGUE' | 'FULL_REPLACE' = 'NEW_LEAGUE';
 
+  loadPdfArchives(){
+    this.archivesLoading = true;
+    this.archivesError = '';
+    const url = '/api/matches/analysis-pdfs?page=0&size=50';
+    this.http.get<any>(url).subscribe({
+      next: (res) => {
+        this.archives = Array.isArray(res?.content) ? res.content : [];
+        this.archivesLoading = false;
+      },
+      error: (err) => {
+        this.archivesLoading = false;
+        this.archivesError = (err?.error?.message) || 'Failed to load PDF archives.';
+      }
+    });
+  }
+
   onCountryChange(){
     if (!this.rawCountry) {
       this.seasons = [];
     } else {
-      // Populate seasons from 2018/2019 upwards to 2025/2026 when a country is selected
-      this.seasons = this.generateSeasons(2018, 2025);
+      // Populate seasons from 2015/2016 upwards to 2025/2026 when a country is selected
+      this.seasons = this.generateSeasons(2015, 2025);
     }
     // Clear any previously selected season
     this.rawSeason = '';
@@ -250,10 +273,9 @@ export class ArchivesUploadComponent {
       this.useManualLeague = true;
       this.rawLeagueName = '';
     } else {
-      // Default to list usage
-      if (this.useManualLeague) {
-        this.rawLeagueName = '';
-      }
+      // Preset leagues available -> default to dropdown selection mode
+      this.useManualLeague = false;
+      this.rawLeagueName = '';
     }
   }
 

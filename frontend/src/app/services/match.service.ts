@@ -8,7 +8,7 @@ export interface TeamBreakdownDto { total: number; wins: number; draws: number; 
 export interface H2HSuggestion { teamA: string; teamB: string; }
 export interface H2HMatchDto { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; season: string | null; }
 export interface FormSummaryDto { recentResults: string[]; currentStreak: string; winRate: number; pointsEarned: number; ppgSeries?: number[]; }
-export interface H2HFormTeamDto { teamId: string; teamName: string; last5: { streak: string; winRate: number; pointsPerGame: number; bttsPercent: number; over25Percent: number; fallback?: boolean; ppgSeries?: number[]; }; matches: { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; }[]; seasonResolved?: string | null; matchesAvailable?: string | null; warnings?: string[]; note?: string | null; sourceLeague?: string | null; }
+export interface H2HFormTeamDto { teamId: string; teamName: string; last5: { streak: string; recent?: string[]; winRate: number; pointsPerGame: number; bttsPercent: number; over25Percent: number; fallback?: boolean; ppgSeries?: number[]; }; matches: { year: number | null; date: string | null; homeTeam: string | null; awayTeam: string | null; result: string; }[]; seasonResolved?: string | null; matchesAvailable?: string | null; warnings?: string[]; note?: string | null; sourceLeague?: string | null; }
 
 @Injectable({ providedIn: 'root' })
 export class MatchService {

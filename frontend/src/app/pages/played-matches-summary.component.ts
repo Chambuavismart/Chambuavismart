@@ -7,7 +7,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil } from 'rxjs';
 import { LeagueContextService } from '../services/league-context.service';
-import { PoissonService, Predictions } from '../services/poisson.service';
+import { Predictions } from '../services/poisson.service';
+import { MatchAnalysisService, MatchAnalysisRequest, MatchAnalysisResponse } from '../services/match-analysis.service';
 
 @Component({
   selector: 'app-played-matches-summary',
@@ -505,10 +506,14 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   homeIsFallback: boolean = false; awayIsFallback: boolean = false;
   homeSourceLeague: string | null = null; awaySourceLeague: string | null = null;
 
-  // Predictions via Poisson
+  // PDF context for filename
+  sourceContext: string = 'analysis';
+  fixtureDateParam: string | null = null;
+
+  // Predictions via backend MatchAnalysis (mapped to local shape)
   predictions: Predictions | null = null;
-  private poisson = inject(PoissonService);
-    private leagueContext = inject(LeagueContextService);
+  private matchAnalysis = inject(MatchAnalysisService);
+  private leagueContext = inject(LeagueContextService);
 
   // Expose Math if needed in template calculations
   Math = Math;
@@ -545,21 +550,46 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   }
 
   analyseFixture(): void {
-    if (!(this.h2hHome && this.h2hAway)) {
+    if (!(this.h2hHome && this.h2hAway) || !this.leagueId) {
       this.predictions = null;
       return;
     }
-    const teamA = { id: this.h2hHomeId, name: this.h2hHome, matchesInvolved: this.homeCount || (this.homeBreakdown as any)?.total || 1 };
-    const teamB = { id: this.h2hAwayId, name: this.h2hAway, matchesInvolved: this.awayCount || (this.awayBreakdown as any)?.total || 1 };
-    const h2hData = (this.h2hMatchesAll && this.h2hMatchesAll.length > 0) ? this.h2hMatchesAll : this.h2hMatches;
-    const preds = this.poisson.calculatePredictions(teamA as any, teamB as any, h2hData as any[], {});
-    this.predictions = preds;
-    if ((preds as any)?.usedFallback) {
-      const msg = 'Limited H2H data; using league averages for Poisson model.';
-      console.warn('[PlayedMatches][AnalyseFixture]', msg, { h2hCount: h2hData?.length ?? 0, home: this.h2hHome, away: this.h2hAway });
-      this.showDataHint = true;
-      try { (window as any).alert?.(msg); } catch {}
-    }
+    const req: MatchAnalysisRequest = {
+      leagueId: this.leagueId,
+      // seasonId omitted to allow backend to use current season
+      homeTeamId: this.h2hHomeId ?? undefined,
+      awayTeamId: this.h2hAwayId ?? undefined,
+      homeTeamName: this.h2hHome,
+      awayTeamName: this.h2hAway,
+      analysisType: 'fixtures'
+    } as any;
+    this.matchAnalysis.analyze(req).pipe(takeUntil(this.destroy$)).subscribe({
+      next: (resp: MatchAnalysisResponse) => {
+        // Map backend response to local predictions shape expected by UI
+        const p: Predictions = {
+          teamAWin: resp?.winProbabilities?.homeWin ?? 0,
+          draw: resp?.winProbabilities?.draw ?? 0,
+          teamBWin: resp?.winProbabilities?.awayWin ?? 0,
+          btts: resp?.bttsProbability ?? 0,
+          over25: resp?.over25Probability ?? 0,
+          // Derive lambda from xG for display; clamp to 2 decimals
+          lambdaA: +(resp?.expectedGoals?.home ?? 0).toFixed(2) as any,
+          lambdaB: +(resp?.expectedGoals?.away ?? 0).toFixed(2) as any,
+          // We don't get over15/over35 from backend Poisson; approximate for UI continuity
+          over15: Math.min(100, Math.max(0, (resp?.over25Probability ?? 0) + 18)),
+          over35: Math.min(100, Math.max(0, (resp?.over25Probability ?? 0) - 18)),
+          isLimitedData: false,
+          correctScores: []
+        } as any;
+        this.predictions = p;
+        this.showDataHint = false;
+      },
+      error: (err) => {
+        console.error('[PlayedMatches][AnalyseFixture] Backend analysis failed', err);
+        this.predictions = null;
+        this.showDataHint = true;
+      }
+    });
   }
 
   private destroy$ = new Subject<void>();
@@ -683,6 +713,11 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         }
         const home = params?.['h2hHome'];
         const away = params?.['h2hAway'];
+        // Optional context for PDF naming
+        const from = params?.['from'] || params?.['source'];
+        const fdate = params?.['fixtureDate'] || params?.['date'] || params?.['kickoff'];
+        if (typeof from === 'string' && from) this.sourceContext = from;
+        if (typeof fdate === 'string' && fdate) this.fixtureDateParam = fdate;
         if (home && away && typeof home === 'string' && typeof away === 'string') {
           // Buffer params and process after flags are ready to avoid running before dataset/flags load
           this._pendingHome = home;
@@ -950,24 +985,28 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
             next: list => {
               const safe: any[] = Array.isArray(list) ? list : [];
               const mapTeam = (team: any, label: string): FormSummaryDto => {
-                const seqStr: string = team?.last5?.streak || '0';
-                const recent: string[] = [];
-                const matches = team?.matches || [];
-                for (let i = 0; i < Math.min(5, matches.length); i++) {
-                  const m = matches[i];
-                  const rs = (m?.result || '').split('-');
-                  if (rs.length === 2) {
-                    const hg = parseInt(rs[0], 10); const ag = parseInt(rs[1], 10);
-                    if (!Number.isNaN(hg) && !Number.isNaN(ag)) {
-                      const my = (m?.homeTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ((m?.awayTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : hg);
-                      const opp = (m?.homeTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : ((m?.awayTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ag);
-                      recent.push(my > opp ? 'W' : (my === opp ? 'D' : 'L'));
+                const backendRecent: string[] | undefined = team?.last5?.recent;
+                let recent: string[] = Array.isArray(backendRecent) ? backendRecent : [];
+                if (!Array.isArray(backendRecent) || backendRecent.length === 0) {
+                  // Fallback: derive from matches list if backend didn't provide recent array
+                  const matches = team?.matches || [];
+                  for (let i = 0; i < Math.min(5, matches.length); i++) {
+                    const m = matches[i];
+                    const rs = (m?.result || '').split('-');
+                    if (rs.length === 2) {
+                      const hg = parseInt(rs[0], 10); const ag = parseInt(rs[1], 10);
+                      if (!Number.isNaN(hg) && !Number.isNaN(ag)) {
+                        const my = (m?.homeTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ((m?.awayTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : hg);
+                        const opp = (m?.homeTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : ((m?.awayTeam || '').localeCompare(label, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ag);
+                        recent.push(my > opp ? 'W' : (my === opp ? 'D' : 'L'));
+                      }
                     }
                   }
                 }
                 const winRate = team?.last5?.winRate ?? 0;
+                const streak: string = team?.last5?.streak || this.computeCompactStreak(recent);
                 const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
-                return { recentResults: recent, currentStreak: this.computeCompactStreak(recent), winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
+                return { recentResults: recent, currentStreak: streak, winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
               };
               const hEntry = safe.find(t => (t?.teamName || '').toLowerCase() === homeName.toLowerCase()) || safe[0] || null;
               const aEntry = safe.find(t => (t?.teamName || '').toLowerCase() === awayName.toLowerCase()) || safe[1] || null;
@@ -1017,26 +1056,29 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
               // After IDs are confirmed via Last-5 response, fetch oriented H2H with IDs
               this.fetchOrientedH2H(homeName, awayName);
               const toSummary = (team: any, teamLabel: string): FormSummaryDto => {
-                const seqStr: string = team?.last5?.streak || '0';
-                const recent: string[] = [];
-                const matches = team?.matches || [];
-                for (let i = 0; i < Math.min(5, matches.length); i++) {
-                  const m = matches[i];
-                  const rs = (m?.result || '').split('-');
-                  if (rs.length === 2) {
-                    const hg = parseInt(rs[0], 10); const ag = parseInt(rs[1], 10);
-                    if (!Number.isNaN(hg) && !Number.isNaN(ag)) {
-                      const my = (m?.homeTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0
-                        ? hg : ((m?.awayTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : hg);
-                      const opp = (m?.homeTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0
-                        ? ag : ((m?.awayTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ag);
-                      if (my > opp) recent.push('W'); else if (my === opp) recent.push('D'); else recent.push('L');
+                const backendRecent: string[] | undefined = team?.last5?.recent;
+                let recent: string[] = Array.isArray(backendRecent) ? backendRecent : [];
+                if (!Array.isArray(backendRecent) || backendRecent.length === 0) {
+                  const matches = team?.matches || [];
+                  for (let i = 0; i < Math.min(5, matches.length); i++) {
+                    const m = matches[i];
+                    const rs = (m?.result || '').split('-');
+                    if (rs.length === 2) {
+                      const hg = parseInt(rs[0], 10); const ag = parseInt(rs[1], 10);
+                      if (!Number.isNaN(hg) && !Number.isNaN(ag)) {
+                        const my = (m?.homeTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0
+                          ? hg : ((m?.awayTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? ag : hg);
+                        const opp = (m?.homeTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0
+                          ? ag : ((m?.awayTeam || '').localeCompare(teamLabel, undefined, { sensitivity: 'accent', usage: 'search' }) === 0 ? hg : ag);
+                        if (my > opp) recent.push('W'); else if (my === opp) recent.push('D'); else recent.push('L');
+                      }
                     }
                   }
                 }
                 const winRate = team?.last5?.winRate ?? 0;
+                const streak: string = team?.last5?.streak || this.computeCompactStreak(recent);
                 const points = recent.reduce((acc, r) => acc + (r === 'W' ? 3 : r === 'D' ? 1 : 0), 0);
-                return { recentResults: recent, currentStreak: this.computeCompactStreak(recent), winRate: winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
+                return { recentResults: recent, currentStreak: streak, winRate: winRate, pointsEarned: points, ppgSeries: team?.last5?.ppgSeries } as any;
               };
               const homeEntry = safe.find(t => Number(t?.teamId) === homeId) || safe.find(t => t?.teamName?.toLowerCase?.() === homeName.toLowerCase()) || null;
               const awayEntry = safe.find(t => Number(t?.teamId) === awayId) || safe.find(t => t?.teamName?.toLowerCase?.() === awayName.toLowerCase()) || null;
@@ -1270,6 +1312,9 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       totalMatches: this.total,
       teamA,
       teamB,
+      // Include optional context for backend PDF filename logic
+      source: this.sourceContext || 'analysis',
+      fixtureDate: this.fixtureDateParam || null,
       h2h: {
         insights,
         goalDifferential,
@@ -1299,17 +1344,49 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     try { console.log('[Download] Sending payload:', payload); } catch {}
     this.matchService.generateAnalysisPdf(payload).subscribe({
       next: (resp: any) => {
-        const blob = resp?.body instanceof Blob ? resp.body as Blob : new Blob([resp], { type: 'application/pdf' });
+        const blob = resp?.body instanceof Blob ? (resp.body as Blob) : new Blob([resp], { type: 'application/pdf' });
         const cd = resp?.headers?.get ? resp.headers.get('Content-Disposition') : null;
-        let filename = 'analysis.pdf';
-        if (cd && /filename=([^;]+)/i.test(cd)) {
+        let filename: string | null = null;
+        // 1) Try to parse from Content-Disposition (server-provided)
+        if (cd && /filename\*=UTF-8''([^;]+)/i.test(cd)) {
+          try {
+            const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+            if (m && m[1]) filename = decodeURIComponent(m[1].trim());
+          } catch {}
+        }
+        if (!filename && cd && /filename=([^;]+)/i.test(cd)) {
           const m = cd.match(/filename=([^;]+)/i);
           if (m && m[1]) filename = m[1].replace(/"/g, '').trim();
+        }
+        // 2) Client-side fallback: build descriptive filename if header missing or generic
+        const looksGeneric = (s: string | null) => !s || /^analysis(\.|$)/i.test(s) || /analysis\s*result/i.test(s);
+        if (looksGeneric(filename)) {
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+          const now = new Date();
+          const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
+          const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())}`;
+          const clean = (s: string) => (s || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/[\n\r]+/g, ' ').trim().replace(/\s+/g, ' ');
+          const home = clean(this.h2hHome || 'Team A');
+          const away = clean(this.h2hAway || 'Team B');
+          let base = `${home} VS ${away} - Analysis ${stamp}`;
+          // Append fixture date if initiated from Fixtures or Home Today's fixtures and we have a date
+          try {
+            const src = (this.sourceContext || '').toLowerCase();
+            const fdate = this.fixtureDateParam;
+            if (fdate && (src === 'fixtures' || src === 'home' || src === 'home-today' || src === 'today')) {
+              const d = new Date(fdate);
+              if (!isNaN(d.getTime())) {
+                const dStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                base += ` - Fixture ${dStr}`;
+              }
+            }
+          } catch {}
+          filename = base.replace(/\u00A0/g, ' ').trim().replace(/\s+/g, ' ').replace(/\s/g, '_') + '.pdf';
         }
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
+        a.download = filename || 'analysis.pdf';
         document.body.appendChild(a);
         a.click();
         setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 0);

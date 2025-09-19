@@ -91,7 +91,8 @@ public class QuickInsightsService {
                         league.getName(),
                         homeName,
                         awayName,
-                        false
+                        false,
+                        "match"
                 );
 
                 List<String> reasons = computeTriggers(mar);
@@ -127,7 +128,7 @@ public class QuickInsightsService {
                     String homeName = safe(f.getHomeTeam());
                     String awayName = safe(f.getAwayTeam());
                     Long seasonId = seasonService.findCurrentSeason(leagueId).map(com.chambua.vismart.model.Season::getId).orElse(null);
-                    MatchAnalysisResponse mar = matchAnalysisService.analyzeDeterministic(leagueId, homeId, awayId, seasonId, league.getName(), homeName, awayName, false);
+                    MatchAnalysisResponse mar = matchAnalysisService.analyzeDeterministic(leagueId, homeId, awayId, seasonId, league.getName(), homeName, awayName, false, "match");
                     if (mar == null) continue;
                     int best = 0;
                     String trigger = null;

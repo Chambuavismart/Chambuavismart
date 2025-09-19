@@ -107,14 +107,20 @@ public class MatchControllerLast5NoDbTest {
         when(matchRepository.findRecentPlayedByTeamIdAndSeason(eq(homeId), eq(seasonId))).thenReturn(List.of());
         when(matchRepository.findRecentPlayedByTeamIdAndSeason(eq(awayId), eq(seasonId))).thenReturn(List.of());
 
-        // Global recent matches (simulate 3 historical matches each)
-        when(matchRepository.findRecentPlayedByTeamId(eq(homeId))).thenReturn(fakeMatches(homeId, "Ath Bilbao", 3));
-        when(matchRepository.findRecentPlayedByTeamId(eq(awayId))).thenReturn(fakeMatches(awayId, "Arsenal", 3));
+        // Domestic recent matches (simulate 3 historical matches each in domestic leagues)
+        // Stub team projections with domestic league ids and names
+        com.chambua.vismart.repository.TeamRepository.TeamProjection projHome = Mockito.mock(com.chambua.vismart.repository.TeamRepository.TeamProjection.class);
+        when(projHome.getLeagueId()).thenReturn(1L);
+        when(projHome.getLeagueName()).thenReturn("La Liga");
+        when(teamRepository.findTeamProjectionById(homeId)).thenReturn(projHome);
 
-        // Projection fallback (only used for away where sourceLeague not pre-set)
-        com.chambua.vismart.repository.TeamRepository.TeamProjection proj = Mockito.mock(com.chambua.vismart.repository.TeamRepository.TeamProjection.class);
-        when(proj.getLeagueName()).thenReturn("Premier League");
-        when(teamRepository.findTeamProjectionById(awayId)).thenReturn(proj);
+        com.chambua.vismart.repository.TeamRepository.TeamProjection projAway = Mockito.mock(com.chambua.vismart.repository.TeamRepository.TeamProjection.class);
+        when(projAway.getLeagueId()).thenReturn(2L);
+        when(projAway.getLeagueName()).thenReturn("Premier League");
+        when(teamRepository.findTeamProjectionById(awayId)).thenReturn(projAway);
+
+        when(matchRepository.findRecentPlayedByTeamIdAndLeague(eq(homeId), eq(1L))).thenReturn(fakeMatches(homeId, "Ath Bilbao", 3));
+        when(matchRepository.findRecentPlayedByTeamIdAndLeague(eq(awayId), eq(2L))).thenReturn(fakeMatches(awayId, "Arsenal", 3));
 
         // Execute
         List<MatchController.H2HFormTeamResponse> resp = controller.getH2HForms(homeId, awayId, seasonId, null, null, null, null, false, 5);

@@ -19,6 +19,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
         <a routerLink="/data-management" routerLinkActive="active">Data Management</a>
         <a routerLink="/team-search" routerLinkActive="active">Team Search</a>
         <a routerLink="/played-matches-summary" routerLinkActive="active">Fixtures Analysis</a>
+        <a routerLink="/analysis-pdfs" routerLinkActive="active">Fixture Analysis History</a>
         <a routerLink="/admin" routerLinkActive="active">Admin</a>
       </div>
       <div class="copyright">ChambuaViSmart © {{ year }}</div>

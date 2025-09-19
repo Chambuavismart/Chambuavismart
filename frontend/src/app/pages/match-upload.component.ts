@@ -372,7 +372,7 @@ export class MatchUploadComponent {
   seasonId: number | null = null;
 
   // Allowed seasons for new league uploads (dropdown)
-  allowedSeasons: string[] = ['2024/2025','2025/2026','2026/2027'];
+  allowedSeasons: string[] = Array.from({ length: 11 }, (_, i) => `${2015 + i}/${2016 + i}`);
 
   get requiresExistingLeague(): boolean {
     return this.uploadType === 'FULL_REPLACE' || this.uploadType === 'INCREMENTAL';
@@ -397,16 +397,13 @@ export class MatchUploadComponent {
     this.http.get<any>('/api/matches/upload/api/options/contexts').subscribe({
       next: (res) => {
         try {
-          let countries = Array.isArray(res?.countries) ? (res.countries as string[]) : (COUNTRIES as string[]);
+          const backendCountries = Array.isArray(res?.countries) ? (res.countries as string[]) : [];
+          const countries = [...backendCountries, ...(COUNTRIES as string[])];
           const compGroups = res?.competitions || {};
           const flatComps: string[] = [];
           for (const k of Object.keys(compGroups)) {
             const arr = compGroups[k];
             if (Array.isArray(arr)) flatComps.push(...arr);
-          }
-          // Fallback if backend returned an empty countries array (e.g., DB not seeded)
-          if (!countries || countries.length === 0) {
-            countries = COUNTRIES as string[];
           }
           // Assign lists
           this.competitions = flatComps;
@@ -415,6 +412,7 @@ export class MatchUploadComponent {
           const seen = new Set<string>();
           const deduped = merged.filter(v => {
             const key = (v || '').trim();
+            if (!key) return false;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;

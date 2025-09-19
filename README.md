@@ -41,6 +41,22 @@ Verification checklist
 - Dev server runs: npm start and routes render at http://localhost:4200
 - Proxy works: visiting http://localhost:4200 then calling /api/health returns backend health JSON
 
+Fixtures Analysis and Match Analysis harmonization (2025-09-19)
+- Both frontend tabs now call the backend endpoint POST /api/match-analysis/analyze.
+- Fixtures Analysis rewired: client-side PoissonService is no longer used for predictions; it calls MatchAnalysisService via match-analysis.service.ts.
+- analysisType: Request adds analysisType to differentiate logic:
+  - "fixtures": simpler Poisson-style using overall form and shallow H2H averages (no split-weight weighting), scaled with higher draw share. No persistent caching (avoids cross-mixing).
+  - "match": weighted PPG (home/away) and blended form/H2H metrics with split-based BTTS/Over; persisted caching enabled (modelVariant=v2).
+- Request supports either team IDs or names; seasonId is optional (backend falls back to current season).
+- Response DTO remains unchanged (MatchAnalysisResponse with winProbabilities, bttsProbability, over25Probability, expectedGoals, advice, etc.).
+- Frontend caching: match-analysis.service.ts caches identical requests in-memory via shareReplay for responsiveness (cache key includes analysisType).
+- Backend caching: persisted cache entries carry modelVariant="v2" inside JSON; fixtures-mode responses are not persisted.
+- Performance: backend analysis target <20ms; Fixtures Analysis end-to-end target <500ms with caching.
+- Monitoring: logs include analysisType, leagueId, team names, and total ms at INFO level.
+
+Rollback plan
+- To temporarily revert Fixtures Analysis to local computation, re-enable PoissonService.calculatePredictions usage inside played-matches-summary.component.ts (previous implementation preserved in git history).
+
 IntelliJ IDEA tip (if Spring Boot run config error)
 - Install/enable Spring + Spring Boot plugins and restart.
 - Reimport Maven project.

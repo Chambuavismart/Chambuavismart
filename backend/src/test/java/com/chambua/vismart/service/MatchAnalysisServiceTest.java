@@ -78,51 +78,65 @@ class MatchAnalysisServiceTest {
     }
 
     @Test
-    void computesBttsAndOver25FromFormGuideAverages() {
+    void computesBttsAndOver25UsingPoissonFromXg() {
         Long leagueId = 1L; Long homeTeamId = 10L; Long awayTeamId = 20L;
-        // Mock season resolution
-        Season season = new Season();
-        season.setId(100L);
+        Season season = new Season(); season.setId(100L);
         given(seasonService.findCurrentSeason(leagueId)).willReturn(Optional.of(season));
-        // Mock form guide rows
-        FormGuideRowDTO teamA = row(10L, "Team A", 6, 40, 70);
-        FormGuideRowDTO teamB = row(20L, "Team B", 6, 60, 50);
+        // Configure weighted splits to yield xG_home=1.50 and xG_away=1.13
+        FormGuideRowDTO home = row(10L, "Team A", 6, 0, 0);
+        FormGuideRowDTO away = row(20L, "Team B", 6, 0, 0);
+        home.setWeightedHomeMatches(5);
+        away.setWeightedAwayMatches(5);
+        home.setWeightedHomeGoalsFor(1.6); // with away GA 1.4 -> xG_home = (1.6+1.4)/2 = 1.5
+        away.setWeightedAwayGoalsAgainst(1.4);
+        away.setWeightedAwayGoalsFor(1.0); // with home GA 1.26 -> xG_away = (1.0+1.26)/2 = 1.13
+        home.setWeightedHomeGoalsAgainst(1.26);
         given(formGuideService.compute(eq(leagueId), eq(100L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
-                .willReturn(Arrays.asList(teamA, teamB));
+                .willReturn(Arrays.asList(home, away));
 
         MatchAnalysisResponse resp = service.analyzeDeterministic(leagueId, homeTeamId, awayTeamId,
                 "Premier League", "Team A", "Team B", true);
 
-        assertEquals(50, resp.getBttsProbability(), "BTTS% should be average of 40 and 60 -> 50");
-        assertEquals(60, resp.getOver25Probability(), "Over2.5% should be average of 70 and 50 -> 60");
+        assertEquals(46, resp.getWinProbabilities().getHomeWin(), 1, "Home win should be ~46% by Poisson");
+        assertEquals(26, resp.getWinProbabilities().getDraw(), 1, "Draw should be ~26% by Poisson");
+        assertEquals(29, resp.getWinProbabilities().getAwayWin(), 1, "Away win should be ~29% by Poisson");
+        assertEquals(53, resp.getBttsProbability(), 1, "BTTS should be ~53% by Poisson");
+        assertEquals(49, resp.getOver25Probability(), 1, "Over 2.5 should be ~49% by Poisson");
     }
 
     @Test
-    void defaultsTo50WhenInsufficientMatches() {
+    void defaultNeutralXgLeadsToMidrangeBTTSAndOver25() {
         Long leagueId = 2L; Long homeTeamId = 11L; Long awayTeamId = 22L;
         Season season = new Season(); season.setId(200L);
         given(seasonService.findCurrentSeason(leagueId)).willReturn(Optional.of(season));
-        // One team has only 1 match in the window
-        FormGuideRowDTO teamA = row(11L, "Alpha", 1, 90, 90);
-        FormGuideRowDTO teamB = row(22L, "Beta", 6, 10, 10);
+        // No weighted splits provided -> xG defaults to 1.5 for both teams per service logic
+        FormGuideRowDTO teamA = row(11L, "Alpha", 1, 0, 0);
+        FormGuideRowDTO teamB = row(22L, "Beta", 6, 0, 0);
         given(formGuideService.compute(eq(leagueId), eq(200L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
                 .willReturn(Arrays.asList(teamA, teamB));
 
         MatchAnalysisResponse resp = service.analyzeDeterministic(leagueId, homeTeamId, awayTeamId,
                 "League X", "Alpha", "Beta", true);
 
-        assertEquals(50, resp.getBttsProbability(), "BTTS% should default to 50 when any team mp < 2");
-        assertEquals(50, resp.getOver25Probability(), "Over2.5% should default to 50 when any team mp < 2");
+        // For λ_h=1.5, λ_a=1.5, BTTS is about 60% and Over2.5 about 57%
+        assertTrue(resp.getBttsProbability() >= 58 && resp.getBttsProbability() <= 62, "BTTS should be around 60% for neutral xG");
+        assertTrue(resp.getOver25Probability() >= 55 && resp.getOver25Probability() <= 60, "Over2.5 should be around 57% for neutral xG");
     }
 
     @Test
-    void ppgDrivesWinLossSkew_case1_strongHomeWeakerAway() {
+    void xgDrivesWinLossSkew_strongHomeWeakerAway() {
         Long leagueId = 3L; Long homeTeamId = 100L; Long awayTeamId = 200L;
         Season season = new Season(); season.setId(300L);
         given(seasonService.findCurrentSeason(leagueId)).willReturn(Optional.of(season));
-        // Home PPG = 2.5, Away PPG = 0.5
-        FormGuideRowDTO home = rowPpg(100L, "Home", 6, 2.5, 50, 50);
-        FormGuideRowDTO away = rowPpg(200L, "Away", 6, 0.5, 50, 50);
+        // Configure xG: home ~2.2, away ~0.8
+        FormGuideRowDTO home = row(100L, "Home", 6, 0, 0);
+        FormGuideRowDTO away = row(200L, "Away", 6, 0, 0);
+        home.setWeightedHomeMatches(5);
+        away.setWeightedAwayMatches(5);
+        home.setWeightedHomeGoalsFor(2.4); // with away GA 2.0 -> xG_home = 2.2
+        away.setWeightedAwayGoalsAgainst(2.0);
+        away.setWeightedAwayGoalsFor(0.6); // with home GA 1.0 -> xG_away = 0.8
+        home.setWeightedHomeGoalsAgainst(1.0);
         given(formGuideService.compute(eq(leagueId), eq(300L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
                 .willReturn(Arrays.asList(home, away));
 
@@ -132,18 +146,23 @@ class MatchAnalysisServiceTest {
         int h = resp.getWinProbabilities().getHomeWin();
         int d = resp.getWinProbabilities().getDraw();
         int a = resp.getWinProbabilities().getAwayWin();
-        assertTrue(h > a, "Home should be greater than away when PPG much higher");
+        assertTrue(h > a, "Home should be greater than away when xG much higher");
         assertTrue(h >= 60 && a <= 15, "Expected strong skew (home >= 60, away <= 15)");
         assertEquals(100, h + d + a, "Probabilities should sum to 100");
     }
 
     @Test
-    void ppgEqual_case2_balancedWithHigherDrawShare() {
+    void xgEqual_balancedWithRealisticDrawShare() {
         Long leagueId = 4L; Long homeTeamId = 101L; Long awayTeamId = 201L;
         Season season = new Season(); season.setId(400L);
         given(seasonService.findCurrentSeason(leagueId)).willReturn(Optional.of(season));
-        FormGuideRowDTO home = rowPpg(101L, "Home", 6, 1.5, 50, 50);
-        FormGuideRowDTO away = rowPpg(201L, "Away", 6, 1.5, 50, 50);
+        FormGuideRowDTO home = row(101L, "Home", 6, 0, 0);
+        FormGuideRowDTO away = row(201L, "Away", 6, 0, 0);
+        home.setWeightedHomeMatches(5);
+        away.setWeightedAwayMatches(5);
+        // Set xG ~1.2 for both
+        home.setWeightedHomeGoalsFor(1.3); away.setWeightedAwayGoalsAgainst(1.1);
+        away.setWeightedAwayGoalsFor(1.1); home.setWeightedHomeGoalsAgainst(1.3);
         given(formGuideService.compute(eq(leagueId), eq(400L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
                 .willReturn(Arrays.asList(home, away));
 
@@ -153,19 +172,19 @@ class MatchAnalysisServiceTest {
         int h = resp.getWinProbabilities().getHomeWin();
         int d = resp.getWinProbabilities().getDraw();
         int a = resp.getWinProbabilities().getAwayWin();
-        assertTrue(Math.abs(h - a) <= 1, "Home and away should be approximately equal");
-        assertTrue(d >= 20 && d <= 30, "Draw should occupy the buffer around ~25%");
+        assertTrue(Math.abs(h - a) <= 2, "Home and away should be approximately equal");
+        assertTrue(d >= 23 && d <= 30, "Draw should be in the mid‑20s for moderate xG");
         assertEquals(100, h + d + a, "Probabilities should sum to 100");
     }
 
     @Test
-    void insufficientMatches_case3_fallbackDefault404040() {
+    void neutralXgProducesBalancedWdl() {
         Long leagueId = 5L; Long homeTeamId = 102L; Long awayTeamId = 202L;
         Season season = new Season(); season.setId(500L);
         given(seasonService.findCurrentSeason(leagueId)).willReturn(Optional.of(season));
-        // Home has <2 matches
-        FormGuideRowDTO home = rowPpg(102L, "Home", 1, 2.5, 50, 50);
-        FormGuideRowDTO away = rowPpg(202L, "Away", 6, 2.5, 50, 50);
+        // No informative splits: rely on defaults xG=1.5 each
+        FormGuideRowDTO home = row(102L, "Home", 1, 0, 0);
+        FormGuideRowDTO away = row(202L, "Away", 6, 0, 0);
         given(formGuideService.compute(eq(leagueId), eq(500L), anyInt(), eq(FormGuideService.Scope.OVERALL)))
                 .willReturn(Arrays.asList(home, away));
 
@@ -175,10 +194,9 @@ class MatchAnalysisServiceTest {
         int h = resp.getWinProbabilities().getHomeWin();
         int d = resp.getWinProbabilities().getDraw();
         int a = resp.getWinProbabilities().getAwayWin();
-        // With equal PPG and insufficient home matches, current logic yields a 75% band split (38/24/38)
-        assertEquals(38, h);
-        assertEquals(24, d);
-        assertEquals(38, a);
+        assertTrue(Math.abs(h - a) <= 2, "Home and away should be approximately equal at neutral xG");
+        assertTrue(d >= 23 && d <= 30, "Draw should be in the mid‑20s at neutral xG");
+        assertEquals(100, h + d + a, "Probabilities should sum to 100");
     }
 
     @Test

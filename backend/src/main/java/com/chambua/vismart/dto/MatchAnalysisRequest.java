@@ -2,13 +2,16 @@ package com.chambua.vismart.dto;
 
 public class MatchAnalysisRequest {
     private Long leagueId;
-    private Long seasonId; // required: analyze for selected season only
+    private Long seasonId; // optional: backend falls back to current season if omitted
     private Long homeTeamId;
     private Long awayTeamId;
 
     // Optional: allow name-based resolution for convenience when IDs are unknown on client
     private String homeTeamName;
     private String awayTeamName;
+
+    // Differentiates backend logic between tabs: "fixtures" or "match" (default: "match")
+    private String analysisType;
 
     // Optional: force refresh (recompute and overwrite cache)
     private boolean refresh;
@@ -30,6 +33,9 @@ public class MatchAnalysisRequest {
 
     public String getAwayTeamName() { return awayTeamName; }
     public void setAwayTeamName(String awayTeamName) { this.awayTeamName = awayTeamName; }
+
+    public String getAnalysisType() { return analysisType; }
+    public void setAnalysisType(String analysisType) { this.analysisType = analysisType; }
 
     public boolean isRefresh() { return refresh; }
     public void setRefresh(boolean refresh) { this.refresh = refresh; }

@@ -8,6 +8,10 @@ public class AnalysisRequest {
     private Team teamB;
     private H2H h2h;
     private Predictions predictions;
+    // Optional: context about where the analysis was initiated from (e.g., "fixtures", "home-today", "analysis")
+    private String source;
+    // Optional: the fixture date (kickoff date) when initiated from fixtures or today's fixtures. Accept ISO date or date-time string.
+    private String fixtureDate;
 
     public long getTotalMatches() { return totalMatches; }
     public void setTotalMatches(long totalMatches) { this.totalMatches = totalMatches; }
@@ -19,6 +23,10 @@ public class AnalysisRequest {
     public void setH2h(H2H h2h) { this.h2h = h2h; }
     public Predictions getPredictions() { return predictions; }
     public void setPredictions(Predictions predictions) { this.predictions = predictions; }
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
+    public String getFixtureDate() { return fixtureDate; }
+    public void setFixtureDate(String fixtureDate) { this.fixtureDate = fixtureDate; }
 
     public static class Team {
         private String name;
@@ -53,6 +61,8 @@ public class AnalysisRequest {
         private double averageGD;
         private Last5 last5TeamA;
         private Last5 last5TeamB;
+        private String streakInsightA; // optional: historical streak insight for Team A (text summary)
+        private String streakInsightB; // optional: historical streak insight for Team B (text summary)
         private List<Row> history;
         private List<Row> allOrientations;
         public String getInsights() { return insights; }
@@ -65,6 +75,10 @@ public class AnalysisRequest {
         public void setLast5TeamA(Last5 last5TeamA) { this.last5TeamA = last5TeamA; }
         public Last5 getLast5TeamB() { return last5TeamB; }
         public void setLast5TeamB(Last5 last5TeamB) { this.last5TeamB = last5TeamB; }
+        public String getStreakInsightA() { return streakInsightA; }
+        public void setStreakInsightA(String streakInsightA) { this.streakInsightA = streakInsightA; }
+        public String getStreakInsightB() { return streakInsightB; }
+        public void setStreakInsightB(String streakInsightB) { this.streakInsightB = streakInsightB; }
         public List<Row> getHistory() { return history; }
         public void setHistory(List<Row> history) { this.history = history; }
         public List<Row> getAllOrientations() { return allOrientations; }

@@ -9,6 +9,7 @@ import { Season, SeasonService } from '../services/season.service';
 import { MatchService } from '../services/match.service';
 import { TeamService } from '../services/team.service';
 import { of, forkJoin } from 'rxjs';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { map, catchError } from 'rxjs/operators';
 
 @Component({
@@ -258,6 +259,91 @@ import { map, catchError } from 'rxjs/operators';
           </div>
 
           <div class="advice">{{ analysis?.advice || '—' }}</div>
+
+          <!-- Streak Insight Summary (historical pattern outcomes) -->
+          <div class="card" *ngIf="analysis?.homeStreakInsight || analysis?.awayStreakInsight" style="margin-top:12px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;">
+              <h3 style="font-weight:800; margin:0;">Streak Insight Summary</h3>
+              <div class="muted">Across all competitions and seasons</div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-top:8px;">
+
+              <!-- HOME TEAM INSIGHT -->
+              <div *ngIf="analysis?.homeStreakInsight" style="border:1px solid #1f2937; border-radius:8px; padding:8px;">
+                <div style="font-weight:700; margin-bottom:6px; color:#9fb3cd;">{{ analysis?.homeTeam }} current streak: {{ analysis?.homeStreakInsight?.pattern || '0' }}</div>
+                <!-- Data table -->
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                  <thead>
+                    <tr>
+                      <th style="text-align:left; padding:6px; border-bottom:1px solid #1f2937; color:#9fb3cd;">Metric</th>
+                      <th style="text-align:right; padding:6px; border-bottom:1px solid #1f2937; color:#9fb3cd;">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding:6px;">Instances</td>
+                      <td style="padding:6px; text-align:right;">{{ analysis?.homeStreakInsight?.instances || 0 }}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px;">Next Match: Win / Draw / Loss</td>
+                      <td style="padding:6px; text-align:right;">
+                        {{ safePct(analysis?.homeStreakInsight?.nextWinPct) }}% / {{ safePct(analysis?.homeStreakInsight?.nextDrawPct) }}% / {{ safePct(analysis?.homeStreakInsight?.nextLossPct) }}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px;">Over 3.5 / Over 2.5 / Over 1.5</td>
+                      <td style="padding:6px; text-align:right;">
+                        {{ safePct(analysis?.homeStreakInsight?.over35Pct) }}% / {{ safePct(analysis?.homeStreakInsight?.over25Pct) }}% / {{ safePct(analysis?.homeStreakInsight?.over15Pct) }}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px;">BTTS</td>
+                      <td style="padding:6px; text-align:right;">{{ safePct(analysis?.homeStreakInsight?.bttsPct) }}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <!-- Narration below table with colored highlights -->
+                <div style="margin-top:6px; line-height:1.4;" [innerHTML]="renderStreakNarration(analysis?.homeStreakInsight, analysis?.homeTeam)"></div>
+              </div>
+
+              <!-- AWAY TEAM INSIGHT -->
+              <div *ngIf="analysis?.awayStreakInsight" style="border:1px solid #1f2937; border-radius:8px; padding:8px;">
+                <div style="font-weight:700; margin-bottom:6px; color:#9fb3cd;">{{ analysis?.awayTeam }} current streak: {{ analysis?.awayStreakInsight?.pattern || '0' }}</div>
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                  <thead>
+                    <tr>
+                      <th style="text-align:left; padding:6px; border-bottom:1px solid #1f2937; color:#9fb3cd;">Metric</th>
+                      <th style="text-align:right; padding:6px; border-bottom:1px solid #1f2937; color:#9fb3cd;">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding:6px;">Instances</td>
+                      <td style="padding:6px; text-align:right;">{{ analysis?.awayStreakInsight?.instances || 0 }}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px;">Next Match: Win / Draw / Loss</td>
+                      <td style="padding:6px; text-align:right;">
+                        {{ safePct(analysis?.awayStreakInsight?.nextWinPct) }}% / {{ safePct(analysis?.awayStreakInsight?.nextDrawPct) }}% / {{ safePct(analysis?.awayStreakInsight?.nextLossPct) }}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px;">Over 3.5 / Over 2.5 / Over 1.5</td>
+                      <td style="padding:6px; text-align:right;">
+                        {{ safePct(analysis?.awayStreakInsight?.over35Pct) }}% / {{ safePct(analysis?.awayStreakInsight?.over25Pct) }}% / {{ safePct(analysis?.awayStreakInsight?.over15Pct) }}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px;">BTTS</td>
+                      <td style="padding:6px; text-align:right;">{{ safePct(analysis?.awayStreakInsight?.bttsPct) }}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style="margin-top:6px; line-height:1.4;" [innerHTML]="renderStreakNarration(analysis?.awayStreakInsight, analysis?.awayTeam)"></div>
+              </div>
+
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -273,6 +359,7 @@ export class MatchAnalysisComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private matchApi = inject(MatchService);
   private teamApi = inject(TeamService);
+  private sanitizer = inject(DomSanitizer);
 
   // Tooltip explaining weighting methodology
   weightTip: string = 'Weighted metrics use recency-weighted form and home/away context to adjust raw rates. See methodology for details.';
@@ -432,7 +519,8 @@ export class MatchAnalysisComponent implements OnInit {
       leagueId: this.selectedLeagueId,
       seasonId: this.seasonId,
       homeTeamName: this.homeTeamName,
-      awayTeamName: this.awayTeamName
+      awayTeamName: this.awayTeamName,
+      analysisType: 'match'
     }).subscribe({
       next: (res) => {
         console.timeEnd('[MatchAnalysis][analyze]');
@@ -547,5 +635,39 @@ export class MatchAnalysisComponent implements OnInit {
     const a = this.h2hAwayFromPpg(h2h);
     const d = 100 - (h + a);
     return this.safePct(d);
+  }
+
+  // Build colored narration HTML for streak insight
+  renderStreakNarration(si: any, teamName?: string): SafeHtml {
+    if (!si || (!si.summaryText && si.instances == null)) {
+      return this.sanitizer.bypassSecurityTrustHtml('');
+    }
+    const name = teamName || si.teamName || 'This team';
+    const pat = si.pattern || '0';
+    const inst = this.safePct(si.instances);
+    const w = this.safePct(si.nextWinPct);
+    const d = this.safePct(si.nextDrawPct);
+    const l = this.safePct(si.nextLossPct);
+    const o35 = this.safePct(si.over35Pct);
+    const o25 = this.safePct(si.over25Pct);
+    const o15 = this.safePct(si.over15Pct);
+    const btts = this.safePct(si.bttsPct);
+
+    // Color helpers: >70% => positive green for wins/goals/BTTS, red for losses; draws neutral
+    const fmt = (val: number, kind: 'win'|'draw'|'loss'|'over'|'btts'): string => {
+      const high = val > 70;
+      let color = '';
+      if (high) {
+        if (kind === 'loss') color = '#ef4444';
+        else if (kind === 'win' || kind === 'over' || kind === 'btts') color = '#10b981';
+      }
+      return `<span style="${color ? 'color:'+color+'; font-weight:700;' : ''}">${val}%</span>`;
+    };
+
+    const html = `${name} has had ${inst} instances of a ${pat} streak. ` +
+      `Of the matches that followed: ${fmt(w,'win')} were wins, ${fmt(d,'draw')} were draws, ${fmt(l,'loss')} were losses. ` +
+      `${fmt(o35,'over')} were Over 3.5, ${fmt(o25,'over')} were Over 2.5, ${fmt(o15,'over')} were Over 1.5, and ${fmt(btts,'btts')} were BTTS.`;
+
+    return this.sanitizer.bypassSecurityTrustHtml(html);
   }
 }
