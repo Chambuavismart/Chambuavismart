@@ -1,0 +1,46 @@
+# General
+.DS_Store
+Thumbs.db
+
+# IntelliJ IDEA / JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+.run/
+
+# VSCode
+.vscode/
+
+# Maven/Gradle
+.mvn/wrapper/maven-wrapper.jar
+.mvn/wrapper/maven-wrapper.properties
+.mvn/
+.target/
+**/target/
+**/build/
+.gradle/
+
+# Logs
+*.log
+**/logs/
+
+# Node/Angular
+node_modules/
+**/node_modules/
+.npm/
+dist/
+**/dist/
+.angular/
+
+# OS
+ehthumbs.db
+Icon?
+
+# Env
+.env
+.env.*
+
+# IDE other
+*.swp
+*.swo

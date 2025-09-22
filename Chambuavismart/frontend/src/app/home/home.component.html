@@ -1,0 +1,220 @@
+
+<!-- HERO SECTION -->
+<section class="hero">
+  <div class="hero-backdrop"></div>
+  <div class="hero-content">
+    <div class="hero-logo">
+      <!-- If the asset is missing, this inline SVG serves as a visual fallback. -->
+      <svg width="140" height="40" viewBox="0 0 140 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="2" y="8" width="32" height="24" rx="4" fill="#113a2b" stroke="#19b562"/>
+        <circle cx="18" cy="20" r="7" fill="#19b562"/>
+        <circle cx="18" cy="20" r="4" fill="#0b1220"/>
+        <text x="42" y="25" fill="#e6eef8" font-size="16" font-weight="700">ChambuaViSmart</text>
+      </svg>
+    </div>
+    <h1>Smart Football Analysis Powered by Data</h1>
+    <div class="hero-actions">
+      <a routerLink="/match-analysis" class="btn primary">Analyze a Match</a>
+      <a routerLink="/history" class="btn secondary">View Match Analysis History</a>
+    </div>
+  </div>
+</section>
+
+<!-- Global Leaders Sidebar (hidden on mobile) -->
+<app-global-leaders-container side="right"></app-global-leaders-container>
+
+<!-- TODAY'S FIXTURES -->
+<section class="today">
+  <div class="panel">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <h2 style="margin:0;">Today's Fixtures — 
+        <span style="display:inline-block; padding:2px 8px; border-radius:999px; background:#0b3a4a; color:#e6eef8; font-weight:800; font-size:12px; border:1px solid #08303d;" aria-live="polite" title="Total number of fixtures scheduled for today">
+          <span *ngIf="todayLoading; else countTplInline">Loading…</span>
+          <ng-template #countTplInline>{{ todayCount }}</ng-template>
+        </span>
+        {{ formattedDate }}
+      </h2>
+      <div style="position:relative; display:inline-block;">
+        <button (click)="toggleCalendar()" title="View All Fixtures" style="display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#0b3a4a; cursor:pointer;">
+          <span style="width:14px; height:14px; display:inline-block; border:2px solid #1e6bd6; border-radius:2px; position:relative;"></span>
+          <span style="font-weight:700;">View All Fixtures</span>
+        </button>
+        <!-- Calendar dropdown anchored to button -->
+        <div *ngIf="showCalendar" style="position:absolute; top:100%; left:0; margin-top:6px; z-index:1002; pointer-events:auto;">
+          <div style="display:inline-block; background:#ffffff; color:#0b3a4a; border:1px solid #e5e7eb; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.12); padding:12px; min-width:280px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+              <button (click)="prevMonth()" style="border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; padding:2px 8px; cursor:pointer;">←</button>
+              <div style="font-weight:700;">{{ calendarMonthLabel }}</div>
+              <button (click)="nextMonth()" style="border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; padding:2px 8px; cursor:pointer;">→</button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:6px; font-size:12px; text-align:center; color:#64748b; margin-bottom:6px;">
+              <div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div><div>Sun</div>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:6px;">
+              <button *ngFor="let d of daysGrid"
+                      (click)="selectDate(d.iso)"
+                      style="position:relative; height:36px; border:1px solid #e5e7eb; background:#ffffff; color:#0b3a4a; border-radius:6px; cursor:pointer;" [style.opacity]="d.inMonth ? 1 : 0.5">
+                <span>{{ d.day }}</span>
+                <span *ngIf="d.hasFixtures" style="position:absolute; left:50%; transform:translateX(-50%); bottom:4px; width:6px; height:6px; background:#1e6bd6; border-radius:50%;"></span>
+              </button>
+            </div>
+            <div style="margin-top:8px; font-size:12px; color:#64748b;">Dates with a dot have fixtures. You can select any date.</div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1"></div>
+      <!-- Quick navigation tabs next to Form Guide -->
+      <nav style="display:flex; gap:8px; align-items:center;">
+        <a routerLink="/form-guide" class="btn tertiary" style="padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#0b3a4a; text-decoration:none; font-weight:700;">Form Guide</a>
+        <a routerLink="/quick-insights" class="btn tertiary" style="padding:6px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#0b3a4a; text-decoration:none; font-weight:700;">Quick Insights</a>
+      </nav>
+    </div>
+
+    <!-- Today's fixtures render -->
+    <div *ngIf="!showOnlySelectedDate" style="margin-top:8px;">
+      <div *ngIf="todayLoading" style="color:#64748b; display:flex; align-items:center; gap:8px;">
+        <span class="spinner" style="width:14px; height:14px; border:2px solid #cbd5e1; border-top-color:#1e6bd6; border-radius:50%; display:inline-block; animation: spin 1s linear infinite;"></span>
+        Loading today's fixtures...
+      </div>
+      <p *ngIf="!todayLoading && (!todayFixtures || todayFixtures.length === 0)" class="muted">
+        No fixtures available for today. Please load fixtures to continue.
+      </p>
+      <div *ngIf="!todayLoading && todayFixtures && todayFixtures.length" style="display:grid; grid-template-columns: 1fr; gap:12px;">
+        <div style="border:1px solid #e5e7eb; border-radius:8px; background:#ffffff;">
+          <div style="padding:8px 12px; border-bottom:1px solid #e5e7eb; font-weight:800; color:#0b3a4a;">All Leagues — Today</div>
+          <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; padding:10px;">
+            <div *ngFor="let item of todayFlat" (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName, leagueCountry: item.leagueCountry, fixtures: [] }, item.fixture)" [ngClass]="{ 'leader-hl': involvesLeader(item.fixture) }" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:10px; cursor:pointer;">
+              <div *ngIf="involvesLeader(item.fixture)" class="leader-flag" [attr.title]="leaderTooltip(item.fixture)" aria-label="Leader match details">Leader Match Today</div>
+              <div style="color:#64748b; font-size:12px;">
+                {{ item.fixture.round }} • {{ item.fixture.dateTime | date:'d MMM, HH:mm' }} • <span>{{ item.leagueName }}<span *ngIf="item.leagueCountry"> — {{ item.leagueCountry }}</span></span>
+              </div>
+              <div style="font-weight:700; color:#0b3a4a;">{{ item.fixture.homeTeam }} vs {{ item.fixture.awayTeam }}</div>
+              <div style="color:#64748b; margin: 4px 0 6px;">
+                {{ item.fixture?.homeScore != null && item.fixture?.awayScore != null ? (item.fixture.homeScore + ' - ' + item.fixture.awayScore) : '- -' }}
+              </div>
+              <span [ngClass]="'status ' + computeStatus(item.fixture)" style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#eef2f7; color:#0b3a4a;">{{ statusLabel(item.fixture) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Past fixtures render -->
+    <div *ngIf="selectedDate" style="margin-top:12px;">
+      <div style="font-weight:700; color:#0b3a4a;">Fixtures for {{ selectedDate }}</div>
+      <div *ngIf="loadingPast" style="margin-top:8px; color:#64748b; display:flex; align-items:center; gap:8px;">
+        <span class="spinner" style="width:14px; height:14px; border:2px solid #cbd5e1; border-top-color:#1e6bd6; border-radius:50%; display:inline-block; animation: spin 1s linear infinite;"></span>
+        Loading...
+      </div>
+      <div *ngIf="!loadingPast && pastFixtures?.length === 0" class="muted" style="margin-top:8px;">
+        No fixtures were available on {{ selectedDate }}.
+      </div>
+      <div *ngIf="!loadingPast && pastFixtures?.length" style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:8px;">
+        <div *ngFor="let league of pastFixtures" style="border:1px solid #e5e7eb; border-radius:8px; background:#ffffff;">
+          <div style="padding:8px 12px; border-bottom:1px solid #e5e7eb; font-weight:800; color:#0b3a4a;">{{ league.leagueName }}<span *ngIf="league.leagueCountry"> — {{ league.leagueCountry }}</span></div>
+          <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; padding:10px;">
+            <div *ngFor="let f of league.fixtures" (click)="goToAnalysis(league, f)" style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:10px; cursor:pointer;">
+              <div style="color:#64748b; font-size:12px;">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
+              <div style="font-weight:700; color:#0b3a4a;">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
+              <div style="color:#64748b; margin: 4px 0 6px;">
+                {{ f?.homeScore != null && f?.awayScore != null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}
+              </div>
+              <span [ngClass]="'status ' + computeStatus(f)" style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#eef2f7; color:#0b3a4a;">{{ statusLabel(f) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- WHY CHOOSE -->
+<section class="why">
+  <h3 class="why-title">Why Choose ChambuaViSmart?</h3>
+  <div class="why-grid">
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-stats"></span></div>
+      <h4>Match Analysis</h4>
+      <p>Dive into detailed insights with team metrics and contextual factors.</p>
+      <a routerLink="/match-analysis" class="learn">Learn More →</a>
+    </div>
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-clock"></span></div>
+      <h4>Match Analysis History</h4>
+      <p>Review past match analyses and analyze trends.</p>
+      <a routerLink="/history" class="learn">Learn More →</a>
+    </div>
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-database"></span></div>
+      <h4>Data Management</h4>
+      <p>Easily upload fixtures and league data.</p>
+      <a routerLink="/data-management" class="learn">Learn More →</a>
+    </div>
+    <div class="why-card">
+      <div class="icon-wrap"><span class="i i-bulb"></span></div>
+      <h4>Advice</h4>
+      <p>Get tailored betting recommendations based on analysis.</p>
+      <a routerLink="/advice" class="learn">Learn More →</a>
+    </div>
+  </div>
+</section>
+
+<!-- TRACK RECORD STRIP -->
+<section class="track">
+  <div class="track-inner">
+    <div class="metric">
+      <div class="value">{{ stats.matchesAnalyzed }}</div>
+      <div class="label">Matches Analyzed</div>
+    </div>
+    <div class="metric">
+      <div class="value">{{ stats.avgConfidence }}%</div>
+      <div class="label">Average
+        Confidence</div>
+    </div>
+    <div class="metric">
+      <div class="value">{{ stats.fixturesUploaded }}</div>
+      <div class="label">Fixtures Uploaded</div>
+    </div>
+  </div>
+</section>
+
+<!-- DEEP LINKS FOOTER-STYLE -->
+<section class="sitelinks">
+  <div class="links-grid">
+    <a routerLink="/">Home</a>
+    <a routerLink="/match-analysis">Match Analysis</a>
+    <a routerLink="/xg">Inter-League xG Comparison</a>
+    <a routerLink="/history">Match Analysis History</a>
+    <a routerLink="/fixture-predictions">Fixture Predictions</a>
+    <a routerLink="/analyzed-fixtures">Analyzed Fixtures</a>
+    <a routerLink="/btts-over25">BTTS Analysis</a>
+    <a routerLink="/btts-over25">Over 2.5 Goals Analysis</a>
+    <a routerLink="/advice">ML Match Outcome Predictor</a>
+    <a routerLink="/data-management">Data Management</a>
+    <a routerLink="/league">League Match Upload</a>
+    <a routerLink="/admin">Incremental Match Upload</a>
+    <a routerLink="/league">League Management</a>
+    <a routerLink="/admin">Upload Fixture</a>
+    <a routerLink="/advice">Advice</a>
+    <a routerLink="/wekelea-baskets">Wekelea Baskets</a>
+    <a routerLink="/league">League Table</a>
+    <a routerLink="/league">Form Table</a>
+    <a routerLink="/xg">xG Analysis History</a>
+    <a routerLink="/xg">xG Stats Summary</a>
+  </div>
+  <div class="brandline">
+    <div class="brand-mini">
+      <span class="dot"></span>
+      <span>ChambuaViSmart</span>
+    </div>
+    <div class="legal">
+      <a href="#">About</a>
+      <a href="#">Contact</a>
+      <a href="#">Privacy Policy</a>
+      <a href="#">Terms of Service</a>
+    </div>
+    <div class="copy">© {{ today.getFullYear() }} ChambuaViSmart</div>
+  </div>
+</section>
