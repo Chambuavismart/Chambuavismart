@@ -33,6 +33,13 @@ export interface LeagueFixturesResponse {
   fixtures: FixtureDTO[];
 }
 
+export interface SearchFixtureItemDTO {
+  leagueId?: number;
+  leagueName?: string;
+  leagueCountry?: string;
+  fixture: FixtureDTO;
+}
+
 @Injectable({ providedIn: 'root' })
 export class FixturesService {
   private http = inject(HttpClient);
@@ -76,5 +83,20 @@ export class FixturesService {
     if (season && season.trim()) params.set('season', season.trim());
     params.set('_ts', String(Date.now()));
     return this.http.get<string[]>(`${this.baseUrl}/available-dates?${params.toString()}`);
+  }
+
+  // New: global search for fixtures by team prefix
+  searchFixtures(q: string, limit = 10, season?: string): Observable<SearchFixtureItemDTO[]> {
+    const query = (q ?? '').trim();
+    if (query.length < 3) {
+      return new Observable<SearchFixtureItemDTO[]>(subscriber => { subscriber.next([]); subscriber.complete(); });
+    }
+    const params = new URLSearchParams({ q: query, limit: String(Math.min(Math.max(limit, 1), 50)) });
+    if (season && season.trim()) params.set('season', season.trim());
+    params.set('_ts', String(Date.now()));
+    const url = `${this.baseUrl}/search?${params.toString()}`;
+    // eslint-disable-next-line no-console
+    console.debug('[FixturesService] GET', url);
+    return this.http.get<SearchFixtureItemDTO[]>(url);
   }
 }

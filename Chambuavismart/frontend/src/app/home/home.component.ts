@@ -1,7 +1,8 @@
 import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { Router, RouterModule, ActivatedRoute } from '@angular/router';
 import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
-import { FixturesService, LeagueFixturesResponse } from '../services/fixtures.service';
+import { FormsModule } from '@angular/forms';
+import { FixturesService, LeagueFixturesResponse, SearchFixtureItemDTO } from '../services/fixtures.service';
 import { GlobalLeadersContainerComponent } from '../components/global-leaders-container/global-leaders-container.component';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
 import { forkJoin } from 'rxjs';
@@ -9,11 +10,24 @@ import { forkJoin } from 'rxjs';
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [RouterModule, NgFor, NgIf, NgClass, DatePipe, GlobalLeadersContainerComponent],
+  imports: [RouterModule, FormsModule, NgFor, NgIf, NgClass, DatePipe, GlobalLeadersContainerComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.css']
 })
 export class HomeComponent implements OnInit, OnDestroy {
+  // Safely convert input to Date or null to avoid NG02100 in DatePipe
+  toSafeDate(input: any): Date | null {
+    if (!input) return null;
+    try {
+      const d = new Date(input);
+      return isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
+  // Sidebar UI state
+  sidebarOpen: boolean = true;
+  activeNav: string = 'Home';
   private fixturesApi = inject(FixturesService);
   private router = inject(Router);
   private leadersApi = inject(GlobalLeadersService);
@@ -32,6 +46,13 @@ export class HomeComponent implements OnInit, OnDestroy {
   // Today's fixtures state
   todayIso: string = '';
   todayFixtures: LeagueFixturesResponse[] = [];
+  // Stable, precomputed flat list for rendering (Phase 1)
+  todayFlatData: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+  
+  // Search state for today's fixtures
+  searchQuery: string = '';
+  showSuggestions: boolean = false;
+  highlightedIndex: number = -1;
   todayLoading = false;
 
   // When a past date is selected, hide today's fixtures section
@@ -41,28 +62,97 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   // Total count of today's fixtures across all leagues
   get todayCount(): number {
-    return this.todayFlat.length;
+    return this.todayFlatData.length;
   }
 
-  // Flattened, time-sorted list of today's fixtures across all leagues
-  get todayFlat(): { leagueId: number; leagueName: string; leagueCountry?: string; fixture: { id: number; round: string; dateTime: string; homeTeam: string; awayTeam: string; homeScore: number | null; awayScore: number | null; status: any; }; }[] {
-    const items: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
-    for (const lg of this.todayFixtures || []) {
-      const fs = lg?.fixtures || [];
-      for (const f of fs) {
-        if (!f) continue;
-        items.push({ leagueId: lg.leagueId, leagueName: lg.leagueName, leagueCountry: lg.leagueCountry, fixture: f });
-      }
+  // Unified normalization for team names (single source of truth)
+  normalizeTeamName(f: any, side: 'home' | 'away'): string {
+    if (!f) return '';
+    const primaryKeys = side === 'home'
+      ? ['homeTeam','home_team','home','home_name','homeTeamName']
+      : ['awayTeam','away_team','away','away_name','awayTeamName'];
+    for (const k of primaryKeys) {
+      const v = (f as any)[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
     }
-    items.sort((a, b) => {
-      const ta = this.toUtcMillis(a.fixture?.dateTime);
-      const tb = this.toUtcMillis(b.fixture?.dateTime);
-      if (isNaN(ta) && isNaN(tb)) return 0;
-      if (isNaN(ta)) return 1; // push invalid/unknown times to bottom
-      if (isNaN(tb)) return -1;
-      return ta - tb; // earliest first
+    // Nested common structures
+    const nested = side === 'home'
+      ? ((f as any).home || (f as any).home_team || (f as any).teams?.home || (f as any).teamHome)
+      : ((f as any).away || (f as any).away_team || (f as any).teams?.away || (f as any).teamAway);
+    if (nested) {
+      if (typeof nested === 'string' && nested.trim()) return nested.trim();
+      if (typeof (nested as any).name === 'string' && (nested as any).name.trim()) return (nested as any).name.trim();
+      if (typeof (nested as any).team === 'string' && (nested as any).team.trim()) return (nested as any).team.trim();
+      if (typeof (nested as any).title === 'string' && (nested as any).title.trim()) return (nested as any).title.trim();
+      if (typeof (nested as any).shortName === 'string' && (nested as any).shortName.trim()) return (nested as any).shortName.trim();
+    }
+    return '';
+  }
+
+  // Flattened, filtered, time-sorted list of today's fixtures across all leagues
+
+  // Global search results populated from backend
+  searchResults: SearchFixtureItemDTO[] = [];
+
+  onSearchInput(): void {
+    const q = this.searchQuery.trim();
+    this.highlightedIndex = -1;
+    if (q.length < 3) {
+      this.searchResults = [];
+      this.showSuggestions = false;
+      return;
+    }
+    this.fixturesApi.searchFixtures(q, 10, this.season).subscribe({
+      next: res => {
+        this.searchResults = Array.isArray(res) ? res : [];
+        this.showSuggestions = this.searchResults.length > 0;
+      },
+      error: _err => {
+        this.searchResults = [];
+        this.showSuggestions = false;
+      }
     });
-    return items;
+  }
+
+  onSearchFocus(): void {
+    this.showSuggestions = this.searchQuery.trim().length >= 3 && this.searchResults.length > 0;
+  }
+
+  onSearchBlur(): void {
+    // Slight delay to allow click event on suggestion to fire before closing
+    setTimeout(() => { this.showSuggestions = false; }, 150);
+  }
+
+  onSearchKeydown(event: KeyboardEvent): void {
+    const suggestions = this.searchResults;
+    if (!suggestions.length) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this.highlightedIndex = (this.highlightedIndex + 1) % suggestions.length;
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      this.highlightedIndex = (this.highlightedIndex <= 0 ? suggestions.length - 1 : this.highlightedIndex - 1);
+    } else if (event.key === 'Enter') {
+      if (this.highlightedIndex >= 0 && this.highlightedIndex < suggestions.length) {
+        event.preventDefault();
+        const sel = suggestions[this.highlightedIndex];
+        this.selectSuggestion(sel);
+      }
+    } else if (event.key === 'Escape') {
+      this.showSuggestions = false;
+    }
+  }
+
+  selectSuggestion(item: SearchFixtureItemDTO): void {
+    if (!item) return;
+    this.goToAnalysis({ leagueId: item.leagueId!, leagueName: item.leagueName }, item.fixture);
+    this.clearSearch();
+  }
+
+  clearSearch(): void {
+    this.searchQuery = '';
+    this.showSuggestions = false;
+    this.highlightedIndex = -1;
   }
 
   // Leaders cache for highlighting
@@ -79,6 +169,20 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    try {
+      this.sidebarOpen = window.innerWidth >= 768;
+      const path = (window.location?.pathname || '').toLowerCase();
+      if (path.includes('fixtures-analysis-history')) this.activeNav = 'Fixture Analysis History';
+      else if (path.includes('fixtures-analysis')) this.activeNav = 'Fixtures Analysis';
+      else if (path.includes('fixtures')) this.activeNav = 'Fixtures';
+      else if (path.includes('match-analysis')) this.activeNav = 'Match Analysis';
+      else if (path.includes('form-guide')) this.activeNav = 'Form Guide';
+      else if (path.includes('quick-insights')) this.activeNav = 'Quick Insights';
+      else if (path.includes('league-table')) this.activeNav = 'League Table';
+      else if (path.includes('team-search')) this.activeNav = 'Team Search';
+      else if (path.includes('admin')) this.activeNav = 'Admin';
+      else this.activeNav = 'Home';
+    } catch {}
     this.todayIso = this.toIsoLocal(this.today);
     this.loadLeaders();
     this.loadToday();
@@ -91,26 +195,105 @@ export class HomeComponent implements OnInit, OnDestroy {
     window.addEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
   }
 
+  toggleSidebar(){ this.sidebarOpen = !this.sidebarOpen; }
+
+  setActive(key: string){ this.activeNav = key; }
+
+  get todayLabel(): string {
+    try {
+      const opts: Intl.DateTimeFormatOptions = { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZoneName: 'short' };
+      return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: 'Africa/Nairobi' }).format(new Date());
+    } catch {
+      return this.formattedDate;
+    }
+  }
+
   ngOnDestroy(): void {
     window.removeEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
+  }
+
+  private isDev(): boolean {
+    try {
+      const host = (window && window.location && window.location.hostname) ? window.location.hostname : '';
+      return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+    } catch { return false; }
   }
 
   private loadToday(): void {
     this.todayLoading = true;
     this.todayFixtures = [];
+    this.todayFlatData = [];
     // eslint-disable-next-line no-console
     console.debug('[HomeComponent] fetching TODAY fixtures for', this.todayIso);
     this.fixturesApi.getFixturesByDate(this.todayIso, this.season).subscribe({
       next: res => {
         this.todayFixtures = Array.isArray(res) ? res.filter(Boolean) : [];
-        // eslint-disable-next-line no-console
-        console.debug('[HomeComponent] TODAY fixtures loaded:', this.todayFixtures.length);
+        // Build stable flat list once (normalize, filter, sort)
+        const tz = 'Africa/Nairobi';
+        const seen = new Set<number>();
+        const flat: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+        for (const lg of this.todayFixtures) {
+          const fx = lg?.fixtures || [];
+          for (const f of fx) {
+            if (!f) continue;
+            const home = this.normalizeTeamName(f, 'home');
+            const away = this.normalizeTeamName(f, 'away');
+            // Attach normalized names directly to fixture for consistent template binding
+            (f as any).homeTeam = home;
+            (f as any).awayTeam = away;
+            if (!home || !away) continue; // exclude invalid entries
+            if (!this.isSameDayInTz((f as any).dateTime, tz)) continue; // keep only today's fixtures in EAT
+            const id: number | undefined = typeof (f as any).id === 'number' ? (f as any).id : undefined;
+            if (id != null) {
+              if (seen.has(id)) continue;
+              seen.add(id);
+            }
+            // Preformat date for display to minimize DatePipe usage
+            let formattedDate: string | null = null;
+            try {
+              const d = new Date((f as any).dateTime);
+              if (!isNaN(d.getTime())) {
+                formattedDate = new Intl.DateTimeFormat('en-GB', {
+                  weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz, timeZoneName: 'short'
+                }).format(d);
+              }
+            } catch { formattedDate = null; }
+            (f as any).formattedDate = formattedDate;
+
+            flat.push({ leagueId: lg.leagueId, leagueName: lg.leagueName, leagueCountry: lg.leagueCountry, fixture: f });
+          }
+        }
+        flat.sort((a, b) => {
+          const ta = this.toUtcMillis(a.fixture?.dateTime);
+          const tb = this.toUtcMillis(b.fixture?.dateTime);
+          if (isNaN(ta) && isNaN(tb)) return 0;
+          if (isNaN(ta)) return 1;
+          if (isNaN(tb)) return -1;
+          return ta - tb;
+        });
+        this.todayFlatData = flat;
+        if (this.isDev()) {
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[HomeComponent] Normalized today fixtures:', {
+              totalLeagues: this.todayFixtures.length,
+              total: this.todayFlatData.length,
+              sample: this.todayFlatData.slice(0, 5).map(x => ({ home: x.fixture.homeTeam, away: x.fixture.awayTeam, dt: x.fixture.formattedDate || x.fixture.dateTime }))
+            });
+          } catch {}
+        }
+        const allValid = this.todayFlatData.every(it => !!(it.fixture.homeTeam && it.fixture.awayTeam));
+        if (!allValid) {
+          // eslint-disable-next-line no-console
+          console.warn('[HomeComponent] Some fixtures missing names after normalization');
+        }
         this.todayLoading = false;
       },
       error: err => {
         // eslint-disable-next-line no-console
         console.debug('[HomeComponent] TODAY fixtures load error', err);
-        this.todayFixtures = []; this.todayLoading = false;
+        this.todayFixtures = []; this.todayFlatData = []; this.todayLoading = false;
       }
     });
   }
@@ -311,6 +494,31 @@ export class HomeComponent implements OnInit, OnDestroy {
     return d.getTime();
   }
 
+  // Returns {y,m,d} of given Date in a given IANA timezone using Intl API
+  private getYMDInTz(date: Date, timeZone: string): { y: number; m: number; d: number } {
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const parts = fmt.formatToParts(date);
+    const y = Number(parts.find(p => p.type === 'year')?.value);
+    const m = Number(parts.find(p => p.type === 'month')?.value);
+    const d = Number(parts.find(p => p.type === 'day')?.value);
+    return { y, m, d };
+  }
+
+  // Check if an ISO string occurs on the same calendar day as now in a specific time zone
+  private isSameDayInTz(iso: string | undefined, timeZone: string): boolean {
+    if (!iso) return false;
+    const dt = new Date(iso);
+    if (isNaN(dt.getTime())) return false;
+    const todayYMD = this.getYMDInTz(new Date(), timeZone);
+    const thatYMD = this.getYMDInTz(dt, timeZone);
+    return todayYMD.y === thatYMD.y && todayYMD.m === thatYMD.m && todayYMD.d === thatYMD.d;
+  }
+
   // Leader helpers
   private isFixtureToday(f: { dateTime: string }): boolean {
     const d = f?.dateTime ? new Date(f.dateTime) : null;
@@ -360,6 +568,31 @@ export class HomeComponent implements OnInit, OnDestroy {
     return parts.length ? parts.join(' • ') : null;
   }
 
+  // New: robust display resolver for team names at render-time
+  displayTeamName(f: any, side: 'home' | 'away'): string {
+    if (!f) return '';
+    const keys = side === 'home'
+      ? ['homeTeam','home_team','home','home_name','homeTeamName']
+      : ['awayTeam','away_team','away','away_name','awayTeamName'];
+    for (const k of keys) {
+      const v = (f as any)[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    // Common nested structures
+    const nested = side === 'home'
+      ? ((f as any).home || (f as any).home_team || (f as any).teams?.home || (f as any).teamHome)
+      : ((f as any).away || (f as any).away_team || (f as any).teams?.away || (f as any).teamAway);
+    if (nested) {
+      if (typeof nested === 'string' && nested.trim()) return nested.trim();
+      if (typeof nested.name === 'string' && nested.name.trim()) return nested.name.trim();
+      if (typeof nested.team === 'string' && nested.team.trim()) return nested.team.trim();
+      if (typeof nested.title === 'string' && nested.title.trim()) return nested.title.trim();
+    }
+    // Fallback to normalized fields if present
+    const fallback = side === 'home' ? f.homeTeam : f.awayTeam;
+    return typeof fallback === 'string' ? (fallback || '').trim() : '';
+  }
+
   // Navigate to Played Matches Summary (Fixture Analysis) with preselected teams
   // Reuse the exact logic used in Fixtures tab: h2hHome, h2hAway, and optional leagueId
   goToAnalysis(league: { leagueId?: number; leagueName?: string } | null, f: any) {
@@ -367,10 +600,16 @@ export class HomeComponent implements OnInit, OnDestroy {
     const leagueId = league?.leagueId ?? null;
     this.router.navigate(['/played-matches-summary'], {
       queryParams: {
-        h2hHome: f?.homeTeam ?? '',
-        h2hAway: f?.awayTeam ?? '',
+        h2hHome: (f?.homeTeam || this.normalizeTeamName(f, 'home') || ''),
+        h2hAway: (f?.awayTeam || this.normalizeTeamName(f, 'away') || ''),
         ...(leagueId ? { leagueId } : {})
       }
     });
+  }
+
+  // trackBy to stabilize DOM and performance
+  trackByFixtureId(index: number, item: { fixture: any }): string | number {
+    const f = item?.fixture as any;
+    return (f && (typeof f.id === 'number' || typeof f.id === 'string')) ? f.id : `${f?.homeTeam || ''}-${f?.awayTeam || ''}-${f?.dateTime || index}`;
   }
 }

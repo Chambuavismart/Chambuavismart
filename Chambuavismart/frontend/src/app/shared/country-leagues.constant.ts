@@ -17,9 +17,21 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Southern League Premier South",
     "Isthmian League Premier Division"
   ],
-  "Kenya": ["FKF Premier League", "National Super League", "FKF Division One", "FKF Cup"],
+  "Kenya": ["FKF Premier League", "Kenya Premier League", "National Super League", "FKF Division One", "FKF Cup"],
   "Spain": ["La Liga", "Segunda División", "Copa del Rey", "Supercopa de España"],
-  "Italy": ["Serie A", "Serie B", "Coppa Italia", "Supercoppa Italiana"],
+  "Italy": [
+    "Serie A",
+    "Serie B",
+    "Serie C – Group A",
+    "Serie C – Group B",
+    "Serie C – Group C",
+    "Coppa Italia",
+    "Supercoppa Italiana",
+    "Primavera 1",
+    "Primavera 2",
+    "Serie A Women",
+    "Serie B Women"
+  ],
   "Germany": ["Bundesliga", "2. Bundesliga", "DFB-Pokal", "DFL-Supercup"],
   "France": ["Ligue 1", "Ligue 2", "Coupe de France", "Trophée des Champions"],
   "Portugal": ["Primeira Liga", "Liga Portugal 2", "Taça de Portugal", "Supertaça Cândido de Oliveira"],
@@ -50,5 +62,147 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "K 3 League",
     "Korean Cup",
     "WK League Women"
+  ],
+  "India": [
+    "I-League",
+    "I-League 2",
+    "I-League 3",
+    "Calcutta Premier Division",
+    "Santosh Trophy",
+    "IWL Women"
+  ],
+  "Ukraine": [
+    "Premier League",
+    "Persha Liga",
+    "Druha Liga",
+    "U19 League",
+    "Championship Women"
+  ],
+  "Vietnam": [
+    "V.League 1",
+    "V.League 2"
+  ],
+  "Turkey": [
+    "Super Lig",
+    "1. Lig",
+    "2. Lig White Group",
+    "2. Lig Red Group",
+    "2. Lig Play Offs",
+    "3. Lig Group 1",
+    "3. Lig Group 2",
+    "3. Lig Group 3",
+    "3. Lig Group 4",
+    "3. Lig Play Offs",
+    "Turkish Cup",
+    "Super Cup",
+    "Super Lig Women",
+    "Women’s First League",
+    "Women’s Second League",
+    "Women’s Third League",
+    "U19 Elit A Ligi",
+    "U19 Elit B Ligi",
+    "Turkey U19 (National)",
+    "Turkey U19 Women (National)"
+  ],
+  "Singapore": [
+    "Singapore Premier League",
+    "Singapore Cup",
+    "Singapore Community Shield",
+    "Singapore Football League 1 (SFL 1)",
+    "Singapore Football League 2 (SFL 2)",
+    "Island Wide League (IWL)",
+    "Women’s Premier League (Singapore)",
+    "Women’s National League (Singapore)"
+  ],
+  "Malaysia": [
+    "Malaysia Super League",
+    "A1 Semi-Pro League",
+    "A2 Amateur League",
+    "Malaysia Cup",
+    "Malaysia FA Cup",
+    "MFL Challenge Cup",
+    "MFL Cup",
+    "Malaysia Charity Shield / Supercup",
+    "Piala Presiden",
+    "Piala Belia"
+  ],
+  "Kazakhstan": [
+    "Premier League",
+    "First League"
+  ],
+  "Malawi": [
+    "Super League"
+  ],
+  "North Macedonia": [
+    "1.MFL",
+    "2.MFL"
+  ],
+  "Croatia": [
+    "HNL",
+    "Prva NL",
+    "3. NL",
+    "1. HNL Women"
+  ],
+  "Egypt": [
+    "Egyptian Premier League",
+    "Egyptian Second Division A",
+    "Egyptian Women’s Premier League"
+  ],
+  "Romania": [
+    "Superliga",
+    "Liga 2",
+    "Liga 3",
+    "Liga 4",
+    "Romania Cup",
+    "Super Cup",
+    "Liga 1 Women",
+    "Liga 2 Women",
+    "Romania Women",
+    "Romania Cup Women",
+    "Liga Elitelor U19",
+    "Liga Elitelor U17",
+    "Cupa Romaniei U19"
+  ],
+  "Poland": [
+    "Ekstraklasa",
+    "I liga",
+    "II liga",
+    "III liga",
+    "III liga – Group I",
+    "III liga – Group II",
+    "III liga – Group III",
+    "III liga – Group IV",
+    "Central Youth League",
+    "Ekstraliga (Women)",
+    "I liga (Women)"
+  ],
+  "Cyprus": [
+    "First Division",
+    "Second Division",
+    "Third Division",
+    "Fourth Division",
+    "Protathlima Entaxis STOK",
+    "Cypriot First Division Women"
+  ],
+  "Ireland": [
+    "Premier Division",
+    "First Division",
+    "League of Ireland Women’s Premier Division",
+    "Ireland U19 Championship"
+  ],
+  "Japan": [
+    "J1 League",
+    "J2 League",
+    "J3 League",
+    "Japan Football League",
+    "WE League",
+    "Nadeshiko League Division 1",
+    "Nadeshiko League Division 2",
+    "Prince League U18 Premier League"
+  ],
+  "Iran": [
+    "Persian Gulf Pro League",
+    "Azadegan League",
+    "Kowsar Women Football League"
   ]
 });

@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, NavigationEnd } from '@angular/router';
+import { Router, NavigationEnd, RouterLink, RouterLinkActive } from '@angular/router';
 import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO } from '../services/fixtures.service';
 import { LeagueService, GroupedLeagueDTO } from '../services/league.service';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
@@ -10,111 +10,179 @@ import { forkJoin } from 'rxjs';
 @Component({
   selector: 'app-fixtures',
   standalone: true,
-  imports: [NgFor, NgIf, NgClass, FormsModule, DatePipe],
+  imports: [NgFor, NgIf, NgClass, FormsModule, DatePipe, RouterLink, RouterLinkActive],
   styles: [`
-    :host { display:block; color:#e6eef8; }
-    .page { display:flex; gap:16px; }
-    .sidebar { width: 300px; background:#0b1220; border:1px solid #1f2937; border-radius:12px; padding:12px; }
-    .league { border-bottom:1px solid #1f2937; padding:8px 4px; }
-    .league:last-child { border-bottom:0; }
-    .league-header { display:flex; align-items:center; justify-content:space-between; cursor:pointer; padding:6px 8px; border-radius:8px; }
-    .league-header:hover { background:#0f172a; }
-    .badge { background:#0ea5e9; color:#04110a; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
-    .content { flex:1; }
-    .grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; }
-    .card { background:#0b1220; border:1px solid #1f2937; border-radius:16px; padding:12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
-    .card.hl { border-color:#19b562; box-shadow: 0 0 0 2px rgba(25,181,98,0.25), 0 2px 12px rgba(25,181,98,0.25); }
-    .leader-flag { display:inline-block; background:#19b562; color:#04110a; font-size:11px; font-weight:800; padding:2px 6px; border-radius:6px; margin-bottom:6px; }
-    .muted { color:#9fb3cd; }
-    .teams { font-weight:700; }
-    .status { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
-    .status.UPCOMING { background:#0ea5e9; color:#04110a; }
-    .status.AWAITING { background:#f59e0b; color:#04110a; }
-    .status.RESULTS_MISSING { background:#ef4444; color:#04110a; }
-    .status.FINISHED { background:#9ca3af; color:#04110a; }
-    .toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
-    .select { background:#0b1220; border:1px solid #1f2937; color:#e6eef8; padding:6px 8px; border-radius:8px; }
+    /* Flashscore-inspired dark theme */
+    :host { display:block; color:#e0e0e0; font-family: Inter, Roboto, Arial, sans-serif; background:#0a0a0a; }
+    .fs-layout { display:flex; min-height:100vh; }
+    /* Sidebar Navigation */
+    .fs-sidebar { width:20%; min-width:240px; background:#1a1a1a; padding:16px 12px; position:sticky; top:0; height:100vh; overflow:auto; border-right:1px solid #2a2a2a; }
+    .brand { color:#fff; font-weight:700; font-size:18px; margin-bottom:16px; }
+    .nav-list { list-style:none; margin:0; padding:0; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:10px 12px; color:#ccc; border-radius:8px; cursor:pointer; transition: background 0.2s ease, color 0.2s ease; }
+    .nav-item:hover { background:#333333; color:#007bff; }
+    .nav-item:hover i { color:#007bff; }
+    .nav-item.active { background:#007bff; color:#ffffff; }
+    .nav-item.active i { color:#ffffff; }
+    .nav-item i { width:18px; text-align:center; color:#6ea8fe; }
 
-    @media (max-width: 900px) {
-      .page { flex-direction: column; }
-      .sidebar { display:none; }
-      .grid { grid-template-columns: 1fr; }
-      .mobile { display:block; }
-    }
+    /* Main Content */
+    .fs-main { width:80%; padding:20px; }
+    .fs-grid { display:grid; grid-template-columns: 1fr; gap:16px; }
+    .card { background:#2a2a2a; border:1px solid #3a3a3a; border-radius:8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .card .card-body { padding:16px; }
+    .title { font-size:24px; font-weight:800; color:#ffffff; }
+    .subtitle { color:#e0e0e0; font-size:14px; display:flex; align-items:center; gap:8px; text-decoration:none; opacity:0.9; }
+    .subtitle i { color:#6ea8fe; }
+
+    .toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+    .muted { color:#9aa0a6; }
+    .badge { display:inline-block; font-size:12px; border-radius:9999px; padding:2px 8px; background:#0b2f55; color:#6ea8fe; border:1px solid #123e73; }
+
+    /* Search input */
+    .search-input { background:#2a2a2a; border:1px solid #404040; color:#e0e0e0; border-radius:8px; padding:10px 12px; width:100%; }
+    .search-input::placeholder { color:#9aa0a6; }
+
+    /* League accordion */
+    .league-card { background:#2a2a2a; border:1px solid #3a3a3a; border-radius:8px; margin-bottom:15px; overflow:hidden; }
+    .league-header { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; cursor:pointer; transition: background .2s ease; }
+    .league-header:hover { background:#333333; }
+    .league-name { font-weight:700; color:#ffffff; font-size:18px; display:flex; align-items:center; gap:8px; }
+    .league-actions { display:flex; align-items:center; gap:10px; }
+    .chev { color:#9aa0a6; transition: transform .2s ease; }
+    .chev.expanded { transform: rotate(180deg); }
+
+    .fixtures-list { background:#1a1a1a; border-top:1px solid #333333; }
+    .fixture-row { display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #2a2a2a; }
+    .fixture-row:last-child { border-bottom:none; }
+    .fixture-time { color:#e0e0e0; flex:0 0 190px; font-size:14px; }
+    .fixture-teams { color:#ffffff; font-weight:700; flex:1; display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .fixture-teams .vs { color:#9aa0a6; font-weight:600; }
+    .fixture-status { flex:0 0 120px; display:flex; justify-content:flex-end; }
+
+    /* Status chips */
+    .status-chip { font-size:12px; padding:2px 8px; border-radius:999px; border:1px solid #2d2d2d; color:#e0e0e0; background:#101010; }
+    .status-chip.UPCOMING { background:#113a2a; color:#28a745; border-color:#1f7a4c; }
+    .status-chip.AWAITING { background:#2f2a11; color:#ffd166; border-color:#7a6a1f; }
+    .status-chip.RESULTS_MISSING { background:#3a1111; color:#ff6b6b; border-color:#7a1f1f; }
+    .status-chip.FINISHED { background:#1f1f1f; color:#bdbdbd; border-color:#333; }
+
+    .btn { border-radius:8px; padding:8px 12px; border:1px solid transparent; cursor:pointer; transition: background .2s ease, border-color .2s ease, transform .05s ease; font-weight:600; }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background:#007bff; color:#fff; }
+    .btn-primary:hover { background:#0056b3; }
+
+    .loader { color:#6ea8fe; display:inline-flex; align-items:center; gap:8px; }
+
+    /* Responsive */
+    @media (max-width: 1024px){ .fs-sidebar { position:relative; height:auto; } .fs-main { width:100%; padding:12px; } .fs-layout { flex-direction:column; } }
+    @media (max-width: 768px){ .fs-sidebar { order:2; width:100%; height:auto; } .fs-main { order:1; } .fixture-time { flex-basis:140px; } }
   `],
   template: `
-    <h1 style="font-weight:800; margin: 8px 0 4px;">Fixtures</h1>
-    <div class="muted" style="margin: 0 0 12px;">Note: Fixtures currently don’t use season filters. Season context may be inferred heuristically.</div>
-
-    <!-- Mobile league picker -->
-    <div class="mobile">
-      <div class="toolbar">
-        <label class="muted">League</label>
-        <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="loadFixtures()">
-          <option [ngValue]="0">All Leagues</option>
-          <optgroup *ngFor="let g of groupedLeagues" [label]="g.groupLabel">
-            <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
-          </optgroup>
-        </select>
-        <label class="muted">Filter</label>
-        <select class="select" [(ngModel)]="filterMode" (ngModelChange)="onFilterChange()">
-          <option [ngValue]="'ALL'">All</option>
-          <option [ngValue]="'UPCOMING'">Upcoming</option>
-          <option [ngValue]="'AWAITING'">Awaiting Results</option>
-          <option [ngValue]="'RESULTS_MISSING'">Results Missing</option>
-          <option [ngValue]="'FINISHED'">Finished</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="page">
-      <aside class="sidebar">
-        <div *ngFor="let l of leagues" class="league">
-          <div class="league-header" (click)="toggleLeague(l.leagueId)">
-            <div style="font-weight:800; color:#19b562">{{ l.leagueCountry }} – {{ l.leagueName }} – {{ l.season }}</div>
-            <span class="badge">{{ l.upcomingCount }}</span>
-          </div>
-          <div *ngIf="expandedLeagueId === l.leagueId" style="padding:8px 4px;">
-            <button class="select" (click)="selectLeague(l.leagueId)">View fixtures</button>
-          </div>
-        </div>
+    <div class="fs-layout">
+      <!-- Sidebar Navigation -->
+      <aside class="fs-sidebar">
+        <div class="brand">ChambuVS</div>
+        <ul class="nav-list">
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/']"><i class="fa fa-home"></i> <span>Home</span></a></li>
+          <li class="nav-item active" aria-current="page"><i class="fa fa-calendar"></i> <span>Fixtures</span></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/match-analysis']"><i class="fa fa-chart-line"></i> <span>Match Analysis</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/form-guide']"><i class="fa fa-list"></i> <span>Form Guide</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/quick-insights']"><i class="fa fa-bolt"></i> <span>Quick Insights</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/league']"><i class="fa fa-table"></i> <span>League Table</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/data-management']"><i class="fa fa-database"></i> <span>Data Management</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/team-search']"><i class="fa fa-search"></i> <span>Team Search</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/played-matches-summary']"><i class="fa fa-lightbulb"></i> <span>Fixtures Analysis</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/analysis-pdfs']"><i class="fa fa-history"></i> <span>Fixture Analysis History</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/admin']"><i class="fa fa-user-shield"></i> <span>Admin</span></a></li>
+        </ul>
       </aside>
 
-      <section class="content">
-        <div class="toolbar">
-          <div class="muted">Selected:</div>
-          <div style="font-weight:700;">{{ currentLeagueName || '—' }}</div>
-          <button class="select" style="margin-left:8px;" (click)="viewAllLeagues()">All Leagues</button>
-          <div style="flex:1"></div>
-          <label class="muted">Filter</label>
-          <select class="select" [(ngModel)]="filterMode" (ngModelChange)="onFilterChange()">
-            <option [ngValue]="'ALL'">All</option>
-            <option [ngValue]="'UPCOMING'">Upcoming</option>
-            <option [ngValue]="'AWAITING'">Awaiting Results</option>
-            <option [ngValue]="'RESULTS_MISSING'">Results Missing</option>
-            <option [ngValue]="'FINISHED'">Finished</option>
-          </select>
-        </div>
-
-        <div *ngIf="isLoading" class="muted">Refreshing fixtures...</div>
-        <ng-container *ngIf="!isLoading">
-          <div *ngIf="filteredFixtures?.length === 0" class="muted">No fixtures.</div>
-          <div class="grid">
-            <div class="card" *ngFor="let f of filteredFixtures" (click)="openAnalysis(f)" style="cursor:pointer;" [ngClass]="{ 'hl': isFixtureToday(f) && involvesLeader(f) }">
-              <div *ngIf="isFixtureToday(f) && involvesLeader(f)" class="leader-flag" [attr.title]="leaderTooltip(f)" aria-label="Leader match details">Leader Match Today</div>
-              <div class="muted">{{ f.round }} • {{ f.dateTime | date:'d MMM, HH:mm' }}</div>
-              <div class="muted" *ngIf="selectedLeagueId === 0">{{ f.leagueName }}</div>
-              <div class="teams">{{ f.homeTeam }} vs {{ f.awayTeam }}</div>
-              <div class="muted" style="margin: 4px 0 6px;">{{ f.homeScore !== null && f.awayScore !== null ? (f.homeScore + ' - ' + f.awayScore) : '- -' }}</div>
-              <span class="status" [ngClass]="computeStatus(f)">{{ statusLabel(f) }}</span>
+      <!-- Main Content -->
+      <main class="fs-main" role="main">
+        <!-- Top card with title and search -->
+        <div class="card" style="margin-bottom:12px;">
+          <div class="card-body">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+              <div>
+                <div class="title">Fixtures Calendar</div>
+                <div class="subtitle"><i class="fa fa-calendar"></i> View upcoming matches by league</div>
+              </div>
+              <div style="flex:1; max-width:420px; min-width:240px;">
+                <input type="text" class="search-input" [(ngModel)]="leagueSearch" placeholder="Search leagues by country or name..." aria-label="Search leagues"/>
+              </div>
             </div>
           </div>
-        </ng-container>
-      </section>
+        </div>
+
+        <!-- Accordion list of leagues -->
+        <section aria-label="Leagues list">
+          <div *ngFor="let l of visibleLeagues; trackBy: trackLeague" class="league-card">
+            <div class="league-header" (click)="toggleAccordion(l.leagueId)" [attr.aria-expanded]="expandedLeagueId === l.leagueId" [attr.aria-label]="'League: ' + l.leagueCountry + ' - ' + l.leagueName + ' ' + l.season">
+              <div class="league-name"><i class="fa fa-globe"></i> <span>{{ l.leagueCountry }} - {{ l.leagueName }} {{ l.season }}</span></div>
+              <div class="league-actions">
+                <span class="badge" title="Upcoming fixtures">{{ l.upcomingCount }}</span>
+                <i class="fa fa-chevron-down chev" [ngClass]="{ 'expanded': expandedLeagueId === l.leagueId }"></i>
+              </div>
+            </div>
+            <div class="fixtures-list" *ngIf="expandedLeagueId === l.leagueId">
+              <div class="fixture-row" *ngIf="isLeagueLoading(l.leagueId)">
+                <span class="loader"><i class="fa fa-spinner fa-spin"></i> Loading fixtures...</span>
+              </div>
+              <ng-container *ngIf="!isLeagueLoading(l.leagueId)">
+                <div class="fixture-row" *ngIf="(leagueFixturesMap.get(l.leagueId)?.length || 0) === 0">
+                  <em class="muted">No upcoming fixtures for this league</em>
+                </div>
+                <div class="fixture-row" *ngFor="let f of leagueFixturesMap.get(l.leagueId)">
+                  <div class="fixture-time">{{ f.dateTime | date:'d MMM yyyy, HH:mm' }} EAT</div>
+                  <div class="fixture-teams">
+                    <span class="team">{{ f.homeTeam }}</span>
+                    <span class="vs">vs</span>
+                    <span class="team">{{ f.awayTeam }}</span>
+                  </div>
+                  <div class="fixture-status">
+                    <span class="status-chip" [ngClass]="computeStatus(f)">{{ statusLabel(f) }}</span>
+                  </div>
+                  <div>
+                    <button class="btn btn-primary" (click)="openAnalysisForLeague(l.leagueId, f); $event.stopPropagation();" title="Open details">Details</button>
+                  </div>
+                </div>
+              </ng-container>
+            </div>
+          </div>
+
+          <div *ngIf="visibleLeagues.length < filteredLeagues.length" style="text-align:center; margin-top:8px;">
+            <button class="btn btn-primary" (click)="loadMoreLeagues()">Load More</button>
+          </div>
+        </section>
+      </main>
     </div>
   `
 })
 export class FixturesComponent implements OnInit, OnDestroy {
+  // UI state for search, pagination, and per-league loading
+  leagueSearch: string = '';
+  pageSize = 20;
+  visibleLeagueCount = 20;
+  leagueFixturesMap: Map<number, FixtureDTO[]> = new Map<number, FixtureDTO[]>();
+  loadingLeagueIds: Set<number> = new Set<number>();
+
+  get filteredLeagues(): LeagueWithUpcomingDTO[] {
+    const q = (this.leagueSearch || '').trim().toLowerCase();
+    if (!q) return this.leagues || [];
+    return (this.leagues || []).filter(l => {
+      const a = `${l.leagueCountry || ''} ${l.leagueName || ''} ${l.season || ''}`.toLowerCase();
+      return a.includes(q);
+    });
+  }
+  get visibleLeagues(): LeagueWithUpcomingDTO[] {
+    return this.filteredLeagues.slice(0, this.visibleLeagueCount);
+  }
+  loadMoreLeagues() { this.visibleLeagueCount += this.pageSize; }
+
+  // trackBy function for leagues list to prevent unnecessary DOM re-renders
+  trackLeague(index: number, l: LeagueWithUpcomingDTO): number { return l?.leagueId ?? index; }
+
   openAnalysis(f: FixtureDTO) {
     // Navigate to Played Matches tab with pre-filled H2H teams, preserving orientation
     // Include leagueId so the Fixture Analysis tab can scope lookups correctly
@@ -125,6 +193,37 @@ export class FixturesComponent implements OnInit, OnDestroy {
         h2hAway: f?.awayTeam ?? '',
         ...(leagueId ? { leagueId } : {})
       }
+    });
+  }
+
+  openAnalysisForLeague(leagueId: number, f: FixtureDTO) {
+    this.selectedLeagueId = leagueId;
+    this.openAnalysis(f);
+  }
+
+  toggleAccordion(id: number) {
+    const next = this.expandedLeagueId === id ? null : id;
+    this.expandedLeagueId = next;
+    if (next != null && !this.leagueFixturesMap.has(id)) {
+      this.loadLeagueFixtures(id);
+    }
+  }
+
+  isLeagueLoading(id: number): boolean {
+    return this.loadingLeagueIds.has(id);
+  }
+
+  private loadLeagueFixtures(leagueId: number) {
+    if (this.loadingLeagueIds.has(leagueId)) return;
+    this.loadingLeagueIds.add(leagueId);
+    const upcomingOnly = this.filterMode === 'UPCOMING';
+    this.api.getLeagueFixtures(leagueId, upcomingOnly).subscribe((res: LeagueFixturesResponse) => {
+      const fixtures = (res?.fixtures || []).slice();
+      this.leagueFixturesMap.set(leagueId, fixtures);
+      this.loadingLeagueIds.delete(leagueId);
+    }, _err => {
+      this.leagueFixturesMap.set(leagueId, []);
+      this.loadingLeagueIds.delete(leagueId);
     });
   }
   private api = inject(FixturesService);

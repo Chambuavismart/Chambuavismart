@@ -1,5 +1,5 @@
 param(
-  [string]$FrontendDistPath = "..\frontend\dist\app",
+  [string]$FrontendDistPath = "..\Chambuavismart\frontend\dist\app",
   [string]$BackendStaticPath = "..\backend\src\main\resources\static"
 )
 

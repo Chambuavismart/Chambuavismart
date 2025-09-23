@@ -17,57 +17,167 @@ import { map, catchError } from 'rxjs/operators';
   standalone: true,
   imports: [NgIf, NgFor, NgStyle, FormsModule, RouterLink],
   styles: [`
-    :host { display:block; color:#e6eef8; }
-    .layout { display:flex; gap: 16px; }
-    .sidebar { width: 300px; background:#0b1220; border:1px solid #1f2937; border-radius:12px; padding:12px; }
-    .content { flex: 1; display:flex; flex-direction:column; gap:12px; }
-    .card { background:#0b1220; border:1px solid #1f2937; border-radius:16px; padding:12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); overflow:auto; }
-    .header { display:flex; align-items:center; justify-content:space-between; }
+    :host { display:block; color:#e0e0e0; background:#0a0a0a; font-family: Inter, Roboto, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif; font-size:16px; line-height:1.5; letter-spacing:0.1px; }
+    .app { display:flex; gap:16px; }
+    .sidebar { width:20%; min-width:220px; background:#1a1a1a; border-radius:8px; padding:12px; position:sticky; top:12px; height:fit-content; }
+    .sidebar .nav-item { display:flex; align-items:center; gap:10px; padding:10px; border-radius:6px; color:#e0e0e0; transition: background-color .2s ease, color .2s ease; cursor:pointer; font-size:16px; }
+    .sidebar .nav-item:hover { background:#333333; color:#007bff; }
+    .sidebar .nav-item.active { background:#007bff; color:#ffffff; }
+    .sidebar .icon { width:20px; text-align:center; }
+
+    .content { flex:1; display:flex; flex-direction:column; gap:12px; }
+    .card { background:#2a2a2a; border-radius:8px; padding:12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .card.header { display:flex; align-items:center; justify-content:space-between; }
+
+    .form-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; }
+    .form-grid .full { grid-column: 1 / -1; }
+
+    .select, .input, .btn { background:#1a1a1a; border:1px solid #404040; color:#e0e0e0; padding:10px; border-radius:8px; font-size:16px; }
+    .input::placeholder { color:#bdbdbd; opacity:1; font-size:14px; }
+    .select option { background:#2a2a2a; color:#e0e0e0; }
+    .select:focus, .input:focus, .btn:focus { outline:2px solid #007bff; outline-offset:2px; }
+    .btn { cursor:pointer; transition: background-color .2s ease, transform .2s ease, color .2s ease, border-color .2s ease; font-weight:700; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn.primary { background:#28a745; border-color:#28a745; color:#04110a; font-weight:700; }
+    .btn.primary:hover { background:#218838; border-color:#218838; }
+    .btn.secondary { background:#007bff; border-color:#007bff; color:#ffffff; font-weight:700; }
+    .btn.secondary:hover { background:#0056b3; border-color:#0056b3; }
+
+    .muted { color:#e0e0e0; opacity:0.9; font-size:16px; }
     .w3 { display:flex; gap:8px; align-items:flex-end; }
     .bar { height: 18px; border-radius:6px; }
-    .bar.home { background:#19b562; }
+    .bar.home { background:#28a745; }
     .bar.draw { background:#9ca3af; }
     .bar.away { background:#0ea5e9; }
     .stats { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:12px; }
     .stat { text-align:center; }
-    .circle { width: 80px; height: 80px; border-radius: 50%; background: conic-gradient(#19b562 var(--p, 0deg), #1f2937 0); display:grid; place-items:center; margin:0 auto; }
-    .circle span { font-weight:800; }
-    .advice { font-weight:800; font-size: 18px; color: #04110a; background:#19b562; padding:12px; border-radius:12px; text-align:center; }
+    .circle { width: 80px; height: 80px; border-radius: 50%; background: conic-gradient(#28a745 var(--p, 0deg), #1f2937 0); display:grid; place-items:center; margin:0 auto; }
+    .circle span { font-weight:800; color:#ffffff; }
+    .advice { font-weight:800; font-size: 18px; color: #04110a; background:#28a745; padding:12px; border-radius:12px; text-align:center; }
 
     .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-    .select, .input, .btn { background:#0b1220; border:1px solid #1f2937; color:#e6eef8; padding:6px 8px; border-radius:8px; }
-    .btn.primary { background:#19b562; color:#04110a; border-color:#19b562; font-weight:800; cursor:pointer; }
-    .weighted { color:#9fb3cd; font-size:12px; margin-left:6px; }
 
-    @media (max-width:900px) { .layout { flex-direction:column; } .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width:768px) {
+      .app { flex-direction:column; }
+      .sidebar { position:relative; width:100%; }
+      .form-grid { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      :host { font-size:15px; }
+      .select, .input, .btn { font-size:15px; }
+      .sidebar .nav-item { font-size:15px; }
+    }
   `],
   template: `
-    <h1 style="font-weight:800; margin: 8px 0 12px;">Match Analysis</h1>
+    <div class="app" aria-label="Match Analysis Layout">
+      <aside class="sidebar" aria-label="Sidebar Navigation">
+        <div class="nav-item" [class.active]="true">
+          <span class="icon">📈</span>
+          <span>Match Analysis</span>
+        </div>
+        <a class="nav-item" routerLink="/" aria-label="Home Navigation"><span class="icon">🏠</span><span>Home</span></a>
+        <a class="nav-item" routerLink="/fixtures" aria-label="Fixtures Navigation"><span class="icon">📅</span><span>Fixtures</span></a>
+        <a class="nav-item" routerLink="/form-guide" aria-label="Form Guide Navigation"><span class="icon">🧭</span><span>Form Guide</span></a>
+        <a class="nav-item" routerLink="/quick-insights" aria-label="Quick Insights Navigation"><span class="icon">⚡</span><span>Quick Insights</span></a>
+        <a class="nav-item" routerLink="/league-table" aria-label="League Table Navigation"><span class="icon">🏆</span><span>League Table</span></a>
+        <a class="nav-item" routerLink="/data" aria-label="Data Management Navigation"><span class="icon">🗂️</span><span>Data Management</span></a>
+        <a class="nav-item" routerLink="/team-search" aria-label="Team Search Navigation"><span class="icon">🔎</span><span>Team Search</span></a>
+        <a class="nav-item" routerLink="/fixtures-analysis" aria-label="Fixtures Analysis Navigation"><span class="icon">🧮</span><span>Fixtures Analysis</span></a>
+        <a class="nav-item" routerLink="/fixture-analysis-history" aria-label="Fixture Analysis History Navigation"><span class="icon">🕘</span><span>Fixture Analysis History</span></a>
+        <a class="nav-item" routerLink="/admin" aria-label="Admin Navigation"><span class="icon">🛠️</span><span>Admin</span></a>
+      </aside>
 
-    <div class="toolbar">
-      <label>League</label>
-      <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="onLeagueChange()">
-        <option [ngValue]="null">Select league...</option>
-        <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }}</option>
-      </select>
-      <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="homeTeamName">
-        <option [ngValue]="''">Select home team...</option>
-        <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
-      </select>
-      <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="awayTeamName">
-        <option [ngValue]="''">Select away team...</option>
-        <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
-      </select>
-      <label *ngIf="selectedLeagueId">Season</label>
-      <select class="select" *ngIf="selectedLeagueId" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
-        <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
-      </select>
-      <button class="btn primary" (click)="analyze()">Analyze</button>
-      <span style="flex:1"></span>
-      <a routerLink="/fixtures" class="btn">Pick from Fixtures</a>
-    </div>
+      <section class="content" aria-label="Match Analysis Content">
+        <!-- Top title card -->
+        <div class="card header">
+          <div>
+            <div style="font-size:24px; font-weight:800; color:#ffffff;">Match Analysis</div>
+            <div class="muted">Analyze match data for selected teams • {{ eatNow }}</div>
+          </div>
+          <div title="More info"><span>ℹ️</span></div>
+        </div>
 
-    <!-- Head-to-head section placed directly below the top Analyze button -->
+        <!-- Selection card -->
+        <div class="card" aria-label="Match Analysis Form">
+          <div class="form-grid">
+            <div class="full">
+              <label class="muted" for="leagueSel">League</label>
+              <select id="leagueSel" class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="onLeagueChange()">
+                <option [ngValue]="null">Select league...</option>
+                <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted" for="homeTeamSel">Home Team</label>
+              <input class="input" placeholder="Search home..." [(ngModel)]="homeFilter" aria-label="Home Team Search" />
+              <select id="homeTeamSel" class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="homeTeamName">
+                <option [ngValue]="''">Select home team...</option>
+                <option *ngFor="let t of filteredHomeTeams" [ngValue]="t">{{ t }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted" for="awayTeamSel">Away Team</label>
+              <input class="input" placeholder="Search away..." [(ngModel)]="awayFilter" aria-label="Away Team Search" />
+              <select id="awayTeamSel" class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="awayTeamName">
+                <option [ngValue]="''">Select away team...</option>
+                <option *ngFor="let t of filteredAwayTeams" [ngValue]="t">{{ t }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted" for="seasonSel">Season</label>
+              <select id="seasonSel" class="select" [disabled]="!selectedLeagueId" [ngModel]="seasonId" (ngModelChange)="onSeasonChange($event)">
+                <option *ngFor="let s of seasons" [ngValue]="s.id">{{ s.name }}</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <button class="btn secondary" (click)="quickSearchOpen = !quickSearchOpen">Quick Search</button>
+          </div>
+        </div>
+
+        <!-- Secondary quick search card -->
+        <div class="card" *ngIf="quickSearchOpen">
+          <div class="form-grid">
+            <div>
+              <label class="muted">League</label>
+              <select class="select" [(ngModel)]="selectedLeagueId" (ngModelChange)="onLeagueChange()">
+                <option [ngValue]="null">Select league...</option>
+                <option *ngFor="let l of leagues" [ngValue]="l.leagueId">{{ l.leagueName }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted">Home Team</label>
+              <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="homeTeamName">
+                <option [ngValue]="''">Select home team...</option>
+                <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted">Away Team</label>
+              <select class="select" [disabled]="!teamsForLeague.length" [(ngModel)]="awayTeamName">
+                <option [ngValue]="''">Select away team...</option>
+                <option *ngFor="let t of teamsForLeague" [ngValue]="t">{{ t }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action card -->
+        <div class="card" aria-label="Action Buttons">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn primary" (click)="analyze()">Analyze</button>
+            <a class="btn secondary" routerLink="/fixtures">Pick from Fixtures</a>
+            <span class="muted" *ngIf="!analysis && !loading">Load a match to see analysis</span>
+          </div>
+        </div>
+
+        <!-- Loading/analysis card -->
+        <div class="card" *ngIf="loading">
+          <span class="muted"><span class="spinner">⏳</span> Working on it…</span>
+        </div>
+
+        <!-- Existing content below -->
+
+        <!-- Head-to-head section placed directly below the top Analyze button -->
     <div *ngIf="analysis" class="card" style="margin-top:8px;">
       <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;">
         <h3 style="font-weight:800; margin:0;">Head-to-head matches</h3>
@@ -272,7 +382,7 @@ import { map, catchError } from 'rxjs/operators';
               <div *ngIf="analysis?.homeStreakInsight" style="border:1px solid #1f2937; border-radius:8px; padding:8px;">
                 <div style="font-weight:700; margin-bottom:6px; color:#9fb3cd;">{{ analysis?.homeTeam }} current streak: {{ analysis?.homeStreakInsight?.pattern || '0' }}</div>
                 <!-- Data table -->
-                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <table style="width:100%; border-collapse:collapse; font-size:16px;">
                   <thead>
                     <tr>
                       <th style="text-align:left; padding:6px; border-bottom:1px solid #1f2937; color:#9fb3cd;">Metric</th>
@@ -309,7 +419,7 @@ import { map, catchError } from 'rxjs/operators';
               <!-- AWAY TEAM INSIGHT -->
               <div *ngIf="analysis?.awayStreakInsight" style="border:1px solid #1f2937; border-radius:8px; padding:8px;">
                 <div style="font-weight:700; margin-bottom:6px; color:#9fb3cd;">{{ analysis?.awayTeam }} current streak: {{ analysis?.awayStreakInsight?.pattern || '0' }}</div>
-                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <table style="width:100%; border-collapse:collapse; font-size:16px;">
                   <thead>
                     <tr>
                       <th style="text-align:left; padding:6px; border-bottom:1px solid #1f2937; color:#9fb3cd;">Metric</th>
@@ -350,6 +460,33 @@ import { map, catchError } from 'rxjs/operators';
   `
 })
 export class MatchAnalysisComponent implements OnInit {
+  // UI state
+  quickSearchOpen = false;
+  homeFilter = '';
+  awayFilter = '';
+
+  get filteredHomeTeams(): string[] {
+    const q = (this.homeFilter || '').toLowerCase();
+    if (!q) return this.teamsForLeague;
+    return (this.teamsForLeague || []).filter(t => (t || '').toLowerCase().includes(q));
+    }
+
+  get filteredAwayTeams(): string[] {
+    const q = (this.awayFilter || '').toLowerCase();
+    if (!q) return this.teamsForLeague;
+    return (this.teamsForLeague || []).filter(t => (t || '').toLowerCase().includes(q));
+  }
+
+  get eatNow(): string {
+    try {
+      // Show Nairobi time succinctly
+      const now = new Date();
+      // We cannot change timezone reliably in browser; show locale string with EAT label.
+      return now.toLocaleString() + ' EAT';
+    } catch {
+      return '';
+    }
+  }
   trackH2H(index: number, item: any) { return index; }
   trackH2HCompact(index: number, item: any) { return index; }
   private fixturesApi = inject(FixturesService);
