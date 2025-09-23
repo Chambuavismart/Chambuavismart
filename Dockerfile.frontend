@@ -1,6 +1,8 @@
 # Build Angular app
 FROM node:20-alpine AS build
 WORKDIR /app
+# Install the latest npm globally for the build environment
+RUN npm i -g npm@latest
 COPY Chambuavismart/frontend/package*.json ./Chambuavismart/frontend/
 RUN cd Chambuavismart/frontend && npm ci
 COPY Chambuavismart/frontend ./Chambuavismart/frontend

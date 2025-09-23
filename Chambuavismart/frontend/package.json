@@ -11,13 +11,14 @@
     "check:dist": "node ./scripts/check-dist.js",
     "test": "ng test",
     "lint": "ng lint",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "npm:local": "node ./node_modules/npm/bin/npm-cli.js --version"
   },
   "engines": {
     "node": ">=18.13.0 <19 || >=20.9.0 <21",
-    "npm": ">=9 <11"
+    "npm": ">=10"
   },
-  "packageManager": "npm@10.9.2",
+  "packageManager": "npm@latest",
   "dependencies": {
     "@angular/animations": "17.3.8",
     "@angular/common": "17.3.8",
@@ -43,6 +44,7 @@
     "karma-jasmine": "5.1.0",
     "karma-jasmine-html-reporter": "2.1.0",
     "typescript": "5.4.5",
-    "patch-package": "8.0.0"
+    "patch-package": "8.0.0",
+    "npm": "latest"
   }
 }

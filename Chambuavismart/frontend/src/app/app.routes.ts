@@ -26,6 +26,7 @@ export const routes: Routes = [
   { path: 'wekelea-baskets', canActivate: [authGuard], loadComponent: () => import('./pages/wekelea-baskets.component').then(m => m.WekeleaBasketsComponent), title: 'Wekelea Baskets' },
   { path: 'team-search', canActivate: [authGuard], loadComponent: () => import('./pages/team-search.component').then(m => m.TeamSearchComponent), title: 'Team Search' },
   { path: 'played-matches-summary', canActivate: [authGuard], loadComponent: () => import('./pages/played-matches-summary.component').then(m => m.PlayedMatchesSummaryComponent), title: 'Fixtures Analysis' },
+  { path: 'hot-picks-today', canActivate: [authGuard], loadComponent: () => import('./pages/hot-picks-today.component').then(m => m.HotPicksTodayComponent), title: 'Hot Picks Today' },
   { path: 'fixtures', canActivate: [authGuard], component: FixturesComponent, title: 'Fixtures' },
   { path: 'teams', canActivate: [authGuard], component: TeamsComponent, title: 'Teams' },
   { path: 'matchup', canActivate: [authGuard], component: MatchupAnalyzerComponent, title: 'Matchup Analyzer' },

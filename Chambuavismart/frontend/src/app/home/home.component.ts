@@ -1,8 +1,9 @@
-import { Component, inject, OnInit, OnDestroy } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, NgZone, ChangeDetectorRef } from '@angular/core';
 import { Router, RouterModule, ActivatedRoute } from '@angular/router';
-import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
+import { NgFor, NgIf, DatePipe, NgClass, NgStyle } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { FixturesService, LeagueFixturesResponse, SearchFixtureItemDTO } from '../services/fixtures.service';
+import { AnalysisColorCacheService } from '../services/analysis-color-cache.service';
 import { GlobalLeadersContainerComponent } from '../components/global-leaders-container/global-leaders-container.component';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
 import { forkJoin } from 'rxjs';
@@ -10,7 +11,7 @@ import { forkJoin } from 'rxjs';
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [RouterModule, FormsModule, NgFor, NgIf, NgClass, DatePipe, GlobalLeadersContainerComponent],
+  imports: [RouterModule, FormsModule, NgFor, NgIf, NgClass, NgStyle, DatePipe, GlobalLeadersContainerComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.css']
 })
@@ -32,6 +33,9 @@ export class HomeComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private leadersApi = inject(GlobalLeadersService);
   private route = inject(ActivatedRoute);
+  private colorCache = inject(AnalysisColorCacheService);
+  private zone = inject(NgZone);
+  private cdr = inject(ChangeDetectorRef);
 
   today = new Date();
   showCalendar = false;
@@ -193,6 +197,7 @@ export class HomeComponent implements OnInit, OnDestroy {
       setTimeout(() => this.selectDate(qpDate), 0);
     }
     window.addEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
+    window.addEventListener('fixtures:colors-updated', this._onColorsUpdated as EventListener);
   }
 
   toggleSidebar(){ this.sidebarOpen = !this.sidebarOpen; }
@@ -210,6 +215,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     window.removeEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
+    window.removeEventListener('fixtures:colors-updated', this._onColorsUpdated as EventListener);
   }
 
   private isDev(): boolean {
@@ -593,9 +599,37 @@ export class HomeComponent implements OnInit, OnDestroy {
     return typeof fallback === 'string' ? (fallback || '').trim() : '';
   }
 
-  // Navigate to Played Matches Summary (Fixture Analysis) with preselected teams
-  // Reuse the exact logic used in Fixtures tab: h2hHome, h2hAway, and optional leagueId
-  goToAnalysis(league: { leagueId?: number; leagueName?: string } | null, f: any) {
+  // Style for colored team pills based on Fixtures Analysis cache
+  teamPillStyle(teamName: string | null | undefined, leagueId?: number | null): {[k: string]: string} {
+    const name = (teamName || '').toString().trim();
+    if (!name) return {};
+    try {
+      const color = this.colorCache.getTeamColor(name, leagueId ?? undefined);
+      if (!color) return {};
+      return {
+        background: color,
+        color: '#ffffff',
+        padding: '2px 6px',
+        borderRadius: '6px',
+        border: '1px solid rgba(255,255,255,0.15)'
+      };
+    } catch { return {}; }
+  }
+
+  // React to color updates from Fixtures Analysis tab
+  private _onColorsUpdated = (_ev: Event) => {
+    try {
+      this.zone.run(() => {
+        // Force a lightweight refresh so ngStyle re-evaluates
+        this.todayFlatData = this.todayFlatData.slice();
+        try { this.cdr.detectChanges(); } catch {}
+      });
+    } catch { /* no-op */ }
+  };
+ 
+   // Navigate to Played Matches Summary (Fixture Analysis) with preselected teams
+   // Reuse the exact logic used in Fixtures tab: h2hHome, h2hAway, and optional leagueId
+   goToAnalysis(league: { leagueId?: number; leagueName?: string } | null, f: any) {
     if (!f) return;
     const leagueId = league?.leagueId ?? null;
     this.router.navigate(['/played-matches-summary'], {

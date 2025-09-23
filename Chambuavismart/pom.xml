@@ -12,6 +12,7 @@
     <description>Root Maven aggregator for Chambua ViSmart</description>
 
     <modules>
-        <module>backend</module>
+        <!-- Point to the actual backend module located one level up -->
+        <module>../backend</module>
     </modules>
 </project>

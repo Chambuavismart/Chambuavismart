@@ -204,5 +204,8 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Persian Gulf Pro League",
     "Azadegan League",
     "Kowsar Women Football League"
+  ],
+  "Tanzania": [
+    "Ligi Kuu Bara"
   ]
 });

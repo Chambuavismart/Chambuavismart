@@ -9,6 +9,7 @@ import { Subject, debounceTime, distinctUntilChanged, switchMap, of, takeUntil }
 import { LeagueContextService } from '../services/league-context.service';
 import { Predictions } from '../services/poisson.service';
 import { MatchAnalysisService, MatchAnalysisRequest, MatchAnalysisResponse } from '../services/match-analysis.service';
+import { AnalysisColorCacheService } from '../services/analysis-color-cache.service';
 
 @Component({
   selector: 'app-played-matches-summary',
@@ -532,6 +533,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   predictions: Predictions | null = null;
   private matchAnalysis = inject(MatchAnalysisService);
   private leagueContext = inject(LeagueContextService);
+  private colorCache = inject(AnalysisColorCacheService);
 
   // Expose Math if needed in template calculations
   Math = Math;
@@ -949,6 +951,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         const has = !!b && (b.longestStreakCount as any) > 0 && !!b.longestStreakType;
         if (has) console.log('[H2H][HomeBreakdown][RESP]', { name: homeName, longest: `${b.longestStreakType}:${b.longestStreakCount}` });
         else console.warn('[H2H][HomeBreakdown][RESP][NO_STREAK]', { name: homeName, total: b?.total ?? 0, payload: b });
+        this.tryPersistH2HColors();
       },
       error: () => { this.homeBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0, over15: 0 } as any; this.loadingHomeBreakdown = false; }
     });
@@ -964,6 +967,7 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
         const has = !!b && (b.longestStreakCount as any) > 0 && !!b.longestStreakType;
         if (has) console.log('[H2H][AwayBreakdown][RESP]', { name: awayName, longest: `${b.longestStreakType}:${b.longestStreakCount}` });
         else console.warn('[H2H][AwayBreakdown][RESP][NO_STREAK]', { name: awayName, total: b?.total ?? 0, payload: b });
+        this.tryPersistH2HColors();
       },
       error: () => { this.awayBreakdown = { total: 0, wins: 0, draws: 0, losses: 0, btts: 0, over25: 0, over15: 0 } as any; this.loadingAwayBreakdown = false; }
     });
@@ -1290,6 +1294,41 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     if (!edge) return {};
     // 6px inset ring; no background fill. This does not distort green/red/orange stat texts.
     return { boxShadow: `inset 0 0 0 6px ${edge}` };
+  }
+
+  // Compute a display color for team pill based on longest-ever streak from Fixtures Analysis
+  private computeColorFromBreakdown(b?: TeamBreakdownDto | null): string | null {
+    const t = (b?.longestStreakType || '').toUpperCase();
+    const c = b?.longestStreakCount || 0;
+    // Match Fixtures Analysis UI rule: highlight only for strong streaks (>5)
+    if (!t || !c || c <= 5) return null;
+    if (t === 'W') return 'rgba(16,160,16,0.85)';   // green
+    if (t === 'L') return 'rgba(204, 43, 59, 0.85)'; // red
+    if (t === 'D') return 'rgba(255, 165, 0, 0.85)'; // orange
+    return null;
+  }
+
+  // Persist H2H team colors into local cache so Home page can render colored pills for today's fixtures
+  private tryPersistH2HColors(): void {
+    try {
+      if (!this.h2hSelected) return;
+      if (!this.h2hHome || !this.h2hAway) return;
+      if (this.loadingHomeBreakdown || this.loadingAwayBreakdown) return;
+      const homeColor = this.computeColorFromBreakdown(this.homeBreakdown);
+      const awayColor = this.computeColorFromBreakdown(this.awayBreakdown);
+      const lid = this.leagueId ?? undefined;
+      let changed = false;
+      if (homeColor) { this.colorCache.setTeamColor(this.h2hHome, homeColor, lid); changed = true; }
+      else { this.colorCache.removeTeamColor(this.h2hHome, lid); changed = true; }
+      if (awayColor) { this.colorCache.setTeamColor(this.h2hAway, awayColor, lid); changed = true; }
+      else { this.colorCache.removeTeamColor(this.h2hAway, lid); changed = true; }
+      if (changed) {
+        console.log('[FixturesAnalysis] Updated team colors', { leagueId: lid, home: this.h2hHome, homeColor, away: this.h2hAway, awayColor });
+        try { window.dispatchEvent(new CustomEvent('fixtures:colors-updated', { detail: { leagueId: lid, home: this.h2hHome, away: this.h2hAway } })); } catch {}
+      }
+    } catch (e) {
+      console.warn('[FixturesAnalysis] Failed to persist team colors', e);
+    }
   }
 
   // --- Form rendering helpers ---

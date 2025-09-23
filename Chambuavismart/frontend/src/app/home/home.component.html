@@ -12,6 +12,7 @@
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Match Analysis'" routerLink="/match-analysis" (click)="setActive('Match Analysis')" title="Match Analysis"><i class="fa fa-chart-line"></i> Match Analysis</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Form Guide'" routerLink="/form-guide" (click)="setActive('Form Guide')" title="Form Guide"><i class="fa fa-stream"></i> Form Guide</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Quick Insights'" routerLink="/quick-insights" (click)="setActive('Quick Insights')" title="Quick Insights"><i class="fa fa-bolt"></i> Quick Insights</li>
+      <li class="nav-item" role="menuitem" [class.active]="activeNav==='Hot Picks Today'" routerLink="/hot-picks-today" (click)="setActive('Hot Picks Today')" title="Hot Picks Today"><i class="fa fa-fire"></i> Hot Picks Today</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='League Table'" routerLink="/league-table" (click)="setActive('League Table')" title="League Table"><i class="fa fa-table"></i> League Table</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Data Management'" routerLink="/data-management" (click)="setActive('Data Management')" title="Data Management"><i class="fa fa-database"></i> Data Management</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Team Search'" routerLink="/team-search" (click)="setActive('Team Search')" title="Team Search"><i class="fa fa-search"></i> Team Search</li>
@@ -64,9 +65,9 @@
                 <span class="text">{{ item.leagueCountry || 'Unknown Country' }} — {{ item.leagueName || 'Unknown League' }}</span>
               </div>
               <div class="fixture-teams" aria-label="Fixture teams">
-                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
+                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
                 <span class="vs" aria-hidden="true">vs</span>
-                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
+                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
               </div>
               <div class="fixture-status">
                 <span class="status" [class.upcoming]="computeStatus(item.fixture)==='UPCOMING'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>
