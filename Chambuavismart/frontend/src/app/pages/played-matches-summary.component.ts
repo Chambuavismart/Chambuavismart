@@ -1314,9 +1314,15 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       if (!this.h2hSelected) return;
       if (!this.h2hHome || !this.h2hAway) return;
       if (this.loadingHomeBreakdown || this.loadingAwayBreakdown) return;
-      const homeColor = this.computeColorFromBreakdown(this.homeBreakdown);
-      const awayColor = this.computeColorFromBreakdown(this.awayBreakdown);
+      const computedHome = this.computeColorFromBreakdown(this.homeBreakdown);
+      const computedAway = this.computeColorFromBreakdown(this.awayBreakdown);
       const lid = this.leagueId ?? undefined;
+
+      // Apply Indigo fallback only when neither team qualifies for a color
+      const INDIGO = 'rgba(75, 0, 130, 0.85)';
+      const homeColor = computedHome || (computedHome === null && computedAway === null ? INDIGO : null);
+      const awayColor = computedAway || (computedHome === null && computedAway === null ? INDIGO : null);
+
       let changed = false;
       if (homeColor) { this.colorCache.setTeamColor(this.h2hHome, homeColor, lid); changed = true; }
       else { this.colorCache.removeTeamColor(this.h2hHome, lid); changed = true; }

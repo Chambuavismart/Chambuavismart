@@ -270,14 +270,8 @@ export class HomeComponent implements OnInit, OnDestroy {
             flat.push({ leagueId: lg.leagueId, leagueName: lg.leagueName, leagueCountry: lg.leagueCountry, fixture: f });
           }
         }
-        flat.sort((a, b) => {
-          const ta = this.toUtcMillis(a.fixture?.dateTime);
-          const tb = this.toUtcMillis(b.fixture?.dateTime);
-          if (isNaN(ta) && isNaN(tb)) return 0;
-          if (isNaN(ta)) return 1;
-          if (isNaN(tb)) return -1;
-          return ta - tb;
-        });
+        // Sort with priority: fixtures without analysis colors first, then by kickoff time ascending
+        flat.sort((a, b) => this.compareFixturesForToday(a, b));
         this.todayFlatData = flat;
         if (this.isDev()) {
           try {
@@ -500,6 +494,38 @@ export class HomeComponent implements OnInit, OnDestroy {
     return d.getTime();
   }
 
+  // Determine if a fixture has been analysed based on presence of team colors in cache
+  private hasAnalysisColors(item: { leagueId?: number; fixture: any }): boolean {
+    try {
+      const leagueId = item?.leagueId ?? undefined;
+      const f = item?.fixture || {};
+      const home = (f.homeTeam || this.normalizeTeamName(f, 'home') || '').toString().trim();
+      const away = (f.awayTeam || this.normalizeTeamName(f, 'away') || '').toString().trim();
+      if (!home && !away) return false;
+      const c1 = home ? this.colorCache.getTeamColor(home, leagueId) : null;
+      const c2 = away ? this.colorCache.getTeamColor(away, leagueId) : null;
+      return !!(c1 || c2);
+    } catch { return false; }
+  }
+
+  // Comparator: unanalysed fixtures first; within each group, order by kickoff time ascending
+  private compareFixturesForToday = (a: { leagueId?: number; fixture: any }, b: { leagueId?: number; fixture: any }): number => {
+    const aAnalysed = this.hasAnalysisColors(a) ? 1 : 0;
+    const bAnalysed = this.hasAnalysisColors(b) ? 1 : 0;
+    if (aAnalysed !== bAnalysed) return aAnalysed - bAnalysed; // 0 (unanalysed) comes before 1 (analysed)
+    const ta = this.toUtcMillis(a.fixture?.dateTime);
+    const tb = this.toUtcMillis(b.fixture?.dateTime);
+    if (isNaN(ta) && isNaN(tb)) return 0;
+    if (isNaN(ta)) return 1;
+    if (isNaN(tb)) return -1;
+    return ta - tb;
+  }
+
+  private resortTodayFlatData(): void {
+    if (!Array.isArray(this.todayFlatData) || this.todayFlatData.length === 0) return;
+    this.todayFlatData = this.todayFlatData.slice().sort(this.compareFixturesForToday);
+  }
+
   // Returns {y,m,d} of given Date in a given IANA timezone using Intl API
   private getYMDInTz(date: Date, timeZone: string): { y: number; m: number; d: number } {
     const fmt = new Intl.DateTimeFormat('en-GB', {
@@ -620,8 +646,8 @@ export class HomeComponent implements OnInit, OnDestroy {
   private _onColorsUpdated = (_ev: Event) => {
     try {
       this.zone.run(() => {
-        // Force a lightweight refresh so ngStyle re-evaluates
-        this.todayFlatData = this.todayFlatData.slice();
+        // Resort based on updated analysis colors and refresh view
+        this.resortTodayFlatData();
         try { this.cdr.detectChanges(); } catch {}
       });
     } catch { /* no-op */ }

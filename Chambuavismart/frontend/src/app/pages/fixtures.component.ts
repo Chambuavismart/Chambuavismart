@@ -109,7 +109,7 @@ import { forkJoin } from 'rxjs';
                 <div class="subtitle"><i class="fa fa-calendar"></i> View upcoming matches by league</div>
               </div>
               <div style="flex:1; max-width:420px; min-width:240px;">
-                <input type="text" class="search-input" [(ngModel)]="leagueSearch" placeholder="Search leagues by country or name..." aria-label="Search leagues"/>
+                <input type="text" class="search-input" [(ngModel)]="leagueSearch" (ngModelChange)="onLeagueSearchChange()" placeholder="Search leagues by country or name..." aria-label="Search leagues"/>
               </div>
             </div>
           </div>
@@ -119,7 +119,11 @@ import { forkJoin } from 'rxjs';
         <section aria-label="Leagues list">
           <div *ngFor="let l of visibleLeagues; trackBy: trackLeague" class="league-card">
             <div class="league-header" (click)="toggleAccordion(l.leagueId)" [attr.aria-expanded]="expandedLeagueId === l.leagueId" [attr.aria-label]="'League: ' + l.leagueCountry + ' - ' + l.leagueName + ' ' + l.season">
-              <div class="league-name"><i class="fa fa-globe"></i> <span>{{ l.leagueCountry }} - {{ l.leagueName }} {{ l.season }}</span></div>
+              <div class="league-name">
+                <i class="fa fa-globe"></i>
+                <span [attr.title]="leagueCountryTooltip(l)" (click)="$event.stopPropagation()">{{ l.leagueCountry }}</span>
+                <span> - {{ l.leagueName }} {{ l.season }}</span>
+              </div>
               <div class="league-actions">
                 <span class="badge" title="Upcoming fixtures">{{ l.upcomingCount }}</span>
                 <i class="fa fa-chevron-down chev" [ngClass]="{ 'expanded': expandedLeagueId === l.leagueId }"></i>
@@ -169,16 +173,28 @@ export class FixturesComponent implements OnInit, OnDestroy {
 
   get filteredLeagues(): LeagueWithUpcomingDTO[] {
     const q = (this.leagueSearch || '').trim().toLowerCase();
-    if (!q) return this.leagues || [];
-    return (this.leagues || []).filter(l => {
-      const a = `${l.leagueCountry || ''} ${l.leagueName || ''} ${l.season || ''}`.toLowerCase();
-      return a.includes(q);
+    const source = (this.leagues || []).slice();
+    const filtered = q
+      ? source.filter(l => {
+          const a = `${l.leagueCountry || ''} ${l.leagueName || ''} ${l.season || ''}`.toLowerCase();
+          return a.includes(q);
+        })
+      : source;
+    // Sort countries A→Z; tie-break by league name A→Z
+    filtered.sort((a, b) => {
+      const ca = (a.leagueCountry || '').toLowerCase();
+      const cb = (b.leagueCountry || '').toLowerCase();
+      if (ca !== cb) return ca.localeCompare(cb);
+      const la = (a.leagueName || '').toLowerCase();
+      const lb = (b.leagueName || '').toLowerCase();
+      return la.localeCompare(lb);
     });
+    return filtered;
   }
   get visibleLeagues(): LeagueWithUpcomingDTO[] {
     return this.filteredLeagues.slice(0, this.visibleLeagueCount);
   }
-  loadMoreLeagues() { this.visibleLeagueCount += this.pageSize; }
+  loadMoreLeagues() { this.visibleLeagueCount += this.pageSize; this.preloadStatusCountsForVisibleLeagues(); }
 
   // trackBy function for leagues list to prevent unnecessary DOM re-renders
   trackLeague(index: number, l: LeagueWithUpcomingDTO): number { return l?.leagueId ?? index; }
@@ -231,6 +247,9 @@ export class FixturesComponent implements OnInit, OnDestroy {
   private leadersApi = inject(GlobalLeadersService);
   private leagueService = inject(LeagueService);
 
+  // Per-league cached counts for AWAITING and RESULTS_MISSING to power country tooltips
+  private leagueStatusCounts: Map<number, { awaiting: number; missing: number }> = new Map<number, { awaiting: number; missing: number }>();
+
   leagues: LeagueWithUpcomingDTO[] = [];
   // Grouped leagues for mobile dropdown (Country — League Name, seasons latest->oldest)
   groupedLeagues: GroupedLeagueDTO[] = [];
@@ -266,6 +285,8 @@ export class FixturesComponent implements OnInit, OnDestroy {
       // Preload leaders cache, then load fixtures
       this.loadLeaders();
       this.loadFixtures();
+      // Preload status counts for visible leagues to power country tooltips
+      this.preloadStatusCountsForVisibleLeagues();
     });
 
     // Load grouped leagues for the mobile dropdown
@@ -374,6 +395,8 @@ export class FixturesComponent implements OnInit, OnDestroy {
     // If switching to UPCOMING, we may need to refetch with backend filter.
     // If switching away, ensure we have all data by fetching without upcomingOnly.
     this.loadFixtures();
+    // Refresh tooltip counts as status categories may be of interest
+    this.preloadStatusCountsForVisibleLeagues();
   }
 
   get filteredFixtures(): FixtureDTO[] {
@@ -501,5 +524,67 @@ export class FixturesComponent implements OnInit, OnDestroy {
     }
 
     return parts.length ? parts.join(' • ') : null;
+  }
+
+  // Tooltip for country showing which leagues have fixtures awaiting or with missing results
+  leagueCountryTooltip(l: LeagueWithUpcomingDTO): string | null {
+    if (!l) return null;
+    const country = l.leagueCountry;
+    const related = (this.leagues || []).filter(x => x.leagueCountry === country);
+    const lines: string[] = [];
+    for (const item of related) {
+      const counts = this.leagueStatusCounts.get(item.leagueId);
+      const awaiting = counts?.awaiting || 0;
+      const missing = counts?.missing || 0;
+      if (awaiting || missing) {
+        const parts: string[] = [];
+        if (awaiting) parts.push(`${awaiting} awaiting`);
+        if (missing) parts.push(`${missing} missing results`);
+        lines.push(`${item.leagueName}: ${parts.join(', ')}`);
+      }
+    }
+    return lines.length ? lines.join(' • ') : null;
+  }
+
+  // Preload per-league status counts for visible leagues (and their countries)
+  private preloadStatusCountsForVisibleLeagues(): void {
+    try {
+      const needIds = new Set<number>();
+      // Start with currently visible leagues
+      for (const lg of this.visibleLeagues) {
+        if (!this.leagueStatusCounts.has(lg.leagueId)) needIds.add(lg.leagueId);
+        // Also consider other leagues in the same country (if any counts missing)
+        const siblings = (this.leagues || []).filter(x => x.leagueCountry === lg.leagueCountry);
+        for (const s of siblings) {
+          if (!this.leagueStatusCounts.has(s.leagueId)) needIds.add(s.leagueId);
+        }
+      }
+      if (!needIds.size) return;
+      const calls = Array.from(needIds).map(id => this.api.getLeagueFixtures(id, false));
+      forkJoin(calls).subscribe({
+        next: (responses: LeagueFixturesResponse[]) => {
+          for (const r of responses) {
+            const fx = r?.fixtures || [];
+            let awaiting = 0, missing = 0;
+            for (const f of fx) {
+              const st = this.computeStatus(f as any);
+              if (st === 'AWAITING') awaiting++;
+              else if (st === 'RESULTS_MISSING') missing++;
+            }
+            this.leagueStatusCounts.set(r.leagueId, { awaiting, missing });
+          }
+        },
+        error: _err => {
+          // Ignore errors; tooltips will simply not be available for those leagues
+        }
+      });
+    } catch {
+      // no-op
+    }
+  }
+
+  onLeagueSearchChange(): void {
+    // Trigger preloading for the current visible set when search changes
+    this.preloadStatusCountsForVisibleLeagues();
   }
 }

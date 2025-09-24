@@ -21,5 +21,6 @@ export const COUNTRIES: readonly string[] = [
   "Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu",
   "Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela",
   "Vietnam","Yemen","Zambia","Zimbabwe",
-  "England"
+  // Common football associations and territories not covered by ISO country short names but used in leagues
+  "England","Scotland","Wales","Northern Ireland","Kosovo","Faroe Islands","Gibraltar","Hong Kong","Taiwan","Macau"
 ] as const;

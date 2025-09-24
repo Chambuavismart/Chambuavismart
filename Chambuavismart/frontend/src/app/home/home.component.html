@@ -71,7 +71,6 @@
               </div>
               <div class="fixture-status">
                 <span class="status" [class.upcoming]="computeStatus(item.fixture)==='UPCOMING'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>
-                <span class="leader" *ngIf="involvesLeader(item.fixture)">Leader Match Today</span>
               </div>
               <div class="fixture-actions">
                 <a (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture); $event.stopPropagation();" class="link" href="javascript:void(0)">Details</a>

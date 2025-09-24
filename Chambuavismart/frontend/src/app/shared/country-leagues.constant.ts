@@ -205,6 +205,13 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Azadegan League",
     "Kowsar Women Football League"
   ],
+  "Belgium": [
+    "Jupiler Pro League",
+    "Challenger Pro League",
+    "National Division 1 - ACFF",
+    "Super League Women",
+    "1st National Women"
+  ],
   "Tanzania": [
     "Ligi Kuu Bara"
   ]
