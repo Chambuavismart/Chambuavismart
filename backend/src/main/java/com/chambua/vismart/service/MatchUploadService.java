@@ -134,6 +134,29 @@ public class MatchUploadService {
         return false;
     }
 
+    // Additional context-aware header check: matches the selected country/competition label or known country/competition names
+    private boolean isContextHeaderLine(String line, String contextLabel) {
+        if (line == null) return false;
+        String t = line.trim();
+        if (t.isEmpty()) return false;
+        // Direct match against the provided context label (from UI)
+        String ctx = normalizeKey(opt(contextLabel));
+        String l = normalizeKey(t);
+        if (!ctx.isEmpty()) {
+            if (l.equalsIgnoreCase(ctx)) return true;
+            if (l.equalsIgnoreCase(ctx + ":")) return true;
+        }
+        // Known competition or country names (if repositories/flags are available)
+        String noColon = l.endsWith(":") ? l.substring(0, l.length() - 1).trim() : l;
+        try {
+            if (isKnownCompetition(noColon)) return true;
+        } catch (Exception ignored) {}
+        try {
+            if (isKnownCountryName(noColon)) return true;
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     // Public helpers for controller/UI
     public boolean isCompetitionsFeatureEnabled() { return enableCompetitions; }
     public boolean isCompetitionLabel(String label) { return isKnownCompetition(label); }
@@ -484,6 +507,11 @@ public class MatchUploadService {
             if (line.isEmpty()) continue;
 
             // Ignore non-match headers/sections (heuristic) in non-strict behavior (strict is handled at validation level)
+            // Ignore explicit context header lines (country or competition label) in non-strict mode
+            if (!strict && isContextHeaderLine(line, country)) {
+                warnLogs.add(new WarnLog(null, null, "Ignored line: " + line));
+                continue;
+            }
             if (isLikelyNonMatchHeader(line)) {
                 warnLogs.add(new WarnLog(null, null, "Ignored line: " + line));
                 continue;
@@ -1049,6 +1077,14 @@ public class MatchUploadService {
         String tl = t.toLowerCase();
         if (tl.equals("standings") || tl.equals("draw")) return true;
         if (tl.contains("group") || tl.contains("play off") || tl.contains("apertura") || tl.contains("clausura")) return true;
+        // Common competition/league title lines without punctuation (e.g., "Serie B", "Premier League")
+        if (!tl.matches(".*[0-9].*") && !tl.contains(":") && !tl.contains("-") ) {
+            // keywords indicating competition names
+            String[] kw = new String[]{"league","serie","division","primera","segunda","championship","national","cup","bundesliga","ligue","eredivisie","superliga","super league","superlig","lig","super lig","premier","tournament"};
+            for (String k : kw) {
+                if (tl.contains(k)) return true;
+            }
+        }
         return false;
     }
 

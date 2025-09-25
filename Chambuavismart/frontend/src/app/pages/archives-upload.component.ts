@@ -262,8 +262,7 @@ Nublense
       </main>
     </div>
 
-    <!-- Optional: Font Awesome for icons (safe to ignore if globally included) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" integrity="sha512-TbdF3mYBq+eS2K3J8+q6fV7r5bQd7zOeZk8gQ9p9+uR3M0X4QxU0iE7s1aYp2r3E1q2M1dO8uTtH0v3Oqz2zYw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Font Awesome is globally included in index.html; duplicate link removed -->
   `
 })
 export class ArchivesUploadComponent {

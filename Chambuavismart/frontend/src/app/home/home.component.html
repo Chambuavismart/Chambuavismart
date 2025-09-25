@@ -1,6 +1,6 @@
 
 <!-- Flashscore-like dark layout with left sidebar and cards -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+<!-- Font Awesome is globally included in index.html; removed duplicate link to avoid conflicts -->
 
 <div class="fs-layout" role="main">
   <!-- Sidebar -->
@@ -24,16 +24,40 @@
 
   <!-- Main Content -->
   <main class="fs-main">
-    <div class="fs-grid">
+    <div class="fs-main-grid" [class.today-closed]="todayClosed">
+      <!-- Left: Main column -->
+      <div class="main-col">
       <!-- Top card -->
       <section class="card">
         <div class="card-body topbar">
           <div>
             <div class="title">CHAMBUAVISMART</div>
-            <a class="subtitle" routerLink="/fixture-analysis-history" title="View Match Analysis History">
-              <i class="fa fa-info-circle"></i>
-              View Match Analysis History
-            </a>
+            <div class="subtitle search-wrap" role="search" aria-label="Search today's fixtures by team">
+              <div class="search-area">
+                <i class="fa fa-search" aria-hidden="true"></i>
+                <input type="text"
+                       [(ngModel)]="searchQuery"
+                       (input)="onSearchInput()"
+                       (focus)="onSearchFocus()"
+                       (blur)="onSearchBlur()"
+                       (keydown)="onSearchKeydown($event)"
+                       placeholder="Search today's fixtures by team (min 3 letters)"
+                       aria-label="Search today's fixtures by team" />
+                <button type="button" class="clear-btn" *ngIf="searchQuery" (click)="clearSearch()" aria-label="Clear search">
+                  <i class="fa fa-times" aria-hidden="true"></i>
+                </button>
+                <ul class="suggestions" *ngIf="showSuggestions" role="listbox">
+                  <li class="suggestion" *ngFor="let s of searchResults; let i = index"
+                      [class.active]="i===highlightedIndex"
+                      (mousedown)="selectSuggestion(s)"
+                      role="option"
+                      [attr.aria-selected]="i===highlightedIndex ? 'true' : 'false'">
+                    <span class="teams">{{ s.fixture.homeTeam }} vs {{ s.fixture.awayTeam }}</span>
+                    <span class="meta">{{ s.leagueCountry || 'Unknown' }} — {{ s.leagueName || 'League' }} • {{ s.fixture.formattedDate || (toSafeDate(s.fixture.dateTime) | date:'EEE, d MMM, hh:mm a z':'':'Africa/Nairobi') }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
           <button class="btn btn-secondary sidebar-toggle" type="button" (click)="toggleSidebar()" [attr.aria-expanded]="sidebarOpen ? 'true' : 'false'" aria-label="Toggle navigation sidebar">
             <i class="fa fa-bars"></i>
@@ -43,11 +67,15 @@
       </section>
 
       <!-- Fixtures grid card list -->
-      <section class="card">
+      <section class="card" *ngIf="!todayClosed">
         <div class="card-body">
           <div class="section-head">
             <div class="section-title">Today's Fixtures</div>
-            <div class="section-sub">{{ todayLabel }}</div>
+            <div class="section-sub">{{ liveNowLabel || todayLabel }}</div>
+            <button type="button" class="badge badge-green announce-badge" (click)="onNotifyMe()" aria-label="Announce time to next kickoff">
+              <i class="fa fa-bullhorn" aria-hidden="true"></i>
+              Notify me
+            </button>
             <div class="flex-spacer"></div>
             <div class="badge badge-blue" aria-live="polite">
               <ng-container *ngIf="todayLoading; else cntTpl">Loading…</ng-container>
@@ -80,36 +108,130 @@
         </div>
       </section>
 
-      <!-- Footer: Why Choose -->
-      <section class="card">
-        <div class="card-body">
-          <div class="section-title">Why Choose ChambuVS</div>
-          <div class="grid-3">
-            <div class="mini-card">
-              <div class="mini-icon"><i class="fa fa-chart-line"></i></div>
-              <div class="mini-title">Match Analysis</div>
-              <div class="mini-desc">Deep, data-driven previews and confidence scoring for smarter decisions.</div>
-              <a routerLink="/match-analysis" class="link">Learn More</a>
-            </div>
-            <div class="mini-card">
-              <div class="mini-icon"><i class="fa fa-database"></i></div>
-              <div class="mini-title">Data Management</div>
-              <div class="mini-desc">Transparent uploads and league-level control over your data.</div>
-              <a routerLink="/data-management" class="link">Learn More</a>
-            </div>
-            <div class="mini-card">
-              <div class="mini-icon"><i class="fa fa-lightbulb"></i></div>
-              <div class="mini-title">Advice</div>
-              <div class="mini-desc">Actionable insights distilled from thousands of analyzed fixtures.</div>
-              <a routerLink="/quick-insights" class="link">Learn More</a>
+      </div>
+
+      <!-- Right: Past fixtures sidebar -->
+      <aside class="fs-rightbar" aria-label="Past fixtures (up to 7 days)">
+        <!-- Quick return to Today's fixtures when past is expanded -->
+        <section class="card" *ngIf="todayClosed" aria-label="Return to today's fixtures">
+          <div class="card-body">
+            <div class="section-head">
+              <div class="section-title">Past fixtures open</div>
+              <div class="flex-spacer"></div>
+              <button type="button" class="btn btn-primary" (click)="showToday()" aria-label="Back to today's fixtures">
+                <i class="fa fa-rotate-left" aria-hidden="true"></i>
+                <span style="margin-left:6px">Back to Today's Fixtures</span>
+              </button>
             </div>
           </div>
-          <div class="stats-bar">
-            <div class="stat" style="width:75%">75% Average Confidence</div>
+        </section>
+        <!-- Yesterday's fixtures collapsible section -->
+        <section class="card yesterday-card">
+          <div class="card-body">
+          <div class="section-head clickable" (click)="toggleYesterday()" (keydown.enter)="toggleYesterday()" (keydown.space)="$event.preventDefault(); toggleYesterday();" role="button" tabindex="0">
+            <div class="section-title">See yesterday's fixtures</div>
+            <div class="section-sub">Africa/Nairobi — {{ yesterdayIso }}</div>
+            <button type="button"
+                    class="badge badge-blue"
+                    (click)="$event.stopPropagation(); toggleYesterday()"
+                    [attr.aria-expanded]="!yesterdayCollapsed ? 'true' : 'false'"
+                    aria-controls="yesterday-fixtures-grid">
+              <i class="fa" [class.fa-chevron-down]="yesterdayCollapsed" [class.fa-chevron-up]="!yesterdayCollapsed" aria-hidden="true"></i>
+              <span style="margin-left:6px">{{ yesterdayCollapsed ? 'Show' : 'Hide' }}</span>
+            </button>
+            <div class="flex-spacer"></div>
+            <div class="badge badge-blue" aria-live="polite">
+              <ng-container *ngIf="yesterdayLoading; else ycTpl">Loading…</ng-container>
+              <ng-template #ycTpl>{{ yesterdayCount }}</ng-template>
+            </div>
+          </div>
+
+          <div *ngIf="!yesterdayLoading && (!yesterdayFlatData || yesterdayFlatData.length === 0)" class="muted">No pending fixtures from yesterday.</div>
+
+          <div [id]="'yesterday-fixtures-grid'" class="grid-2" *ngIf="!yesterdayCollapsed && !yesterdayLoading && yesterdayFlatData && yesterdayFlatData.length">
+            <div class="fixture-card" *ngFor="let item of yesterdayFlatData; trackBy: trackByFixtureId" [attr.aria-label]="'Fixture: ' + (item.fixture.homeTeam || 'Unknown Home') + ' vs ' + (item.fixture.awayTeam || 'Unknown Away')" (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture)" tabindex="0" role="button">
+              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'':'Africa/Nairobi') }}</div>
+              <div class="fixture-league" title="{{ (item.leagueCountry || 'Unknown Country') + ' — ' + (item.leagueName || 'Unknown League') }}">
+                <i class="fa fa-flag" aria-hidden="true"></i>
+                <span class="text">{{ item.leagueCountry || 'Unknown Country' }} — {{ item.leagueName || 'Unknown League' }}</span>
+              </div>
+              <div class="fixture-teams" aria-label="Fixture teams">
+                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
+                <span class="vs" aria-hidden="true">vs</span>
+                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
+              </div>
+              <div class="fixture-status">
+                <span class="status" [class.upcoming]="computeStatus(item.fixture)!=='FINISHED'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>
+              </div>
+              <div class="fixture-actions">
+                <a (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture); $event.stopPropagation();" class="link" href="javascript:void(0)">Details</a>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
+      <!-- Additional past days sections (2–7 days back) -->
+      <section class="card yesterday-card" *ngFor="let sec of pastSections; trackBy: trackByPastSection">
+        <div class="card-body">
+          <div class="section-head clickable" (click)="togglePast(sec)" (keydown.enter)="togglePast(sec)" (keydown.space)="$event.preventDefault(); togglePast(sec);" role="button" tabindex="0">
+            <div class="section-title">See fixtures for {{ sec.iso }}</div>
+            <div class="section-sub">Africa/Nairobi — {{ sec.iso }}</div>
+            <button type="button"
+                    class="badge badge-blue"
+                    (click)="$event.stopPropagation(); togglePast(sec)"
+                    [attr.aria-expanded]="!sec.collapsed ? 'true' : 'false'"
+                    [attr.aria-controls]="'past-fixtures-grid-' + sec.iso">
+              <i class="fa" [class.fa-chevron-down]="sec.collapsed" [class.fa-chevron-up]="!sec.collapsed" aria-hidden="true"></i>
+              <span style="margin-left:6px">{{ sec.collapsed ? 'Show' : 'Hide' }}</span>
+            </button>
+            <div class="flex-spacer"></div>
+            <div class="badge badge-blue" aria-live="polite">
+              <ng-container *ngIf="sec.loading; else pcTpl">Loading…</ng-container>
+              <ng-template #pcTpl>{{ sec.flatData?.length || 0 }}</ng-template>
+            </div>
+          </div>
+
+          <div *ngIf="!sec.loading && (!sec.flatData || sec.flatData.length === 0)" class="muted">No pending fixtures for {{ sec.iso }}.</div>
+
+          <div class="grid-2" [id]="'past-fixtures-grid-' + sec.iso" *ngIf="!sec.collapsed && !sec.loading && sec.flatData && sec.flatData.length">
+            <div class="fixture-card" *ngFor="let item of sec.flatData; trackBy: trackByFixtureId" [attr.aria-label]="'Fixture: ' + (item.fixture.homeTeam || 'Unknown Home') + ' vs ' + (item.fixture.awayTeam || 'Unknown Away')" (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture)" tabindex="0" role="button">
+              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'':'Africa/Nairobi') }}</div>
+              <div class="fixture-league" title="{{ (item.leagueCountry || 'Unknown Country') + ' — ' + (item.leagueName || 'Unknown League') }}">
+                <i class="fa fa-flag" aria-hidden="true"></i>
+                <span class="text">{{ item.leagueCountry || 'Unknown Country' }} — {{ item.leagueName || 'Unknown League' }}</span>
+              </div>
+              <div class="fixture-teams" aria-label="Fixture teams">
+                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
+                <span class="vs" aria-hidden="true">vs</span>
+                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
+              </div>
+              <div class="fixture-status">
+                <span class="status" [class.upcoming]="computeStatus(item.fixture)!=='FINISHED'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>
+              </div>
+              <div class="fixture-actions">
+                <a (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture); $event.stopPropagation();" class="link" href="javascript:void(0)">Details</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      </aside>
+    </div>
+    <!-- Analysis Modal Overlay -->
+    <div class="analysis-modal" *ngIf="analysisModalOpen" (keydown.escape)="closeAnalysisModal()" tabindex="0" role="dialog" aria-modal="true" aria-label="Fixture analysis">
+      <div class="modal-backdrop" (click)="closeAnalysisModal()"></div>
+      <div class="modal-content" role="document">
+        <div class="modal-header">
+          <div class="modal-title">Fixture Analysis</div>
+          <button class="btn btn-secondary" type="button" (click)="closeAnalysisModal()" aria-label="Close analysis">
+            <i class="fa fa-times" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <iframe *ngIf="analysisUrl" [src]="analysisUrl" title="Fixture Analysis" referrerpolicy="no-referrer" loading="lazy"></iframe>
+        </div>
+      </div>
     </div>
   </main>
 </div>

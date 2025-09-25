@@ -1,4 +1,5 @@
 import { Component, inject, OnInit, OnDestroy, NgZone, ChangeDetectorRef } from '@angular/core';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { Router, RouterModule, ActivatedRoute } from '@angular/router';
 import { NgFor, NgIf, DatePipe, NgClass, NgStyle } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -36,6 +37,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   private colorCache = inject(AnalysisColorCacheService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
+  private sanitizer = inject(DomSanitizer);
 
   today = new Date();
   showCalendar = false;
@@ -47,11 +49,37 @@ export class HomeComponent implements OnInit, OnDestroy {
   loadingPast = false;
   season: string | undefined; // Optional: set if you want to constrain to a specific season
 
+  // Yesterday section state
+  yesterdayIso: string = '';
+  yesterdayCollapsed: boolean = true;
+  yesterdayLoading: boolean = false;
+  yesterdayFlatData: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+
+  // Additional past sections (2–7 days back)
+  pastSections: { daysBack: number; iso: string; collapsed: boolean; loading: boolean; flatData: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] }[] = [];
+
+  // Live clock label (Africa/Nairobi)
+  liveNowLabel: string = '';
+  private _clockTimer: any;
+
+  // Hourly voice notification (Web Speech API) aligned to :20 each hour
+  private _ttsAlignTimeout: any;
+  private _ttsHourlyTimer: any;
+  private _ttsInitialized: boolean = false;
+  private readonly HOURLY_ANCHOR_MINUTE: number = 0;
+  private readonly DAILY_FIRST_HOUR_24: number = 7;
+
   // Today's fixtures state
   todayIso: string = '';
   todayFixtures: LeagueFixturesResponse[] = [];
   // Stable, precomputed flat list for rendering (Phase 1)
   todayFlatData: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+  // When true, hide today's fixtures card to give more space to past fixtures
+  todayClosed: boolean = false;
+
+  // Analysis modal state
+  analysisModalOpen: boolean = false;
+  analysisUrl: SafeResourceUrl | null = null;
   
   // Search state for today's fixtures
   searchQuery: string = '';
@@ -99,23 +127,34 @@ export class HomeComponent implements OnInit, OnDestroy {
   searchResults: SearchFixtureItemDTO[] = [];
 
   onSearchInput(): void {
-    const q = this.searchQuery.trim();
+    const q = this.searchQuery.trim().toLowerCase();
     this.highlightedIndex = -1;
     if (q.length < 3) {
       this.searchResults = [];
       this.showSuggestions = false;
       return;
     }
-    this.fixturesApi.searchFixtures(q, 10, this.season).subscribe({
-      next: res => {
-        this.searchResults = Array.isArray(res) ? res : [];
-        this.showSuggestions = this.searchResults.length > 0;
-      },
-      error: _err => {
-        this.searchResults = [];
-        this.showSuggestions = false;
+    // Client-side filter: only search among today's fixtures as requested
+    const matches: SearchFixtureItemDTO[] = [];
+    for (const item of this.todayFlatData) {
+      const f: any = item.fixture || {};
+      const home = (f.homeTeam || this.normalizeTeamName(f, 'home') || '').toString();
+      const away = (f.awayTeam || this.normalizeTeamName(f, 'away') || '').toString();
+      const h = home.toLowerCase();
+      const a = away.toLowerCase();
+      // Match if either team starts with the entered prefix
+      if (h.startsWith(q) || a.startsWith(q)) {
+        matches.push({
+          leagueId: item.leagueId,
+          leagueName: item.leagueName,
+          leagueCountry: item.leagueCountry,
+          fixture: f
+        });
+        if (matches.length >= 10) break; // cap suggestions
       }
-    });
+    }
+    this.searchResults = matches;
+    this.showSuggestions = this.searchResults.length > 0;
   }
 
   onSearchFocus(): void {
@@ -166,6 +205,9 @@ export class HomeComponent implements OnInit, OnDestroy {
   private onFixturesRefresh = (_e?: any) => {
     // refresh today's fixtures and selected date view (if any)
     this.loadToday();
+    this.loadYesterday();
+    // Reload additional past sections
+    for (const sec of this.pastSections) this.loadPast(sec);
     if (this.selectedDate) {
       // Re-fetch for the currently selected date
       this.selectDate(this.selectedDate);
@@ -188,8 +230,20 @@ export class HomeComponent implements OnInit, OnDestroy {
       else this.activeNav = 'Home';
     } catch {}
     this.todayIso = this.toIsoLocal(this.today);
+    this.yesterdayIso = this.computeYesterdayIsoInNairobi();
+    // Initialize additional past sections for days back 2..7
+    this.pastSections = [];
+    for (let d = 2; d <= 7; d++) {
+      this.pastSections.push({ daysBack: d, iso: this.computePastIsoInNairobi(d), collapsed: true, loading: false, flatData: [] });
+    }
     this.loadLeaders();
     this.loadToday();
+    this.loadYesterday();
+    for (const sec of this.pastSections) this.loadPast(sec);
+
+    // Start live clock updating each second without triggering excessive change detection
+    this.startLiveClock();
+
     // Check if a date is provided in the URL (from global navbar calendar)
     const qpDate = this.route.snapshot.queryParamMap.get('date');
     if (qpDate && /^\d{4}-\d{2}-\d{2}$/.test(qpDate)) {
@@ -213,9 +267,413 @@ export class HomeComponent implements OnInit, OnDestroy {
     }
   }
 
+  private formatNowInNairobi(withSeconds: boolean = true): string {
+    try {
+      const opts: Intl.DateTimeFormatOptions = {
+        weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true, timeZoneName: 'short'
+      };
+      if (withSeconds) (opts as any).second = '2-digit';
+      return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: 'Africa/Nairobi' }).format(new Date());
+    } catch {
+      return this.todayLabel; // fallback
+    }
+  }
+
+  private startLiveClock(): void {
+    // Initialize immediately
+    this.liveNowLabel = this.formatNowInNairobi(true);
+    // Run timer outside Angular to avoid triggering CD on every tick
+    this.zone.runOutsideAngular(() => {
+      this._clockTimer = setInterval(() => {
+        const label = this.formatNowInNairobi(true);
+        // Re-enter Angular to update the bound property and trigger view update
+        this.zone.run(() => {
+          this.liveNowLabel = label;
+          try { this.cdr.markForCheck(); } catch {}
+        });
+      }, 1000);
+    });
+  }
+
+  // ========== Hourly Voice Notification (Web Speech API) ==========
+  private setupHourlyKickoffAnnouncements(): void {
+    if (this._ttsInitialized) return; // avoid duplicate setup
+    // Only initialize if we have at least one upcoming fixture today
+    const nextFx = this.getNextUpcomingFixture();
+    if (!nextFx) return;
+
+    this._ttsInitialized = true;
+    // Align to the first tick: if before 07:00, wait until 07:00; otherwise align to the next top-of-hour, then tick every hour
+    const ms = this.msUntilFirstHourlyTickWith7AMStart();
+    // eslint-disable-next-line no-console
+    console.debug('[HomeComponent] TTS hourly announcement (top-of-hour) will start in', Math.round(ms/1000), 'seconds');
+    this._ttsAlignTimeout = setTimeout(() => {
+      this.announceNextKickoff();
+      this._ttsHourlyTimer = setInterval(() => this.announceNextKickoff(), 60 * 60 * 1000);
+    }, ms);
+  }
+
+  private computeYesterdayIsoInNairobi(): string {
+    return this.computePastIsoInNairobi(1);
+  }
+
+  private computePastIsoInNairobi(daysBack: number): string {
+    try {
+      const tz = 'Africa/Nairobi';
+      const now = new Date();
+      const ymd = this.getYMDInTz(new Date(now.getTime() - daysBack*24*60*60*1000), tz);
+      const y = ymd.y.toString().padStart(4, '0');
+      const m = ymd.m.toString().padStart(2, '0');
+      const d = ymd.d.toString().padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    } catch {
+      const d = new Date(); d.setDate(d.getDate() - daysBack); return this.toIsoLocal(d);
+    }
+  }
+
+  private loadYesterday(): void {
+    this.yesterdayLoading = true;
+    this.yesterdayFlatData = [];
+    const tz = 'Africa/Nairobi';
+    this.fixturesApi.getFixturesByDate(this.yesterdayIso, this.season).subscribe({
+      next: (res) => {
+        const byLeague = Array.isArray(res) ? res.filter(Boolean) : [];
+        const seen = new Set<number>();
+        const flat: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+        for (const lg of byLeague) {
+          const fx = lg?.fixtures || [];
+          for (const f of fx) {
+            if (!f) continue;
+            // Only include fixtures that are not finished yet (no final results)
+            const status = this.computeStatus(f as any);
+            if (status === 'FINISHED') continue;
+            const home = this.normalizeTeamName(f, 'home');
+            const away = this.normalizeTeamName(f, 'away');
+            (f as any).homeTeam = home;
+            (f as any).awayTeam = away;
+            if (!home || !away) continue;
+            // Ensure fixture is on yesterday in EAT
+            if (!this.isSameDayInTzRef((f as any).dateTime, tz, this.yesterdayIso)) continue;
+            const id: number | undefined = typeof (f as any).id === 'number' ? (f as any).id : undefined;
+            if (id != null) {
+              if (seen.has(id)) continue;
+              seen.add(id);
+            }
+            // Preformat display date
+            let formattedDate: string | null = null;
+            try {
+              const d = new Date((f as any).dateTime);
+              if (!isNaN(d.getTime())) {
+                formattedDate = new Intl.DateTimeFormat('en-GB', {
+                  weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz, timeZoneName: 'short'
+                }).format(d);
+              }
+            } catch { formattedDate = null; }
+            (f as any).formattedDate = formattedDate;
+
+            flat.push({ leagueId: lg.leagueId, leagueName: lg.leagueName, leagueCountry: lg.leagueCountry, fixture: f });
+          }
+        }
+        // Keep same ordering logic as today (unanalysed first, then by kickoff)
+        flat.sort((a, b) => this.compareFixturesForToday(a, b));
+        this.yesterdayFlatData = flat;
+        this.yesterdayLoading = false;
+      },
+      error: _err => {
+        this.yesterdayFlatData = [];
+        this.yesterdayLoading = false;
+      }
+    });
+  }
+
+  private loadPast(section: { daysBack: number; iso: string; collapsed: boolean; loading: boolean; flatData: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] }): void {
+    if (!section || !section.iso) return;
+    section.loading = true;
+    section.flatData = [];
+    const tz = 'Africa/Nairobi';
+    this.fixturesApi.getFixturesByDate(section.iso, this.season).subscribe({
+      next: (res) => {
+        const byLeague = Array.isArray(res) ? res.filter(Boolean) : [];
+        const seen = new Set<number>();
+        const flat: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }[] = [];
+        for (const lg of byLeague) {
+          const fx = lg?.fixtures || [];
+          for (const f of fx) {
+            if (!f) continue;
+            const status = this.computeStatus(f as any);
+            if (status === 'FINISHED') continue;
+            const home = this.normalizeTeamName(f, 'home');
+            const away = this.normalizeTeamName(f, 'away');
+            (f as any).homeTeam = home;
+            (f as any).awayTeam = away;
+            if (!home || !away) continue;
+            if (!this.isSameDayInTzRef((f as any).dateTime, tz, section.iso)) continue;
+            const id: number | undefined = typeof (f as any).id === 'number' ? (f as any).id : undefined;
+            if (id != null) {
+              if (seen.has(id)) continue;
+              seen.add(id);
+            }
+            let formattedDate: string | null = null;
+            try {
+              const d = new Date((f as any).dateTime);
+              if (!isNaN(d.getTime())) {
+                formattedDate = new Intl.DateTimeFormat('en-GB', {
+                  weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz, timeZoneName: 'short'
+                }).format(d);
+              }
+            } catch { formattedDate = null; }
+            (f as any).formattedDate = formattedDate;
+            flat.push({ leagueId: lg.leagueId, leagueName: lg.leagueName, leagueCountry: lg.leagueCountry, fixture: f });
+          }
+        }
+        flat.sort((a, b) => this.compareFixturesForToday(a, b));
+        section.flatData = flat;
+        section.loading = false;
+      },
+      error: _err => {
+        section.flatData = [];
+        section.loading = false;
+      }
+    });
+  }
+
+  get yesterdayCount(): number { return this.yesterdayFlatData.length; }
+
+  // trackBy function for past sections (days-back cards)
+  trackByPastSection(index: number, sec: { iso?: string }): any {
+    return sec?.iso || index;
+  }
+
+  // Toggle handlers: when opening a past section, close today's fixtures
+  toggleYesterday(): void {
+    this.yesterdayCollapsed = !this.yesterdayCollapsed;
+    if (!this.yesterdayCollapsed) {
+      this.todayClosed = true;
+    }
+  }
+
+  togglePast(section: { daysBack: number; iso: string; collapsed: boolean; loading: boolean; flatData: any[] }): void {
+    if (!section) return;
+    section.collapsed = !section.collapsed;
+    if (!section.collapsed) {
+      this.todayClosed = true;
+    }
+  }
+
+  // Bring back Today's fixtures and collapse past sections
+  showToday(): void {
+    this.todayClosed = false;
+    this.yesterdayCollapsed = true;
+    if (Array.isArray(this.pastSections)) {
+      for (const sec of this.pastSections) {
+        sec.collapsed = true;
+      }
+    }
+  }
+
+  private msUntilNextAnchorMinute(anchorMinute: number): number {
+    const now = new Date();
+    const target = new Date(now.getTime());
+    if (now.getMinutes() < anchorMinute || (now.getMinutes() === anchorMinute && now.getSeconds() === 0)) {
+      target.setMinutes(anchorMinute, 0, 0);
+    } else {
+      // Next hour at anchor minute
+      target.setHours(now.getHours() + 1, anchorMinute, 0, 0);
+    }
+    return Math.max(0, target.getTime() - now.getTime());
+  }
+
+  // Compute delay until the first hourly tick with a 07:00 start-of-day rule
+  // If current time is before 07:00, wait until 07:00. Otherwise align to the next top-of-hour.
+  private msUntilFirstHourlyTickWith7AMStart(): number {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const s = now.getSeconds();
+    if (h < this.DAILY_FIRST_HOUR_24) {
+      const target = new Date(now.getTime());
+      target.setHours(this.DAILY_FIRST_HOUR_24, 0, 0, 0);
+      return Math.max(0, target.getTime() - now.getTime());
+    }
+    // Align to next top-of-hour
+    if (m === 0 && s === 0) return 0;
+    const target = new Date(now.getTime());
+    target.setMinutes(0, 0, 0);
+    if (now.getTime() >= target.getTime()) {
+      target.setHours(target.getHours() + 1, 0, 0, 0);
+    }
+    return Math.max(0, target.getTime() - now.getTime());
+  }
+
+  private getNextUpcomingFixture(): { item: { leagueId: number; leagueName: string; leagueCountry?: string; fixture: any; }, kickoff: Date } | null {
+    if (!Array.isArray(this.todayFlatData) || this.todayFlatData.length === 0) return null;
+    const now = new Date();
+    let best: { item: any; kickoff: Date } | null = null;
+    for (const item of this.todayFlatData) {
+      const dtRaw = (item.fixture as any)?.dateTime;
+      if (!dtRaw) continue;
+      const d = new Date(dtRaw);
+      if (isNaN(d.getTime())) continue;
+      if (d.getTime() <= now.getTime()) continue; // only upcoming
+      if (!best || d.getTime() < best.kickoff.getTime()) {
+        best = { item, kickoff: d };
+      }
+    }
+    return best;
+  }
+
+  private announceNextKickoff(): void {
+    try {
+      const target = this.getNextUpcomingFixture();
+      if (!target) return; // Nothing upcoming – skip this slot
+      const now = new Date();
+      const diffMs = Math.max(0, target.kickoff.getTime() - now.getTime());
+      const totalMinutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+
+      const home = target.item.fixture?.homeTeam || 'Unknown Home';
+      const away = target.item.fixture?.awayTeam || 'Unknown Away';
+      const league = target.item.leagueName || 'Unknown League';
+      const country = target.item.leagueCountry || 'Unknown Country';
+
+      const hPart = hours === 1 ? '1 hour' : `${hours} hours`;
+      const mPart = minutes === 1 ? '1 minute' : `${minutes} minutes`;
+      const message = `It is exactly ${hPart}, ${mPart} until the next kick off which is a match between ${home} versus ${away}. The league is ${league} from the country known as ${country}. Thank you for choosing Chambuavismart. Stay tuned for more updates and analysis.`;
+      this.speak(message);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[HomeComponent] TTS announce error', e);
+    }
+  }
+
+  private pickFemaleCalmVoice(): SpeechSynthesisVoice | null {
+    try {
+      const synth = (window as any).speechSynthesis as SpeechSynthesis | undefined;
+      if (!synth || typeof synth.getVoices !== 'function') return null;
+      const voices = synth.getVoices() || [];
+      if (!voices.length) return null;
+
+      const isEnglish = (v: SpeechSynthesisVoice) => (v.lang || '').toLowerCase().startsWith('en');
+      const isEnGb = (v: SpeechSynthesisVoice) => (v.lang || '').toLowerCase().startsWith('en-gb');
+      const isEnUs = (v: SpeechSynthesisVoice) => (v.lang || '').toLowerCase().startsWith('en-us');
+
+      // Common female-indicative names/URIs across engines (Microsoft, Google, Amazon-like)
+      const femaleHints = /female|zira|hazel|jenny|samantha|victoria|karen|serena|susan|mia|olivia|joanna|salli|kimberly|kendra|amy|emma|google uk english female/i;
+      const maleNames = /male|daniel|alex|david|mark|ryan|george|guy|microsoft david|microsoft mark|google uk english male/i;
+
+      // 1) Prefer explicit female-indicated names in en-GB (often calmer UK timbre)
+      let pick = voices.find(v => isEnGb(v) && femaleHints.test((v.name || '') + ' ' + ((v as any).voiceURI || '')));
+      if (pick) return pick;
+      // 2) Prefer explicit female-indicated names in en-US
+      pick = voices.find(v => isEnUs(v) && femaleHints.test((v.name || '') + ' ' + ((v as any).voiceURI || '')));
+      if (pick) return pick;
+      // 3) Any English voice explicitly female
+      pick = voices.find(v => isEnglish(v) && femaleHints.test((v.name || '') + ' ' + ((v as any).voiceURI || '')));
+      if (pick) return pick;
+      // 4) English voices that are not obviously male by name; prefer en-GB then en-US then any en
+      pick = voices.find(v => isEnGb(v) && !maleNames.test((v.name || '') + ' ' + ((v as any).voiceURI || '')));
+      if (pick) return pick;
+      pick = voices.find(v => isEnUs(v) && !maleNames.test((v.name || '') + ' ' + ((v as any).voiceURI || '')));
+      if (pick) return pick;
+      pick = voices.find(v => isEnglish(v) && !maleNames.test((v.name || '') + ' ' + ((v as any).voiceURI || '')));
+      if (pick) return pick;
+      // 5) Fallback to first available
+      return voices[0] || null;
+    } catch { return null; }
+  }
+
+  private speak(text: string): void {
+    try {
+      const synth = (window as any).speechSynthesis as SpeechSynthesis | undefined;
+      if (!synth || typeof (window as any).SpeechSynthesisUtterance !== 'function') return;
+      const utter = new (window as any).SpeechSynthesisUtterance(text) as SpeechSynthesisUtterance;
+      const voice = this.pickFemaleCalmVoice();
+      if (voice) utter.voice = voice;
+      utter.rate = 0.9; // slower, calm pacing as requested
+      utter.pitch = 0.95; // slightly deeper female tone (but not as deep as male)
+      utter.volume = 1;
+
+      // In some browsers, voices load asynchronously
+      const trySpeak = () => {
+        try { synth.speak(utter); } catch {}
+      };
+      if (synth.getVoices().length === 0) {
+        const onVoices = () => {
+          trySpeak();
+          try { synth.removeEventListener('voiceschanged', onVoices as any); } catch {}
+        };
+        try { synth.addEventListener('voiceschanged', onVoices as any); } catch {}
+        // Also attempt after a short delay
+        setTimeout(trySpeak, 500);
+      } else {
+        trySpeak();
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[HomeComponent] speech synthesis unavailable', e);
+    }
+  }
+
+  // Stops any ongoing or queued speech. Returns true if something was speaking/pending.
+  private stopSpeaking(): boolean {
+    try {
+      const synth = (window as any).speechSynthesis as SpeechSynthesis | undefined;
+      if (!synth) return false;
+      if ((synth as any).speaking || (synth as any).pending) {
+        try { synth.cancel(); } catch {}
+        return true;
+      }
+      return false;
+    } catch { return false; }
+  }
+
+  onNotifyMe(): void {
+    try {
+      // If something is currently being announced (scheduled or manual), stop it instead of starting a new one
+      if (this.stopSpeaking()) return;
+      const target = this.getNextUpcomingFixture();
+      if (!target) {
+        this.speak('Thank you for reaching out to Chambuavismart. There is no upcoming kickoff available right now.');
+        return;
+      }
+      const now = new Date();
+      const diffMs = Math.max(0, target.kickoff.getTime() - now.getTime());
+      const totalMinutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+
+      const home = target.item.fixture?.homeTeam || 'Unknown Home';
+      const away = target.item.fixture?.awayTeam || 'Unknown Away';
+      const league = target.item.leagueName || 'Unknown League';
+      const country = target.item.leagueCountry || 'Unknown Country';
+
+      // Format kickoff time in Africa/Nairobi local time as hh:mm a
+      let localTime = '';
+      try {
+        localTime = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Nairobi' }).format(target.kickoff);
+      } catch { localTime = (target.kickoff.toLocaleTimeString && target.kickoff.toLocaleTimeString()) || ''; }
+
+      const hPart = hours === 1 ? '1 hour' : `${hours} hours`;
+      const mPart = minutes === 1 ? '1 minute' : `${minutes} minutes`;
+
+      const msg = `Thank you for reaching out to Chambuavismart. It is now exactly ${hPart}, ${mPart} to the start of the match between ${home} an ${away}, which is going to be played today in ${country}, ${league} league at ${localTime} local time. . Thank you very much for choosing chambuavismart. stay tuned for more match updates.`;
+      this.speak(msg);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[HomeComponent] onNotifyMe error', e);
+    }
+  }
+
   ngOnDestroy(): void {
     window.removeEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
     window.removeEventListener('fixtures:colors-updated', this._onColorsUpdated as EventListener);
+    if (this._clockTimer) { try { clearInterval(this._clockTimer); } catch {} this._clockTimer = null; }
+    if (this._ttsAlignTimeout) { try { clearTimeout(this._ttsAlignTimeout); } catch {} this._ttsAlignTimeout = null; }
+    if (this._ttsHourlyTimer) { try { clearInterval(this._ttsHourlyTimer); } catch {} this._ttsHourlyTimer = null; }
   }
 
   private isDev(): boolean {
@@ -273,6 +731,8 @@ export class HomeComponent implements OnInit, OnDestroy {
         // Sort with priority: fixtures without analysis colors first, then by kickoff time ascending
         flat.sort((a, b) => this.compareFixturesForToday(a, b));
         this.todayFlatData = flat;
+        // Initialize hourly voice announcements once we know today's upcoming fixtures
+        try { this.setupHourlyKickoffAnnouncements(); } catch {}
         if (this.isDev()) {
           try {
             // eslint-disable-next-line no-console
@@ -551,6 +1011,17 @@ export class HomeComponent implements OnInit, OnDestroy {
     return todayYMD.y === thatYMD.y && todayYMD.m === thatYMD.m && todayYMD.d === thatYMD.d;
   }
 
+  // Compare a fixture date to a specific reference calendar day in the given timezone
+  private isSameDayInTzRef(iso: string | undefined, timeZone: string, refIso: string): boolean {
+    if (!iso || !refIso) return false;
+    const dt = new Date(iso);
+    if (isNaN(dt.getTime())) return false;
+    const ref = this.parseIsoLocal(refIso);
+    const thatYMD = this.getYMDInTz(dt, timeZone);
+    const refYMD = this.getYMDInTz(ref, timeZone);
+    return thatYMD.y === refYMD.y && thatYMD.m === refYMD.m && thatYMD.d === refYMD.d;
+  }
+
   // Leader helpers
   private isFixtureToday(f: { dateTime: string }): boolean {
     const d = f?.dateTime ? new Date(f.dateTime) : null;
@@ -653,19 +1124,37 @@ export class HomeComponent implements OnInit, OnDestroy {
     } catch { /* no-op */ }
   };
  
-   // Navigate to Played Matches Summary (Fixture Analysis) with preselected teams
-   // Reuse the exact logic used in Fixtures tab: h2hHome, h2hAway, and optional leagueId
+   // Open Played Matches Summary (Fixture Analysis) in a modal overlay instead of navigating away
+   // Keeps user on Home and preserves scroll/expanded sections
    goToAnalysis(league: { leagueId?: number; leagueName?: string } | null, f: any) {
-    if (!f) return;
-    const leagueId = league?.leagueId ?? null;
-    this.router.navigate(['/played-matches-summary'], {
-      queryParams: {
-        h2hHome: (f?.homeTeam || this.normalizeTeamName(f, 'home') || ''),
-        h2hAway: (f?.awayTeam || this.normalizeTeamName(f, 'away') || ''),
-        ...(leagueId ? { leagueId } : {})
-      }
-    });
-  }
+     if (!f) return;
+     const leagueId = league?.leagueId ?? null;
+     const h2hHome = encodeURIComponent((f?.homeTeam || this.normalizeTeamName(f, 'home') || ''));
+     const h2hAway = encodeURIComponent((f?.awayTeam || this.normalizeTeamName(f, 'away') || ''));
+     const qp = `${h2hHome && h2hAway ? `?h2hHome=${h2hHome}&h2hAway=${h2hAway}` : ''}${leagueId ? (h2hHome || h2hAway ? `&leagueId=${leagueId}` : `?leagueId=${leagueId}`) : ''}`;
+     const url = `/played-matches-summary${qp}`;
+     try {
+       this.analysisUrl = this.sanitizer.bypassSecurityTrustResourceUrl(url);
+       this.analysisModalOpen = true;
+       // Optional: prevent background scroll
+       document.body.style.overflow = 'hidden';
+     } catch {
+       // Fallback to navigation if sanitizer fails
+       this.router.navigate(['/played-matches-summary'], {
+         queryParams: {
+           h2hHome: (f?.homeTeam || this.normalizeTeamName(f, 'home') || ''),
+           h2hAway: (f?.awayTeam || this.normalizeTeamName(f, 'away') || ''),
+           ...(leagueId ? { leagueId } : {})
+         }
+       });
+     }
+   }
+
+   closeAnalysisModal() {
+     this.analysisModalOpen = false;
+     this.analysisUrl = null;
+     try { document.body.style.overflow = ''; } catch {}
+   }
 
   // trackBy to stabilize DOM and performance
   trackByFixtureId(index: number, item: { fixture: any }): string | number {

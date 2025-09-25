@@ -24,6 +24,10 @@
 .flex-spacer { flex:1; }
 .badge { display:inline-block; font-size:12px; border-radius:9999px; padding:2px 8px; }
 .badge-blue { background:#0b2f55; color:#6ea8fe; border:1px solid #123e73; }
+.badge-green { background:#10381f; color:#50fa7b; border:1px solid #1f7a4c; }
+.announce-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; cursor:pointer; user-select:none; }
+.announce-badge i { color:#50fa7b; }
+.announce-badge:hover { filter: brightness(1.1); }
 
 .grid-2 { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
 .grid-3 { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:12px; margin-top:12px; }
@@ -73,3 +77,78 @@
 .fixture-league { display:flex; align-items:center; gap:8px; margin-top:6px; font-weight:800; color:#ffffff; font-size:14px; }
 .fixture-league i { color:#f9d65c; /* warm accent for visibility */ }
 .fixture-league .text { color:#ffffff; letter-spacing:0.2px; text-shadow: 0 1px 0 rgba(0,0,0,0.4); }
+
+/* Search area styles */
+.search-wrap { margin-top:6px; position:relative; }
+.search-area { position:relative; display:flex; align-items:center; gap:8px; background:#0f1720; border:1px solid #1e2a3a; border-radius:8px; padding:6px 10px; min-width:280px; }
+.search-area i.fa-search { color:#6ea8fe; }
+.search-area input { background:transparent; border:none; outline:none; color:#e0e0e0; width:260px; font-size:14px; }
+.search-area .clear-btn { background:transparent; border:none; color:#9aa0a6; cursor:pointer; padding:2px; }
+.search-area .clear-btn:hover { color:#ffffff; }
+.suggestions { position:absolute; top:38px; left:0; right:0; background:#0f1720; border:1px solid #1e2a3a; border-radius:8px; padding:6px 0; z-index:20; max-height:300px; overflow:auto; box-shadow: 0 6px 18px rgba(0,0,0,0.45); }
+.suggestion { padding:8px 12px; cursor:pointer; display:flex; flex-direction:column; gap:2px; }
+.suggestion .teams { color:#ffffff; font-weight:700; font-size:14px; }
+.suggestion .meta { color:#9aa0a6; font-size:12px; }
+.suggestion:hover, .suggestion.active { background:#123e73; }
+
+
+/* Distinct styling for Yesterday's Fixtures card */
+.card.yesterday-card {
+  border-left: 4px solid #f9d65c;
+  border-color: #2a2a2a;
+  background: linear-gradient(180deg, #121212 0%, #10100c 100%);
+}
+.yesterday-card .section-head {
+  border-bottom: 1px solid #2a250c;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.yesterday-card .section-title {
+  color: #f9d65c;
+}
+.yesterday-card .badge-blue {
+  background: #2a240b;
+  color: #f9d65c;
+  border-color: #574a16;
+}
+
+
+/* Two-column main area: left content + right sidebar */
+.fs-main-grid { display:grid; grid-template-columns: 2fr 1fr; gap:16px; align-items:start; }
+.main-col { display:grid; grid-auto-rows:min-content; gap:16px; }
+.fs-rightbar { background:#1a1a1a; border-left:1px solid #2a2a2a; padding:12px; border-radius:8px; position:sticky; top:0; max-height:calc(100vh - 40px); overflow:auto; }
+
+/* Responsive adjustments for right sidebar */
+@media (max-width: 1024px){
+  .fs-main-grid { grid-template-columns: 1fr; }
+  .fs-rightbar { position:relative; top:auto; max-height:none; }
+}
+
+/* When today's fixtures are closed, expand past fixtures to full width */
+.fs-main-grid.today-closed { grid-template-columns: 1fr; }
+.fs-main-grid.today-closed .main-col { display: none; }
+.fs-main-grid.today-closed .fs-rightbar {
+  position: relative;
+  top: auto;
+  max-height: none;
+  border-left: none;
+  padding: 0; /* align with full-width content */
+}
+
+
+/* Clickable section headers for past fixtures */
+.section-head.clickable { cursor: pointer; }
+.section-head.clickable:hover { filter: brightness(1.05); }
+
+/* Analysis modal overlay */
+.analysis-modal { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; }
+.analysis-modal .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); z-index: 0; }
+.analysis-modal .modal-content { position: relative; z-index: 1; width: 92vw; height: 86vh; max-width: 1400px; background: #0f0f0f; border: 1px solid #262626; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); display: flex; flex-direction: column; overflow: hidden; }
+.analysis-modal .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #161616; border-bottom: 1px solid #262626; }
+.analysis-modal .modal-title { font-weight: 800; color: #ffffff; }
+.analysis-modal .modal-body { flex: 1; }
+.analysis-modal iframe { width: 100%; height: 100%; border: none; background: #0f0f0f; }
+
+@media (max-width: 768px){
+  .analysis-modal .modal-content { width: 98vw; height: 88vh; }
+}

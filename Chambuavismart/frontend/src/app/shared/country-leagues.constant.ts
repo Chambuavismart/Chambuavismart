@@ -32,7 +32,22 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Serie A Women",
     "Serie B Women"
   ],
-  "Germany": ["Bundesliga", "2. Bundesliga", "DFB-Pokal", "DFL-Supercup"],
+  "Germany": [
+    "Bundesliga",
+    "2. Bundesliga",
+    "3. Liga",
+    "Regionalliga Südwest",
+    "Oberliga Schleswig-Holstein",
+    "Oberliga NOFV-Nord",
+    "Oberliga NOFV-Sud",
+    "Oberliga Hamburg",
+    "Oberliga Westfalen",
+    "DFB-Pokal",
+    "DFL-Supercup",
+    "Frauen-Bundesliga",
+    "2. Frauen-Bundesliga",
+    "DFB Youth League"
+  ],
   "France": ["Ligue 1", "Ligue 2", "Coupe de France", "Trophée des Champions"],
   "Portugal": ["Primeira Liga", "Liga Portugal 2", "Taça de Portugal", "Supertaça Cândido de Oliveira"],
   "Netherlands": ["Eredivisie", "Eerste Divisie", "Tweede Divisie", "KNVB Cup", "Johan Cruyff Shield"],
@@ -130,6 +145,10 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Premier League",
     "First League"
   ],
+  "Armenia": [
+    "Premier League",
+    "First League"
+  ],
   "Malawi": [
     "Super League"
   ],
@@ -205,6 +224,10 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Azadegan League",
     "Kowsar Women Football League"
   ],
+  "Algeria": [
+    "Ligue 1",
+    "Ligue 2"
+  ],
   "Belgium": [
     "Jupiler Pro League",
     "Challenger Pro League",
@@ -212,7 +235,38 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Super League Women",
     "1st National Women"
   ],
+  "Belarus": [
+    "Vysshaya Liga",
+    "Pershaya Liga"
+  ],
+  "Bolivia": [
+    "Division Profesional",
+    "Copa Simon Bolivar"
+  ],
+  "Ecuador": [
+    "Liga Pro",
+    "Serie B"
+  ],
+  "Lithuania": [
+    "A Lyga",
+    "1 Lyga"
+  ],
+  "Moldova": [
+    "Super Liga",
+    "Liga 1"
+  ],
+  "Montenegro": [
+    "Druga Liga"
+  ],
+  "South Africa": [
+    "Betway Premiership",
+    "Motsepe Foundation Championship"
+  ],
   "Tanzania": [
     "Ligi Kuu Bara"
+  ],
+  "Kosovo": [
+    "Superliga",
+    "Liga e Pare"
   ]
 });
