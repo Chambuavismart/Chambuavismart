@@ -18,6 +18,7 @@
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Team Search'" routerLink="/team-search" (click)="setActive('Team Search')" title="Team Search"><i class="fa fa-search"></i> Team Search</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Fixtures Analysis'" routerLink="/fixtures-analysis" (click)="setActive('Fixtures Analysis')" title="Fixtures Analysis"><i class="fa fa-chart-bar"></i> Fixtures Analysis</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Fixture Analysis History'" routerLink="/fixture-analysis-history" (click)="setActive('Fixture Analysis History')" title="Fixture Analysis History"><i class="fa fa-history"></i> Fixture Analysis History</li>
+      <li class="nav-item" role="menuitem" [class.active]="activeNav==='Today Colors Report'" routerLink="/today-color-report" (click)="setActive('Today Colors Report')" title="Today's fixture analysis colours report"><i class="fa fa-palette"></i> Today's fixture analysis colours report</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Admin'" routerLink="/admin" (click)="setActive('Admin')" title="Admin"><i class="fa fa-user-shield"></i> Admin</li>
     </ul>
   </aside>
@@ -53,7 +54,7 @@
                       role="option"
                       [attr.aria-selected]="i===highlightedIndex ? 'true' : 'false'">
                     <span class="teams">{{ s.fixture.homeTeam }} vs {{ s.fixture.awayTeam }}</span>
-                    <span class="meta">{{ s.leagueCountry || 'Unknown' }} — {{ s.leagueName || 'League' }} • {{ s.fixture.formattedDate || (toSafeDate(s.fixture.dateTime) | date:'EEE, d MMM, hh:mm a z':'':'Africa/Nairobi') }}</span>
+                    <span class="meta">{{ s.leagueCountry || 'Unknown' }} — {{ s.leagueName || 'League' }} • {{ s.fixture.formattedDate || (toSafeDate(s.fixture.dateTime) | date:'EEE, d MMM, hh:mm a z':'Africa/Nairobi') }}</span>
                   </li>
                 </ul>
               </div>
@@ -87,15 +88,15 @@
 
           <div class="grid-2" *ngIf="!todayLoading && todayFixtures && todayFixtures.length">
             <div class="fixture-card" *ngFor="let item of todayFlatData; trackBy: trackByFixtureId" [attr.aria-label]="'Fixture: ' + (item.fixture.homeTeam || 'Unknown Home') + ' vs ' + (item.fixture.awayTeam || 'Unknown Away')" (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture)" tabindex="0" role="button">
-              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'':'Africa/Nairobi') }}</div>
+              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'Africa/Nairobi') }}</div>
               <div class="fixture-league" title="{{ (item.leagueCountry || 'Unknown Country') + ' — ' + (item.leagueName || 'Unknown League') }}">
                 <i class="fa fa-flag" aria-hidden="true"></i>
                 <span class="text">{{ item.leagueCountry || 'Unknown Country' }} — {{ item.leagueName || 'Unknown League' }}</span>
               </div>
               <div class="fixture-teams" aria-label="Fixture teams">
-                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
+                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)" [innerHTML]="formatTeamLabelHtml(item.fixture.homeTeam, item.leagueId) || 'Unknown Home'"></span>
                 <span class="vs" aria-hidden="true">vs</span>
-                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
+                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)" [innerHTML]="formatTeamLabelHtml(item.fixture.awayTeam, item.leagueId) || 'Unknown Away'"></span>
               </div>
               <div class="fixture-status">
                 <span class="status" [class.upcoming]="computeStatus(item.fixture)==='UPCOMING'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>
@@ -150,15 +151,15 @@
 
           <div [id]="'yesterday-fixtures-grid'" class="grid-2" *ngIf="!yesterdayCollapsed && !yesterdayLoading && yesterdayFlatData && yesterdayFlatData.length">
             <div class="fixture-card" *ngFor="let item of yesterdayFlatData; trackBy: trackByFixtureId" [attr.aria-label]="'Fixture: ' + (item.fixture.homeTeam || 'Unknown Home') + ' vs ' + (item.fixture.awayTeam || 'Unknown Away')" (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture)" tabindex="0" role="button">
-              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'':'Africa/Nairobi') }}</div>
+              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'Africa/Nairobi') }}</div>
               <div class="fixture-league" title="{{ (item.leagueCountry || 'Unknown Country') + ' — ' + (item.leagueName || 'Unknown League') }}">
                 <i class="fa fa-flag" aria-hidden="true"></i>
                 <span class="text">{{ item.leagueCountry || 'Unknown Country' }} — {{ item.leagueName || 'Unknown League' }}</span>
               </div>
               <div class="fixture-teams" aria-label="Fixture teams">
-                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
+                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)" [innerHTML]="formatTeamLabelHtml(item.fixture.homeTeam, item.leagueId) || 'Unknown Home'"></span>
                 <span class="vs" aria-hidden="true">vs</span>
-                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
+                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)" [innerHTML]="formatTeamLabelHtml(item.fixture.awayTeam, item.leagueId) || 'Unknown Away'"></span>
               </div>
               <div class="fixture-status">
                 <span class="status" [class.upcoming]="computeStatus(item.fixture)!=='FINISHED'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>
@@ -196,15 +197,15 @@
 
           <div class="grid-2" [id]="'past-fixtures-grid-' + sec.iso" *ngIf="!sec.collapsed && !sec.loading && sec.flatData && sec.flatData.length">
             <div class="fixture-card" *ngFor="let item of sec.flatData; trackBy: trackByFixtureId" [attr.aria-label]="'Fixture: ' + (item.fixture.homeTeam || 'Unknown Home') + ' vs ' + (item.fixture.awayTeam || 'Unknown Away')" (click)="goToAnalysis({ leagueId: item.leagueId, leagueName: item.leagueName }, item.fixture)" tabindex="0" role="button">
-              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'':'Africa/Nairobi') }}</div>
+              <div class="fixture-meta">{{ item.fixture.round }} — {{ item.fixture.formattedDate || (toSafeDate(item.fixture.dateTime) | date:'EEE, d MMM yyyy, hh:mm a z':'Africa/Nairobi') }}</div>
               <div class="fixture-league" title="{{ (item.leagueCountry || 'Unknown Country') + ' — ' + (item.leagueName || 'Unknown League') }}">
                 <i class="fa fa-flag" aria-hidden="true"></i>
                 <span class="text">{{ item.leagueCountry || 'Unknown Country' }} — {{ item.leagueName || 'Unknown League' }}</span>
               </div>
               <div class="fixture-teams" aria-label="Fixture teams">
-                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)">{{ item.fixture.homeTeam || 'Unknown Home' }}</span>
+                <span class="team home" [title]="item.fixture.homeTeam || 'Unknown Home'" [ngStyle]="teamPillStyle(item.fixture.homeTeam, item.leagueId)" [innerHTML]="formatTeamLabelHtml(item.fixture.homeTeam, item.leagueId) || 'Unknown Home'"></span>
                 <span class="vs" aria-hidden="true">vs</span>
-                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)">{{ item.fixture.awayTeam || 'Unknown Away' }}</span>
+                <span class="team away" [title]="item.fixture.awayTeam || 'Unknown Away'" [ngStyle]="teamPillStyle(item.fixture.awayTeam, item.leagueId)" [innerHTML]="formatTeamLabelHtml(item.fixture.awayTeam, item.leagueId) || 'Unknown Away'"></span>
               </div>
               <div class="fixture-status">
                 <span class="status" [class.upcoming]="computeStatus(item.fixture)!=='FINISHED'" [class.finished]="computeStatus(item.fixture)==='FINISHED'">{{ statusLabel(item.fixture) }}</span>

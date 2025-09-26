@@ -114,7 +114,7 @@ import { HttpClient } from '@angular/common/http';
                 <td style="text-align:center;">
                   <input type="checkbox" [checked]="isSelected(a.id)" (change)="toggleOne(a.id, $event)">
                 </td>
-                <td class="when">{{ a.generatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</td>
+                <td class="when">{{ toSafeDate(a.generatedAt) | date:'yyyy-MM-dd HH:mm:ss' }}</td>
                 <td>
                   <div class="fixture">
                     <span class="team-pill" [ngStyle]="{ background: tint(colorFor(a.homeTeam), .12), borderColor: tint(colorFor(a.homeTeam), .3), color: colorForText(a.homeTeam) }">{{ a.homeTeam }}</span>
@@ -145,6 +145,16 @@ import { HttpClient } from '@angular/common/http';
   `
 })
 export class AnalysisPdfsComponent implements OnInit {
+  // Safely convert input to Date or null to avoid NG02100 in DatePipe
+  toSafeDate(input: any): Date | null {
+    if (!input) return null;
+    try {
+      const d = new Date(input);
+      return isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
   private http = inject(HttpClient);
   items: any[] = [];
   loading = false;

@@ -1,0 +1,54 @@
+<div class="report-wrap">
+  <div class="head no-print">
+    <h1>Fixture Analysis Colours Report</h1>
+    <div class="sub">Date: {{ selectedIso }} • Pending fixtures: {{ totalCount }}</div>
+  </div>
+
+  <!-- Controls: last 7 days with pending counts and print button -->
+  <div class="controls no-print" *ngIf="dateOptions.length">
+    <div class="dates">
+      <button type="button"
+              class="date-btn"
+              *ngFor="let d of dateOptions"
+              [class.active]="d.iso === selectedIso"
+              (click)="changeDate(d.iso)"
+              [title]="d.iso">
+        <span class="lbl">{{ d.label }}</span>
+        <span class="cnt" [class.zero]="d.pendingCount===0">{{ d.pendingCount }}</span>
+      </button>
+    </div>
+    <div class="spacer"></div>
+    <button type="button" class="print-btn" (click)="downloadPdf()" [disabled]="loading">
+      <i class="fa fa-file-pdf-o"></i> Download as PDF
+    </button>
+  </div>
+
+  <div class="head only-print">
+    <h1>Fixture Analysis Colours Report</h1>
+    <div class="sub">Date: {{ selectedIso }} • Pending fixtures: {{ totalCount }}</div>
+  </div>
+
+  <div *ngIf="loading" class="muted">Loading fixtures…</div>
+  <div *ngIf="!loading && groups.length === 0" class="muted">No pending fixtures for {{ selectedIso }}.</div>
+
+  <section *ngFor="let g of groups" class="bucket">
+    <header class="bucket-head">
+      <h2>{{ g.label }}</h2>
+      <span class="count">{{ g.items.length }}</span>
+    </header>
+    <div class="bucket-body">
+      <div *ngFor="let it of g.items; let i = index" class="row" [attr.data-league-id]="it.leagueId">
+        <div class="idx">{{ i + 1 }}.</div>
+        <div class="meta">
+          <div class="time">{{ toSafeDate(it.fixture.dateTime) | date:'EEE, d MMM yyyy • HH:mm z':'Africa/Nairobi' }}</div>
+          <div class="league"><i class="fa fa-flag"></i> {{ it.leagueCountry || 'Unknown' }} — {{ it.leagueName }}</div>
+        </div>
+        <div class="teams">
+          <span class="team home" [ngStyle]="teamPillStyle(it.fixture.homeTeam, it.leagueId)" [innerHTML]="formatTeamLabelHtml(it.fixture.homeTeam, it.leagueId)"></span>
+          <span class="vs">vs</span>
+          <span class="team away" [ngStyle]="teamPillStyle(it.fixture.awayTeam, it.leagueId)" [innerHTML]="formatTeamLabelHtml(it.fixture.awayTeam, it.leagueId)"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>

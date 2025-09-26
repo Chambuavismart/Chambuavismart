@@ -304,6 +304,21 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
       <div class="profile-card" *ngIf="h2hSelected">
         <div class="breakdown-title">Head-to-Head Results (All Orientations)</div>
         <div class="section-desc">This table includes matches where either team was home or away, combining both orientations for a complete history.</div>
+        <div class="hint" *ngIf="(h2hMatchesAll?.length || 0) > 0">
+          Total meetings (all orientations): <strong>{{ h2hMatchesAll.length }}</strong>
+        </div>
+        <div class="breakdown-row h2h-all" *ngIf="(h2hMatchesAll?.length || 0) > 0">
+          <div class="h2h-all-left">
+            <div>{{ h2hHome }} wins: <strong>{{ h2hAllWinsHomeTeam }}</strong></div>
+            <div>Draws: <strong>{{ h2hAllDraws }}</strong></div>
+            <div>{{ h2hAway }} wins: <strong>{{ h2hAllWinsAwayTeam }}</strong></div>
+          </div>
+          <div class="pill-group">
+            <span class="pill pill-home">{{ h2hHome }}: {{ h2hAllWinsHomePct }}%</span>
+            <span class="pill pill-draw">Draw: {{ h2hAllDrawsPct }}%</span>
+            <span class="pill pill-away">{{ h2hAway }}: {{ h2hAllWinsAwayPct }}%</span>
+          </div>
+        </div>
         <table class="h2h-table" *ngIf="h2hMatchesAll?.length; else noH2HAll">
           <thead>
             <tr>
@@ -328,6 +343,7 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
         </table>
         <ng-template #noH2HAll>
           <div class="hint">No matches found across both orientations</div>
+          <div class="hint">Select a valid H2H pair and click "Analyse this fixture" to see predictions.</div>
         </ng-template>
       </div>
 
@@ -439,6 +455,14 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
     .breakdown-title { color:#9fb6d4; margin-bottom:6px; font-weight:600; }
     .breakdown-row { display:flex; gap:16px; flex-wrap:wrap; }
     .breakdown-row .pct { color:#9fb6d4; margin-left:6px; }
+    /* H2H All Orientations percentage pills on the far right */
+    .breakdown-row.h2h-all { justify-content: space-between; align-items: center; }
+    .h2h-all-left { display:flex; gap:16px; flex-wrap:wrap; }
+    .pill-group { margin-left:auto; display:flex; gap:8px; }
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:800; font-size:12px; border:1px solid transparent; }
+    .pill-home { background:#065f46; color:#10b981; border-color:#10b981; }
+    .pill-draw { background:#1f2937; color:#cbd5e1; border-color:#9ca3af; }
+    .pill-away { background:#0f2a52; color:#60a5fa; border-color:#3b82f6; }
     .profiles-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .form-badges { display:flex; gap:8px; align-items:center; }
     .form-badges.compact { gap:4px; }
@@ -496,6 +520,14 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   h2hMatches: H2HMatchDto[] = [];
   h2hMatchesAll: H2HMatchDto[] = [];
   h2hAnyCount: number | null = null;
+  // Aggregates for All Orientations section
+  h2hAllTotal: number = 0;
+  h2hAllWinsHomeTeam: number = 0; // wins credited to the team labeled in h2hHome
+  h2hAllWinsAwayTeam: number = 0; // wins credited to the team labeled in h2hAway
+  h2hAllDraws: number = 0;
+  h2hAllWinsHomePct: number = 0;
+  h2hAllWinsAwayPct: number = 0;
+  h2hAllDrawsPct: number = 0;
   homeForm: FormSummaryDto | null = null;
   awayForm: FormSummaryDto | null = null;
   // New: resolved season and messages from backend Last 5 response
@@ -567,6 +599,50 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   barWidth(p: number): number {
     const w = (p || 0) * 5; // scale up for visibility
     return w > 100 ? 100 : w;
+  }
+
+  private computeH2HAllStats(): void {
+    const list = Array.isArray(this.h2hMatchesAll) ? this.h2hMatchesAll : [];
+    const hn = (this.h2hHome || '').trim().toLowerCase();
+    const an = (this.h2hAway || '').trim().toLowerCase();
+    let homeWins = 0, awayWins = 0, draws = 0, total = 0;
+    const parse = (s: string): { hg: number; ag: number } | null => {
+      if (!s || typeof s !== 'string') return null;
+      const m = s.match(/\s*(\d+)\s*[-:]\s*(\d+)\s*/);
+      if (!m) return null;
+      const hg = parseInt(m[1], 10);
+      const ag = parseInt(m[2], 10);
+      if (Number.isNaN(hg) || Number.isNaN(ag)) return null;
+      return { hg, ag };
+    };
+    for (const m of list) {
+      const res = parse((m as any)?.result || '');
+      if (!res) { continue; }
+      const homeTeamName = ((m as any)?.homeTeam || '').toString().trim().toLowerCase();
+      const awayTeamName = ((m as any)?.awayTeam || '').toString().trim().toLowerCase();
+      if (!homeTeamName || !awayTeamName) { continue; }
+      total++;
+      if (res.hg === res.ag) {
+        draws++;
+      } else if (res.hg > res.ag) {
+        // Home side won
+        if (homeTeamName === hn) homeWins++; else if (homeTeamName === an) awayWins++;
+      } else {
+        // Away side won
+        if (awayTeamName === hn) homeWins++; else if (awayTeamName === an) awayWins++;
+      }
+    }
+    this.h2hAllTotal = total;
+    this.h2hAllWinsHomeTeam = homeWins;
+    this.h2hAllWinsAwayTeam = awayWins;
+    this.h2hAllDraws = draws;
+    if (total > 0) {
+      this.h2hAllWinsHomePct = Math.round((homeWins / total) * 100);
+      this.h2hAllWinsAwayPct = Math.round((awayWins / total) * 100);
+      this.h2hAllDrawsPct = Math.round((draws / total) * 100);
+    } else {
+      this.h2hAllWinsHomePct = this.h2hAllWinsAwayPct = this.h2hAllDrawsPct = 0;
+    }
   }
 
   analyseFixture(): void {
@@ -1169,8 +1245,8 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
 
     // Load H2H matches across both orientations
     this.matchService.getH2HMatchesAnyOrientation(homeName, awayName).subscribe({
-      next: list => { this.h2hMatchesAll = list ?? []; },
-      error: () => { this.h2hMatchesAll = []; }
+      next: list => { this.h2hMatchesAll = list ?? []; try { this.tryPersistH2HColors(); } catch {} try { this.computeH2HAllStats(); } catch {} },
+      error: () => { this.h2hMatchesAll = []; try { this.tryPersistH2HColors(); } catch {} try { this.computeH2HAllStats(); } catch {} }
     });
   }
 
@@ -1194,6 +1270,14 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     this.awaySeasonResolved = null;
     this.homeIsFallback = false;
     this.awayIsFallback = false;
+    // Reset H2H All Orientations aggregates
+    this.h2hAllTotal = 0;
+    this.h2hAllWinsHomeTeam = 0;
+    this.h2hAllWinsAwayTeam = 0;
+    this.h2hAllDraws = 0;
+    this.h2hAllWinsHomePct = 0;
+    this.h2hAllWinsAwayPct = 0;
+    this.h2hAllDrawsPct = 0;
   }
 
   pct(v?: number | null): string {
@@ -1328,9 +1412,77 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       else { this.colorCache.removeTeamColor(this.h2hHome, lid); changed = true; }
       if (awayColor) { this.colorCache.setTeamColor(this.h2hAway, awayColor, lid); changed = true; }
       else { this.colorCache.removeTeamColor(this.h2hAway, lid); changed = true; }
-      if (changed) {
+
+      // New: compute double-green flag (Green + H2H wins > 70%) if H2H matches are available
+      const isGreen = (c: string | null): boolean => !!c && c.toLowerCase().includes('rgba(16,160,16');
+      const calcWinPct = (team: string): number | null => {
+        const list = Array.isArray(this.h2hMatchesAll) ? this.h2hMatchesAll : [];
+        if (!list.length) return null;
+        let wins = 0; let total = 0;
+        for (const m of list) {
+          const res = (m?.result || '').split('-');
+          if (res.length !== 2) continue;
+          const hg = parseInt(res[0], 10); const ag = parseInt(res[1], 10);
+          if (Number.isNaN(hg) || Number.isNaN(ag)) continue;
+          const homeT = (m as any).homeTeam || '';
+          const awayT = (m as any).awayTeam || '';
+          const isTeamHome = homeT.localeCompare(team, undefined, { sensitivity: 'accent', usage: 'search' }) === 0;
+          const isTeamAway = awayT.localeCompare(team, undefined, { sensitivity: 'accent', usage: 'search' }) === 0;
+          if (!isTeamHome && !isTeamAway) continue;
+          total++;
+          const teamGoals = isTeamHome ? hg : ag;
+          const oppGoals = isTeamHome ? ag : hg;
+          if (teamGoals > oppGoals) wins++;
+        }
+        if (total === 0) return null;
+        return wins / total;
+      };
+      if (isGreen(homeColor)) {
+        const p = calcWinPct(this.h2hHome);
+        this.colorCache.setDoubleGreen(this.h2hHome, !!(p !== null && p > 0.7), lid);
+      } else {
+        this.colorCache.setDoubleGreen(this.h2hHome, false, lid);
+      }
+      if (isGreen(awayColor)) {
+        const p = calcWinPct(this.h2hAway);
+        this.colorCache.setDoubleGreen(this.h2hAway, !!(p !== null && p > 0.7), lid);
+      } else {
+        this.colorCache.setDoubleGreen(this.h2hAway, false, lid);
+      }
+
+      // New: compute Draw-heavy D flag: if either team pill is Orange AND H2H draws >= 40% across any orientation, mark BOTH teams
+      const isOrange = (c: string | null): boolean => !!c && c.toLowerCase().includes('255, 165, 0');
+      const calcDrawPct = (): number | null => {
+        const list = Array.isArray(this.h2hMatchesAll) ? this.h2hMatchesAll : [];
+        if (!list.length) return null;
+        let draws = 0; let total = 0;
+        for (const m of list) {
+          const res = (m?.result || '').split('-');
+          if (res.length !== 2) continue;
+          const hg = parseInt(res[0], 10); const ag = parseInt(res[1], 10);
+          if (Number.isNaN(hg) || Number.isNaN(ag)) continue;
+          total++;
+          if (hg === ag) draws++;
+        }
+        if (total === 0) return null;
+        return draws / total;
+      };
+      const drawPct = calcDrawPct();
+      let flagsChanged = false;
+      const sameColor = !!homeColor && !!awayColor && homeColor === awayColor;
+      const shouldMarkD = !!(drawPct !== null && (
+        (drawPct >= 0.4 && (isOrange(homeColor) || isOrange(awayColor))) ||
+        (drawPct > 0.3 && sameColor)
+      ));
+      // Persist for BOTH teams within the league context
+      this.colorCache.setDrawHeavyD(this.h2hHome, shouldMarkD, lid); flagsChanged = true;
+      this.colorCache.setDrawHeavyD(this.h2hAway, shouldMarkD, lid); flagsChanged = true;
+
+      if (changed || flagsChanged) {
         console.log('[FixturesAnalysis] Updated team colors', { leagueId: lid, home: this.h2hHome, homeColor, away: this.h2hAway, awayColor });
         try { window.dispatchEvent(new CustomEvent('fixtures:colors-updated', { detail: { leagueId: lid, home: this.h2hHome, away: this.h2hAway } })); } catch {}
+        // Also notify parent (Home) if we are running inside the modal iframe
+        try { if (window.parent && window.parent !== window) { window.parent.postMessage({ type: 'fixtures:colors-updated', leagueId: lid, home: this.h2hHome, away: this.h2hAway }, '*'); } } catch {}
       }
     } catch (e) {
       console.warn('[FixturesAnalysis] Failed to persist team colors', e);

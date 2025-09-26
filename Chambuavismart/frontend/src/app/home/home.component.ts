@@ -39,6 +39,10 @@ export class HomeComponent implements OnInit, OnDestroy {
   private cdr = inject(ChangeDetectorRef);
   private sanitizer = inject(DomSanitizer);
 
+  // Color version poll state (fallback when events are missed)
+  private _colorVersionPoll: any;
+  private _lastColorVersion: string | null = null;
+
   today = new Date();
   showCalendar = false;
   calendarYear = this.today.getFullYear();
@@ -252,6 +256,25 @@ export class HomeComponent implements OnInit, OnDestroy {
     }
     window.addEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
     window.addEventListener('fixtures:colors-updated', this._onColorsUpdated as EventListener);
+    // Listen for cross-iframe messages from the analysis modal and storage changes
+    window.addEventListener('message', this._onMessageFromChild as EventListener);
+    window.addEventListener('storage', this._onStorageUpdated as EventListener);
+
+    // Fallback: poll version key to detect color cache changes when events are missed
+    try {
+      this._lastColorVersion = localStorage.getItem('fixturesAnalysis.teamColors.version');
+    } catch { this._lastColorVersion = null; }
+    this.zone.runOutsideAngular(() => {
+      this._colorVersionPoll = setInterval(() => {
+        let v: string | null = null;
+        try { v = localStorage.getItem('fixturesAnalysis.teamColors.version'); } catch { v = null; }
+        if (v && v !== this._lastColorVersion) {
+          this._lastColorVersion = v;
+          // Re-enter Angular to update view and sorting
+          this.zone.run(() => this._onColorsUpdated(new Event('poll:fixtures:colors-updated')));
+        }
+      }, 1500);
+    });
   }
 
   toggleSidebar(){ this.sidebarOpen = !this.sidebarOpen; }
@@ -345,9 +368,9 @@ export class HomeComponent implements OnInit, OnDestroy {
           const fx = lg?.fixtures || [];
           for (const f of fx) {
             if (!f) continue;
-            // Only include fixtures that are not finished yet (no final results)
-            const status = this.computeStatus(f as any);
-            if (status === 'FINISHED') continue;
+            // Include both finished and non-finished fixtures for past days
+            // const status = this.computeStatus(f as any);
+            // if (status === 'FINISHED') continue;
             const home = this.normalizeTeamName(f, 'home');
             const away = this.normalizeTeamName(f, 'away');
             (f as any).homeTeam = home;
@@ -402,8 +425,9 @@ export class HomeComponent implements OnInit, OnDestroy {
           const fx = lg?.fixtures || [];
           for (const f of fx) {
             if (!f) continue;
-            const status = this.computeStatus(f as any);
-            if (status === 'FINISHED') continue;
+            // Include both finished and non-finished fixtures for past days
+            // const status = this.computeStatus(f as any);
+            // if (status === 'FINISHED') continue;
             const home = this.normalizeTeamName(f, 'home');
             const away = this.normalizeTeamName(f, 'away');
             (f as any).homeTeam = home;
@@ -671,9 +695,12 @@ export class HomeComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     window.removeEventListener('fixtures:refresh', this.onFixturesRefresh as EventListener);
     window.removeEventListener('fixtures:colors-updated', this._onColorsUpdated as EventListener);
+    window.removeEventListener('message', this._onMessageFromChild as EventListener);
+    window.removeEventListener('storage', this._onStorageUpdated as EventListener);
     if (this._clockTimer) { try { clearInterval(this._clockTimer); } catch {} this._clockTimer = null; }
     if (this._ttsAlignTimeout) { try { clearTimeout(this._ttsAlignTimeout); } catch {} this._ttsAlignTimeout = null; }
     if (this._ttsHourlyTimer) { try { clearInterval(this._ttsHourlyTimer); } catch {} this._ttsHourlyTimer = null; }
+    if (this._colorVersionPoll) { try { clearInterval(this._colorVersionPoll); } catch {} this._colorVersionPoll = null; }
   }
 
   private isDev(): boolean {
@@ -1103,14 +1130,51 @@ export class HomeComponent implements OnInit, OnDestroy {
     try {
       const color = this.colorCache.getTeamColor(name, leagueId ?? undefined);
       if (!color) return {};
-      return {
+      const style: {[k: string]: string} = {
         background: color,
         color: '#ffffff',
         padding: '2px 6px',
         borderRadius: '6px',
         border: '1px solid rgba(255,255,255,0.15)'
       };
+      // New: if this team has doubleGreen flag, draw a double inset ring
+      if (this.colorCache.isDoubleGreen(name, leagueId ?? undefined)) {
+        // Make the double-green ring VERY visible: thicker dual inset rings + outside outline and glow
+        style.boxShadow = 'inset 0 0 0 3px #16a34a, inset 0 0 0 7px rgba(22,163,74,0.65), 0 0 0 2px #16a34a, 0 0 10px 3px rgba(22,163,74,0.75)';
+      }
+      return style;
     } catch { return {}; }
+  }
+
+  // New: decorate team label with special prefixes: glowing orange D for draw-heavy & fire for doubleGreen
+  formatTeamLabel(teamName: string | null | undefined, leagueId?: number | null): string {
+    const name = (teamName || '').toString().trim();
+    if (!name) return '';
+    try {
+      const hasD = this.colorCache.hasDrawHeavyD(name, leagueId ?? undefined);
+      const hasFire = this.colorCache.isDoubleGreen(name, leagueId ?? undefined);
+      const fire = hasFire ? '🔥 ' : '';
+      const d = hasD ? 'D ' : '';
+      return (d + fire + name).trim();
+    } catch { return name; }
+  }
+
+  // HTML version with styling for the big shining orange D
+  formatTeamLabelHtml(teamName: string | null | undefined, leagueId?: number | null) {
+    const name = (teamName || '').toString().trim();
+    if (!name) return '';
+    try {
+      const hasD = this.colorCache.hasDrawHeavyD(name, leagueId ?? undefined);
+      const hasFire = this.colorCache.isDoubleGreen(name, leagueId ?? undefined);
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const parts: string[] = [];
+      if (hasD) {
+        parts.push('<span style="font-weight:800;color:#ff7a00;text-shadow:0 0 6px rgba(255,122,0,0.85), 0 0 12px rgba(255,122,0,0.6);font-size:1.05em;letter-spacing:0.5px;">D</span>');
+      }
+      if (hasFire) parts.push('🔥');
+      parts.push(esc(name));
+      return this.sanitizer.bypassSecurityTrustHtml(parts.join(' '));
+    } catch { return name; }
   }
 
   // React to color updates from Fixtures Analysis tab
@@ -1123,8 +1187,32 @@ export class HomeComponent implements OnInit, OnDestroy {
       });
     } catch { /* no-op */ }
   };
+
+  // Handle postMessage from iframe (played-matches-summary modal)
+  private _onMessageFromChild = (ev: MessageEvent) => {
+    try {
+      const data: any = ev?.data;
+      if (!data) return;
+      // Accept either structured type or legacy string channel
+      const type = typeof data === 'string' ? data : data.type;
+      if (type === 'fixtures:colors-updated') {
+        this._onColorsUpdated(ev as any);
+      }
+    } catch { /* ignore */ }
+  };
+
+  // Handle localStorage updates from child frame (storage event only fires on other documents)
+  private _onStorageUpdated = (ev: StorageEvent) => {
+    try {
+      if (!ev) return;
+      const k = ev.key || '';
+      if (k === 'fixturesAnalysis.teamColors.v1' || k === 'fixturesAnalysis.teamColors.version') {
+        this._onColorsUpdated(ev as any);
+      }
+    } catch { /* ignore */ }
+  };
  
-   // Open Played Matches Summary (Fixture Analysis) in a modal overlay instead of navigating away
+  // Open Played Matches Summary (Fixture Analysis) in a modal overlay instead of navigating away
    // Keeps user on Home and preserves scroll/expanded sections
    goToAnalysis(league: { leagueId?: number; leagueName?: string } | null, f: any) {
      if (!f) return;

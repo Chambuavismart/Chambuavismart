@@ -138,7 +138,7 @@ import { forkJoin } from 'rxjs';
                   <em class="muted">No upcoming fixtures for this league</em>
                 </div>
                 <div class="fixture-row" *ngFor="let f of leagueFixturesMap.get(l.leagueId)">
-                  <div class="fixture-time">{{ f.dateTime | date:'d MMM yyyy, HH:mm' }} EAT</div>
+                  <div class="fixture-time">{{ toSafeDate(f.dateTime) | date:'d MMM yyyy, HH:mm':'Africa/Nairobi' }} EAT</div>
                   <div class="fixture-teams">
                     <span class="team">{{ f.homeTeam }}</span>
                     <span class="vs">vs</span>
@@ -164,6 +164,16 @@ import { forkJoin } from 'rxjs';
   `
 })
 export class FixturesComponent implements OnInit, OnDestroy {
+  // Safely convert input to Date or null to avoid NG02100 in DatePipe
+  toSafeDate(input: any): Date | null {
+    if (!input) return null;
+    try {
+      const d = new Date(input);
+      return isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
   // UI state for search, pagination, and per-league loading
   leagueSearch: string = '';
   pageSize = 20;

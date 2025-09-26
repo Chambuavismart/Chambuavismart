@@ -48,10 +48,15 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "2. Frauen-Bundesliga",
     "DFB Youth League"
   ],
-  "France": ["Ligue 1", "Ligue 2", "Coupe de France", "Trophée des Champions"],
+  "France": ["Ligue 1", "Ligue 2", "National", "Coupe de France", "Trophée des Champions"],
   "Portugal": ["Primeira Liga", "Liga Portugal 2", "Taça de Portugal", "Supertaça Cândido de Oliveira"],
   "Netherlands": ["Eredivisie", "Eerste Divisie", "Tweede Divisie", "KNVB Cup", "Johan Cruyff Shield"],
   "Scotland": ["Premiership", "Championship", "League One", "League Two", "Scottish Cup", "Scottish League Cup"],
+  "Sweden": [
+    "Allsvenskan",
+    "Superettan",
+    "Division 1 – Södra"
+  ],
   "United States": ["MLS", "US Open Cup"],
   "Brazil": ["Campeonato Brasileiro Série A", "Série B", "Copa do Brasil"],
   "Argentina": ["Liga Profesional", "Primera Nacional", "Copa Argentina"],
@@ -268,5 +273,24 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
   "Kosovo": [
     "Superliga",
     "Liga e Pare"
+  ],
+  "Oman": [
+    "Professional League"
+  ],
+  "Serbia": [
+    "Super Liga",
+    "Prva Liga",
+    "Srpska Liga - West",
+    "Srpska Liga - Belgrade",
+    "Srpska Liga - East"
+  ],
+  "Saudi Arabia": [
+    "Saudi Professional League",
+    "Division 1"
+  ],
+  "China": [
+    "Super League",
+    "Jia League",
+    "Yi League"
   ]
 });

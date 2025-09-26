@@ -169,12 +169,16 @@ Nublense
         <div class="grid">
           <label>
             League
-            <select [(ngModel)]="fixturesLeagueId" (ngModelChange)="onFixturesLeagueChange()">
-              <option [ngValue]="null">Select a league...</option>
-              <optgroup *ngFor="let g of groupedFixturesLeagues" [label]="g.groupLabel">
-                <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
-              </optgroup>
-            </select>
+            <div class="country-select">
+              <input type="text" class="country-filter" [(ngModel)]="fixturesCountryFilter" placeholder="Type at least 3 letters of the country..." />
+              <select [(ngModel)]="fixturesLeagueId" (ngModelChange)="onFixturesLeagueChange()">
+                <option [ngValue]="null">Select a league...</option>
+                <optgroup *ngFor="let g of filteredFixturesGroups" [label]="g.groupLabel">
+                  <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="hint">Start typing country to narrow the list.</div>
           </label>
           <label>
             <input type="checkbox" [(ngModel)]="fixturesStrictMode"/>
@@ -376,6 +380,12 @@ export class MatchUploadComponent {
   fixturesRawText: string = '';
   // Grouped leagues for fixtures dropdown
   groupedFixturesLeagues: GroupedLeagueDTO[] = [];
+  fixturesCountryFilter: string = '';
+  get filteredFixturesGroups(): GroupedLeagueDTO[] {
+    const q = (this.fixturesCountryFilter || '').trim().toLowerCase();
+    if (q.length < 3) return this.groupedFixturesLeagues;
+    return this.groupedFixturesLeagues.filter(g => (g.country || '').toLowerCase().includes(q));
+  }
   private fixturesOptionById: Record<number, { season: string; country: string; leagueName: string }> = {};
 
   file?: File;
