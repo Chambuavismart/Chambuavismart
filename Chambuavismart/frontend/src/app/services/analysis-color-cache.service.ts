@@ -11,11 +11,15 @@ export interface TeamColorEntry {
   doubleGreen?: boolean;
   // New: mark when fixture has draw-heavy H2H (>=40% draws) combined with Orange pill on either side
   drawHeavyD?: boolean;
+  // New: longest streak count that led to this color (only when color originates from long streaks)
+  streakCount?: number;
 }
 
 // Lightweight localStorage-backed cache for team highlight colors decided in Fixtures Analysis tab
 @Injectable({ providedIn: 'root' })
 export class AnalysisColorCacheService {
+  // Tracks keys that are currently being backfilled to avoid duplicate work across components
+  private inFlightBackfill = new Set<string>();
   private readonly LS_KEY = 'fixturesAnalysis.teamColors.v1';
   private readonly LS_VERSION_KEY = 'fixturesAnalysis.teamColors.version';
   private map = new Map<string, TeamColorEntry>();
@@ -36,9 +40,30 @@ export class AnalysisColorCacheService {
   setTeamColor(team: string, color: TeamColor, leagueId?: number | null): void {
     const k = this.key(team, leagueId);
     const prev = this.map.get(k);
-    const entry: TeamColorEntry = { teamKey: k, color, leagueId, updatedAt: Date.now(), doubleGreen: prev?.doubleGreen };
+    const entry: TeamColorEntry = { teamKey: k, color, leagueId, updatedAt: Date.now(), doubleGreen: prev?.doubleGreen, drawHeavyD: prev?.drawHeavyD, streakCount: prev?.streakCount };
     this.map.set(k, entry);
     this.save();
+  }
+
+  // Set or clear the longest streak count associated with the team color
+  setTeamStreakCount(team: string, count: number | null | undefined, leagueId?: number | null): void {
+    const k = this.key(team, leagueId);
+    const e = this.map.get(k) || { teamKey: k, color: '' as TeamColor, leagueId, updatedAt: Date.now() } as TeamColorEntry;
+    if (count && count > 0) {
+      e.streakCount = count;
+    } else {
+      delete e.streakCount;
+    }
+    e.updatedAt = Date.now();
+    this.map.set(k, e);
+    this.save();
+  }
+
+  getTeamStreakCount(team: string, leagueId?: number | null): number | null {
+    const k1 = this.key(team, leagueId);
+    const k2 = this.key(team, undefined);
+    const e = this.map.get(k1) || this.map.get(k2);
+    return (typeof e?.streakCount === 'number' && e!.streakCount! > 0) ? (e!.streakCount as number) : null;
   }
 
   getTeamColor(team: string, leagueId?: number | null): TeamColor | null {
@@ -118,12 +143,44 @@ export class AnalysisColorCacheService {
       }
     } catch {}
   }
+  // Utility: determine if a stored color is the Indigo fallback
+  isIndigoColor(input: string | null | undefined): boolean {
+    if (!input) return false;
+    const s = String(input).toLowerCase();
+    return s.includes('indigo');
+  }
+
+  // Enumerate entries that have a color but no streakCount; used for backfilling legacy data
+  listEntriesNeedingStreakCount(): TeamColorEntry[] {
+    const out: TeamColorEntry[] = [];
+    for (const e of this.map.values()) {
+      if (!e || !e.color) continue;
+      if (this.isIndigoColor(e.color)) continue; // skip fallback
+      if (typeof e.streakCount === 'number' && e.streakCount > 0) continue;
+      out.push(e);
+    }
+    return out;
+  }
+
+  markBackfillInFlight(team: string, leagueId?: number | null): boolean {
+    const k = this.key(team, leagueId);
+    if (this.inFlightBackfill.has(k)) return false;
+    this.inFlightBackfill.add(k);
+    return true;
+  }
+  clearBackfillInFlight(team: string, leagueId?: number | null): void {
+    const k = this.key(team, leagueId);
+    this.inFlightBackfill.delete(k);
+  }
+
   private save(): void {
     try {
       const arr = Array.from(this.map.values());
       localStorage.setItem(this.LS_KEY, JSON.stringify(arr));
       // Bump a version key so other documents (and polling fallbacks) can detect changes
       try { localStorage.setItem(this.LS_VERSION_KEY, String(Date.now())); } catch {}
+      // Notify all open components in this tab as well
+      try { window.dispatchEvent(new CustomEvent('fixtures:colors-updated', { detail: { source: 'cache.save' } })); } catch {}
     } catch {}
   }
 }

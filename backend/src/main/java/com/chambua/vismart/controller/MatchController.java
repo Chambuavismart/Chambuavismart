@@ -60,6 +60,241 @@ public class MatchController {
         this(matchRepository, h2hService, featureFlags, null, null, null, null);
     }
 
+    /**
+     * Streak Insights timeline for a team across all matches in the system (played only).
+     * Returns latest to oldest items. The activeStreak fields represent the sequence the team was on before each match.
+     */
+    @GetMapping("/streak-insights/by-team-name")
+    public List<com.chambua.vismart.dto.StreakTimelineItem> getStreakInsightsByTeamName(@RequestParam("name") String teamName,
+                                                                                        @RequestParam(name = "limit", required = false) Integer limitParam) {
+        org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MatchController.class);
+        if (teamName == null || teamName.trim().length() < 1) return java.util.List.of();
+        String q = teamName.trim();
+        // Cap records to speed up response; sane defaults with safety bounds
+        int limit = (limitParam == null ? 220 : Math.max(50, Math.min(500, limitParam)));
+        var slice = matchRepository.findRecentPlayedByTeamName(q, org.springframework.data.domain.PageRequest.of(0, limit));
+        List<com.chambua.vismart.model.Match> matches = (slice != null ? slice.getContent() : java.util.List.of());
+        if (matches == null || matches.isEmpty()) return java.util.List.of();
+        // Compute in chronological order (oldest -> newest) so that pre-match streak is correct
+        java.util.List<com.chambua.vismart.model.Match> asc = new java.util.ArrayList<>(matches);
+        java.util.Collections.reverse(asc);
+        java.util.List<com.chambua.vismart.dto.StreakTimelineItem> items = new java.util.ArrayList<>(asc.size());
+        String currentType = null;
+        int currentCount = 0;
+        String longestType = null;
+        int longestCount = 0;
+        java.time.format.DateTimeFormatter df = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        // Pre-collect unique opponent names to avoid N+1 DB lookups
+        java.util.Set<String> opponentNamesSet = new java.util.HashSet<>();
+        for (com.chambua.vismart.model.Match m : asc) {
+            String homeName = null, awayName = null;
+            try { if (m.getHomeTeam() != null) homeName = m.getHomeTeam().getName(); } catch (Exception ignored) {}
+            try { if (m.getAwayTeam() != null) awayName = m.getAwayTeam().getName(); } catch (Exception ignored) {}
+            boolean isHomeTmp = homeName != null && homeName.equalsIgnoreCase(q);
+            String opponentTmp = isHomeTmp ? (awayName != null ? awayName : null) : (homeName != null ? homeName : null);
+            if (opponentTmp != null && !opponentTmp.isBlank() && !"?".equals(opponentTmp)) {
+                opponentNamesSet.add(opponentTmp.trim().toLowerCase());
+            }
+        }
+        java.util.List<String> opponentNames = new java.util.ArrayList<>(opponentNamesSet);
+        java.util.Map<String, java.util.NavigableMap<java.time.LocalDate, java.util.Map.Entry<String,Integer>>> oppCache = new java.util.HashMap<>();
+        if (!opponentNames.isEmpty()) {
+            // Batch load all matches for all opponents once
+            java.util.List<com.chambua.vismart.model.Match> oppAll = matchRepository.findRecentPlayedByAnyTeamNames(opponentNames);
+            // Group by opponent canonical lowercase name
+            java.util.Map<String, java.util.List<com.chambua.vismart.model.Match>> byOpp = new java.util.HashMap<>();
+            java.util.function.Consumer<com.chambua.vismart.model.Match> addToGroup = (mm) -> {
+                String h = null, a = null;
+                try { if (mm.getHomeTeam() != null && mm.getHomeTeam().getName() != null) h = mm.getHomeTeam().getName().trim().toLowerCase(); } catch (Exception ignored) {}
+                try { if (mm.getAwayTeam() != null && mm.getAwayTeam().getName() != null) a = mm.getAwayTeam().getName().trim().toLowerCase(); } catch (Exception ignored) {}
+                if (h != null && opponentNamesSet.contains(h)) {
+                    byOpp.computeIfAbsent(h, k -> new java.util.ArrayList<>()).add(mm);
+                }
+                if (a != null && opponentNamesSet.contains(a)) {
+                    byOpp.computeIfAbsent(a, k -> new java.util.ArrayList<>()).add(mm);
+                }
+            };
+            if (oppAll != null) {
+                for (var mm : oppAll) addToGroup.accept(mm);
+            }
+            // For each opponent, compute pre-match longest map
+            for (var entry : byOpp.entrySet()) {
+                java.util.List<com.chambua.vismart.model.Match> listByOpp = entry.getValue();
+                if (listByOpp == null || listByOpp.isEmpty()) continue;
+                java.util.List<com.chambua.vismart.model.Match> oppAsc = new java.util.ArrayList<>(listByOpp);
+                oppAsc.sort((m1, m2) -> {
+                    int cmp = java.util.Objects.compare(m1.getDate(), m2.getDate(), java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+                    if (cmp != 0) return cmp;
+                    return java.util.Objects.compare(m1.getRound(), m2.getRound(), java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()));
+                });
+                String oCurType = null; int oCurCount = 0; String oLongestType = null; int oLongestCount = 0;
+                java.util.NavigableMap<java.time.LocalDate, java.util.Map.Entry<String,Integer>> map = new java.util.TreeMap<>();
+                for (com.chambua.vismart.model.Match om : oppAsc) {
+                    boolean oHome = false;
+                    String oHomeName = null, oAwayName = null;
+                    try { if (om.getHomeTeam() != null) oHomeName = om.getHomeTeam().getName(); } catch (Exception ignored) {}
+                    try { if (om.getAwayTeam() != null) oAwayName = om.getAwayTeam().getName(); } catch (Exception ignored) {}
+                    if (oHomeName != null && oHomeName.equalsIgnoreCase(entry.getKey())) oHome = true;
+                    if (om.getDate() != null) {
+                        map.put(om.getDate(), new java.util.AbstractMap.SimpleEntry<>(oLongestType, oLongestCount));
+                    }
+                    if (om.getHomeGoals() != null && om.getAwayGoals() != null) {
+                        String oThisType;
+                        if (om.getHomeGoals().equals(om.getAwayGoals())) {
+                            oThisType = "D";
+                        } else if ((oHome && om.getHomeGoals() > om.getAwayGoals()) || (!oHome && om.getAwayGoals() > om.getHomeGoals())) {
+                            oThisType = "W";
+                        } else {
+                            oThisType = "L";
+                        }
+                        if (oCurType == null || !oThisType.equals(oCurType)) {
+                            oCurType = oThisType; oCurCount = 1;
+                        } else {
+                            oCurCount += 1;
+                        }
+                        if (oCurCount > oLongestCount) { oLongestCount = oCurCount; oLongestType = oCurType; }
+                    }
+                }
+                oppCache.put(entry.getKey(), map);
+            }
+        }
+        // No time stored; keep time blank or use 00:00 to avoid misleading times
+        for (com.chambua.vismart.model.Match m : asc) {
+            Integer hg = m.getHomeGoals();
+            Integer ag = m.getAwayGoals();
+            if (hg == null || ag == null) {
+                // skip anomalies for streak calculation, but still produce row with null outcome
+                hg = null; ag = null;
+            }
+            boolean isHome = false;
+            String homeName = null, awayName = null, leagueName = null, seasonName = null;
+            try { if (m.getHomeTeam() != null) homeName = m.getHomeTeam().getName(); } catch (Exception ignored) {}
+            try { if (m.getAwayTeam() != null) awayName = m.getAwayTeam().getName(); } catch (Exception ignored) {}
+            try { if (m.getLeague() != null) leagueName = m.getLeague().getName(); } catch (Exception ignored) {}
+            try { if (m.getSeason() != null) seasonName = m.getSeason().getName(); } catch (Exception ignored) {}
+            if (homeName != null && homeName.equalsIgnoreCase(q)) { isHome = true; }
+            String opponent = isHome ? (awayName != null ? awayName : "?") : (homeName != null ? homeName : "?");
+            String outcome = null;
+            String thisType = null;
+            if (m.getHomeGoals() != null && m.getAwayGoals() != null) {
+                if (m.getHomeGoals().equals(m.getAwayGoals())) {
+                    thisType = "D";
+                } else if ((isHome && m.getHomeGoals() > m.getAwayGoals()) || (!isHome && m.getAwayGoals() > m.getHomeGoals())) {
+                    thisType = "W";
+                } else {
+                    thisType = "L";
+                }
+                outcome = thisType;
+            }
+            // Build item BEFORE updating current streak (pre-match context)
+            com.chambua.vismart.dto.StreakTimelineItem item = new com.chambua.vismart.dto.StreakTimelineItem();
+            item.setMatchId(m.getId());
+            item.setDate(m.getDate() != null ? m.getDate().format(df) : null);
+            item.setTime(null); // time not available in schema
+            item.setLeague(leagueName);
+            item.setSeason(seasonName);
+            item.setHomeTeam(homeName);
+            item.setAwayTeam(awayName);
+            item.setHomeGoals(m.getHomeGoals());
+            item.setAwayGoals(m.getAwayGoals());
+            item.setHome(isHome);
+            item.setOpponent(opponent);
+            item.setOutcome(outcome);
+            item.setActiveStreakType(currentType);
+            item.setActiveStreakCount(currentType == null ? 0 : currentCount);
+            item.setLongestToDateType(longestType);
+            item.setLongestToDateCount(longestCount);
+            // Opponent longest-to-date lookup
+            String oppName = opponent;
+            java.time.LocalDate matchDate = m.getDate();
+            if (oppName != null && matchDate != null && !"?".equals(oppName)) {
+                String key = oppName.trim().toLowerCase();
+                java.util.NavigableMap<java.time.LocalDate, java.util.Map.Entry<String,Integer>> tmap = oppCache.get(key);
+                if (tmap == null) {
+                    // Build opponent map: date -> (longestType, longestCount) before each of their matches
+                    java.util.List<com.chambua.vismart.model.Match> oppMatches = matchRepository.findRecentPlayedByTeamName(oppName.trim());
+                    java.util.NavigableMap<java.time.LocalDate, java.util.Map.Entry<String,Integer>> map = new java.util.TreeMap<>();
+                    if (oppMatches != null && !oppMatches.isEmpty()) {
+                        java.util.List<com.chambua.vismart.model.Match> oppAsc = new java.util.ArrayList<>(oppMatches);
+                        java.util.Collections.reverse(oppAsc);
+                        String oCurType = null; int oCurCount = 0; String oLongestType = null; int oLongestCount = 0;
+                        for (com.chambua.vismart.model.Match om : oppAsc) {
+                            boolean oHome = false;
+                            String oHomeName = null, oAwayName = null;
+                            try { if (om.getHomeTeam() != null) oHomeName = om.getHomeTeam().getName(); } catch (Exception ignored) {}
+                            try { if (om.getAwayTeam() != null) oAwayName = om.getAwayTeam().getName(); } catch (Exception ignored) {}
+                            if (oHomeName != null && oHomeName.equalsIgnoreCase(oppName)) oHome = true;
+                            // Pre-match longest for this opponent date
+                            if (om.getDate() != null) {
+                                map.put(om.getDate(), new java.util.AbstractMap.SimpleEntry<>(oLongestType, oLongestCount));
+                            }
+                            // Update with this match
+                            if (om.getHomeGoals() != null && om.getAwayGoals() != null) {
+                                String oThisType;
+                                if (om.getHomeGoals().equals(om.getAwayGoals())) {
+                                    oThisType = "D";
+                                } else if ((oHome && om.getHomeGoals() > om.getAwayGoals()) || (!oHome && om.getAwayGoals() > om.getHomeGoals())) {
+                                    oThisType = "W";
+                                } else {
+                                    oThisType = "L";
+                                }
+                                if (oCurType == null || !oThisType.equals(oCurType)) {
+                                    oCurType = oThisType; oCurCount = 1;
+                                } else {
+                                    oCurCount += 1;
+                                }
+                                if (oCurCount > oLongestCount) { oLongestCount = oCurCount; oLongestType = oCurType; }
+                            }
+                        }
+                    }
+                    oppCache.put(key, tmap = map);
+                }
+                if (tmap != null && !tmap.isEmpty()) {
+                    var e = tmap.floorEntry(matchDate);
+                    if (e != null) {
+                        java.util.Map.Entry<String,Integer> val = e.getValue();
+                        if (val != null) {
+                            item.setOpponentLongestToDateType(val.getKey());
+                            item.setOpponentLongestToDateCount(val.getValue() != null ? val.getValue() : 0);
+                        }
+                    }
+                }
+            }
+            // Build matchup summary
+            String aType = item.getLongestToDateType();
+            int aCnt = item.getLongestToDateCount();
+            String bType = item.getOpponentLongestToDateType();
+            int bCnt = item.getOpponentLongestToDateCount();
+            String summary = null;
+            if (aType != null && bType != null) {
+                if (aType.equals(bType)) {
+                    summary = "Same type (" + aType + "): " + aCnt + " vs " + bCnt;
+                } else {
+                    summary = "Different types: " + aCnt + aType + " vs " + bCnt + bType;
+                }
+            }
+            item.setMatchupSummary(summary);
+            items.add(item);
+            // Update active streak with this match's result
+            if (thisType != null) {
+                if (currentType == null || !thisType.equals(currentType)) {
+                    currentType = thisType;
+                    currentCount = 1;
+                } else {
+                    currentCount += 1;
+                }
+                if (currentCount > longestCount) {
+                    longestCount = currentCount;
+                    longestType = currentType;
+                }
+            }
+        }
+        // Return latest -> oldest
+        java.util.Collections.reverse(items);
+        logger.info("[StreakInsights][{}] items={}", q, items.size());
+        return items;
+    }
+
     @GetMapping("/played/total")
     public long getTotalPlayedMatches() {
         long v = 0L;
@@ -106,18 +341,44 @@ public class MatchController {
             logger.warn("[Breakdown][{}] Inconsistent totals: total={} wins={} draws={} losses={} -> recomputedLosses={}", q, total, wins, draws, losses, computedLosses);
             losses = computedLosses;
         }
-        // Compute longest-ever W/D/L streak across all played matches for this team
+        // Compute current and longest W/D/L streaks across all played matches for this team
         String longestType = null;
         int longestCount = 0;
+        String currentTypeNow = null;
+        int currentCountNow = 0;
         try {
-            java.util.List<com.chambua.vismart.model.Match> recent = matchRepository.findRecentPlayedByTeamName(q);
+            java.util.List<com.chambua.vismart.model.Match> recent = matchRepository.findRecentPlayedByTeamName(q); // latest -> oldest
             if (recent == null || recent.isEmpty()) {
-                logger.info("[Breakdown][{}] No played matches found; longest streak unavailable", q);
+                logger.info("[Breakdown][{}] No played matches found; streaks unavailable", q);
             } else {
-                // Traverse from oldest to newest to compute consecutive sequences
-                String currentType = null;
-                int currentCount = 0;
-                int skipped = 0;
+                // Compute current streak from most recent backwards until break
+                int idx = 0;
+                // Find most recent with non-null result
+                while (idx < recent.size() && (recent.get(idx).getHomeGoals() == null || recent.get(idx).getAwayGoals() == null)) idx++;
+                if (idx < recent.size()) {
+                    com.chambua.vismart.model.Match first = recent.get(idx);
+                    boolean isHomeFirst = false;
+                    try { isHomeFirst = first.getHomeTeam() != null && first.getHomeTeam().getName() != null && first.getHomeTeam().getName().equalsIgnoreCase(q); } catch (Exception ignored) {}
+                    Integer hg = first.getHomeGoals(); Integer ag = first.getAwayGoals();
+                    String base;
+                    if (hg != null && ag != null) {
+                        if (hg.equals(ag)) base = "D";
+                        else if ((isHomeFirst && hg > ag) || (!isHomeFirst && ag > hg)) base = "W";
+                        else base = "L";
+                        currentTypeNow = base; currentCountNow = 1;
+                        // extend
+                        for (int j = idx + 1; j < recent.size(); j++) {
+                            com.chambua.vismart.model.Match m = recent.get(j);
+                            Integer h = m.getHomeGoals(); Integer a = m.getAwayGoals(); if (h == null || a == null) continue;
+                            boolean isHome = false; try { isHome = m.getHomeTeam() != null && m.getHomeTeam().getName() != null && m.getHomeTeam().getName().equalsIgnoreCase(q); } catch (Exception ignored) {}
+                            String t;
+                            if (h.equals(a)) t = "D"; else if ((isHome && h > a) || (!isHome && a > h)) t = "W"; else t = "L";
+                            if (!base.equals(t)) break; else currentCountNow++;
+                        }
+                    }
+                }
+                // Compute longest: traverse oldest -> newest
+                String runType = null; int runCount = 0; int skipped = 0;
                 for (int i = recent.size() - 1; i >= 0; i--) {
                     com.chambua.vismart.model.Match m = recent.get(i);
                     Integer hg = m.getHomeGoals();
@@ -127,36 +388,29 @@ public class MatchController {
                     try {
                         isHome = m.getHomeTeam() != null && m.getHomeTeam().getName() != null && m.getHomeTeam().getName().equalsIgnoreCase(q);
                     } catch (Exception e) {
-                        // Defensive: if lazy loading failed for any reason
                         logger.warn("[Breakdown][{}] Could not access homeTeam during streak calc: {}", q, e.toString());
                     }
                     String type;
-                    if (hg.equals(ag)) {
-                        type = "D";
-                    } else if ((isHome && hg > ag) || (!isHome && ag > hg)) {
-                        type = "W";
-                    } else {
-                        type = "L";
-                    }
-                    if (currentType == null || !type.equals(currentType)) {
-                        currentType = type;
-                        currentCount = 1;
-                    } else {
-                        currentCount += 1;
-                    }
-                    if (currentCount > longestCount) {
-                        longestCount = currentCount;
-                        longestType = currentType;
-                    }
+                    if (hg.equals(ag)) type = "D";
+                    else if ((isHome && hg > ag) || (!isHome && ag > hg)) type = "W";
+                    else type = "L";
+                    if (runType == null || !type.equals(runType)) { runType = type; runCount = 1; }
+                    else { runCount += 1; }
+                    if (runCount > longestCount) { longestCount = runCount; longestType = runType; }
                 }
-                logger.info("[Breakdown][{}] Longest streak computed: type={} count={} (skippedAnomalies={})", q, longestType, longestCount, skipped);
+                logger.info("[Breakdown][{}] Streaks computed: current={}{} longest={}{}", q,
+                        (currentTypeNow==null?"-":currentTypeNow+":"), currentCountNow,
+                        (longestType==null?"-":longestType+":"), longestCount);
             }
         } catch (Exception ex) {
-            logger.warn("[Breakdown][{}] Exception while computing longest streak: {}", q, ex.toString());
+            logger.warn("[Breakdown][{}] Exception while computing streaks: {}", q, ex.toString());
         }
-        TeamResultsBreakdownResponse resp = new TeamResultsBreakdownResponse(total, wins, draws, losses, btts, over25, over15, longestType, longestCount);
+        TeamResultsBreakdownResponse resp = new TeamResultsBreakdownResponse(total, wins, draws, losses, btts, over25, over15,
+                currentTypeNow, currentCountNow, longestType, longestCount);
         long took = System.currentTimeMillis() - t0;
-        logger.info("[Breakdown][Resp][{}] total={} W/D/L={}/{}/{} BTTS={} O15={} O25={} longest={}{} took={}ms", q, total, wins, draws, losses, btts, over15, over25, (longestType==null?"-":longestType+":"), longestCount, took);
+        logger.info("[Breakdown][Resp][{}] total={} W/D/L={}/{}/{} BTTS={} O15={} O25={} current={}{} longest={}{} took={}ms", q, total, wins, draws, losses, btts, over15, over25,
+                (currentTypeNow==null?"-":currentTypeNow+":"), currentCountNow,
+                (longestType==null?"-":longestType+":"), longestCount, took);
         return resp;
     }
 

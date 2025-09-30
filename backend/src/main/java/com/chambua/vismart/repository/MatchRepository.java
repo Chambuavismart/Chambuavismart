@@ -140,7 +140,7 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     long countOver15ByTeamName(@Param("teamName") String teamName);
 
     // Last N played matches for a given team id across all leagues/seasons (most recent first)
-    @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) order by m.date desc, m.round desc")
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) order by m.date desc, m.round desc")
     List<Match> findRecentPlayedByTeamId(@Param("teamId") Long teamId);
 
     // New: Last played matches for a given team id within a specific season (most recent first)
@@ -154,6 +154,14 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     // Last N played matches for a given team name across all leagues/seasons (most recent first)
     @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(trim(m.homeTeam.name)) = lower(trim(:teamName)) or lower(trim(m.awayTeam.name)) = lower(trim(:teamName))) order by m.date desc, m.round desc")
     List<Match> findRecentPlayedByTeamName(@Param("teamName") String teamName);
+
+    // Paginated variant to efficiently cap records returned
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(trim(m.homeTeam.name)) = lower(trim(:teamName)) or lower(trim(m.awayTeam.name)) = lower(trim(:teamName))) order by m.date desc, m.round desc")
+    org.springframework.data.domain.Slice<Match> findRecentPlayedByTeamName(@Param("teamName") String teamName, org.springframework.data.domain.Pageable pageable);
+
+    // Batch: played matches for ANY of the provided team names across all leagues/seasons (most recent first)
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam left join fetch m.season where (m.status = com.chambua.vismart.model.MatchStatus.PLAYED or (m.homeGoals is not null and m.awayGoals is not null)) and (lower(trim(m.homeTeam.name)) in :names or lower(trim(m.awayTeam.name)) in :names) order by m.date desc, m.round desc")
+    List<Match> findRecentPlayedByAnyTeamNames(@Param("names") List<String> names);
 
     // Seasons in which a given team name has played, ordered by Season.startDate desc (nulls last), then season id desc
     @Query("select s.id from Match m join m.season s where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and (lower(trim(m.homeTeam.name)) = lower(trim(:teamName)) or lower(trim(m.awayTeam.name)) = lower(trim(:teamName))) group by s.id, s.startDate order by s.startDate desc nulls last, s.id desc")
@@ -213,4 +221,8 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
 
     @Query("select m from Match m where m.status = com.chambua.vismart.model.MatchStatus.PLAYED and m.round is null")
     List<Match> findPlayedWithNullRound();
+
+    // Upcoming scheduled matches for a team from a date (inclusive), soonest first
+    @Query("select m from Match m join fetch m.homeTeam join fetch m.awayTeam join fetch m.league left join fetch m.season where m.status = com.chambua.vismart.model.MatchStatus.SCHEDULED and (m.homeTeam.id = :teamId or m.awayTeam.id = :teamId) and m.date >= :from order by m.date asc, m.round asc, m.id asc")
+    java.util.List<Match> findUpcomingByTeam(@Param("teamId") Long teamId, @Param("from") java.time.LocalDate from);
 }

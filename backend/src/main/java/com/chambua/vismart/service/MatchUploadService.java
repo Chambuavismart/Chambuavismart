@@ -437,7 +437,8 @@ public class MatchUploadService {
             } else {
                 Team home = findOrCreateTeam(league, homeName);
                 Team away = findOrCreateTeam(league, awayName);
-                String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                String dateKey = (date != null) ? date.toString() : ("r:" + round);
+                String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + dateKey;
                 if (seenKeys.add(key)) {
                     inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
                 }
@@ -795,7 +796,8 @@ public class MatchUploadService {
                     // For historical/old season uploads, accept newly promoted or previously untracked teams
                     Team home = findOrCreateTeam(league, homeName);
                     Team away = findOrCreateTeam(league, awayName);
-                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                    String dateKey = (date != null) ? date.toString() : ("r:" + round);
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + dateKey;
                     if (seenKeys.add(key)) {
                         java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Africa/Nairobi"));
                         boolean autoCorrectedNow = false;
@@ -851,7 +853,8 @@ public class MatchUploadService {
                     }
                     Team home = homeOpt.get();
                     Team away = awayOpt.get();
-                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + round;
+                    String dateKey = (date != null) ? date.toString() : ("r:" + round);
+                    String key = league.getId() + ":" + home.getId() + ":" + away.getId() + ":" + dateKey;
                     if (seenKeys.add(key)) {
                         inserted += upsertMatch(league, home, away, date, round, homeGoals, awayGoals, seasonEntity);
                     }
@@ -941,17 +944,15 @@ public class MatchUploadService {
         if (ln.isEmpty() || c.isEmpty() || s.isEmpty()) {
             throw new IllegalArgumentException("League name, country and season are required");
         }
-        return leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(ln, c, s)
-                .orElseGet(() -> {
-                    try {
-                        return leagueRepository.save(new League(ln, c, s));
-                    } catch (org.springframework.dao.DataIntegrityViolationException ex) {
-                        // Another row with the same unique key already exists (or whitespace/case normalization mismatch).
-                        // Re-fetch and return existing instead of failing with 500.
-                        return leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(ln, c, s)
-                                .orElseThrow(() -> ex);
-                    }
-                });
+        Optional<League> existing = leagueRepository.findByNameIgnoreCaseAndCountryIgnoreCaseAndSeason(ln, c, s);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        // Create new league if not present. We avoid catching DataIntegrityViolationException inside
+        // the same transaction to prevent tainting the persistence context with a prior flush failure.
+        // In rare concurrent cases, the unique constraint may throw at commit and the request will fail,
+        // which is preferable to leaving the Session in a broken state.
+        return leagueRepository.save(new League(ln, c, s));
     }
 
     private Team findOrCreateTeam(League league, String name) {

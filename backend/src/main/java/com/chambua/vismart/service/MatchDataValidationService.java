@@ -89,7 +89,9 @@ public class MatchDataValidationService {
             if (prev != null) {
                 String ctxA = context(items.get(prev));
                 String ctxB = context(it);
-                issues.add(err("Duplicate match in upload batch for season/date/teams: " + it.getSeason() + ", " + it.getDate() + ", " + it.getHomeTeamName() + " vs " + it.getAwayTeamName() + " | " + ctxA + " and " + ctxB, ctxB));
+                // Downgrade to WARNING: duplicates within the same batch should not block upload;
+                // they will be skipped during persistence while preserving the first occurrence.
+                issues.add(warn("Duplicate match in upload batch for season/date/teams: " + it.getSeason() + ", " + it.getDate() + ", " + it.getHomeTeamName() + " vs " + it.getAwayTeamName() + " | " + ctxA + " and " + ctxB));
             }
         }
 

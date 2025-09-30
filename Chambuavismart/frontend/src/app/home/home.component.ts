@@ -4,6 +4,7 @@ import { Router, RouterModule, ActivatedRoute } from '@angular/router';
 import { NgFor, NgIf, DatePipe, NgClass, NgStyle } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { FixturesService, LeagueFixturesResponse, SearchFixtureItemDTO } from '../services/fixtures.service';
+import { MatchService } from '../services/match.service';
 import { AnalysisColorCacheService } from '../services/analysis-color-cache.service';
 import { GlobalLeadersContainerComponent } from '../components/global-leaders-container/global-leaders-container.component';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
@@ -35,6 +36,8 @@ export class HomeComponent implements OnInit, OnDestroy {
   private leadersApi = inject(GlobalLeadersService);
   private route = inject(ActivatedRoute);
   private colorCache = inject(AnalysisColorCacheService);
+    private matchApi = inject(MatchService);
+    private _backfillSeen = new Set<string>();
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
   private sanitizer = inject(DomSanitizer);
@@ -244,6 +247,9 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.loadToday();
     this.loadYesterday();
     for (const sec of this.pastSections) this.loadPast(sec);
+
+    // Trigger a legacy backfill shortly after initial data loads
+    setTimeout(() => this.backfillVisibleTeams(), 1200);
 
     // Start live clock updating each second without triggering excessive change detection
     this.startLiveClock();
@@ -1128,18 +1134,22 @@ export class HomeComponent implements OnInit, OnDestroy {
     const name = (teamName || '').toString().trim();
     if (!name) return {};
     try {
-      const color = this.colorCache.getTeamColor(name, leagueId ?? undefined);
-      if (!color) return {};
+      const colorRaw = this.colorCache.getTeamColor(name, leagueId ?? undefined);
+      if (!colorRaw) return {};
+      const s = colorRaw.toString().toLowerCase();
+      let bg: string | null = null;
+      if (s.includes('green') || s.includes('#16a34a') || s.includes('16,160,16')) bg = '#16a34a';
+      else if (s.includes('red') || s.includes('#ef4444') || s.includes('204, 43, 59')) bg = '#ef4444';
+      else if (s.includes('orange') || s.includes('#f59e0b') || s.includes('255, 165, 0')) bg = '#f59e0b';
+      else return {};
       const style: {[k: string]: string} = {
-        background: color,
+        background: bg,
         color: '#ffffff',
         padding: '2px 6px',
         borderRadius: '6px',
         border: '1px solid rgba(255,255,255,0.15)'
       };
-      // New: if this team has doubleGreen flag, draw a double inset ring
       if (this.colorCache.isDoubleGreen(name, leagueId ?? undefined)) {
-        // Make the double-green ring VERY visible: thicker dual inset rings + outside outline and glow
         style.boxShadow = 'inset 0 0 0 3px #16a34a, inset 0 0 0 7px rgba(22,163,74,0.65), 0 0 0 2px #16a34a, 0 0 10px 3px rgba(22,163,74,0.75)';
       }
       return style;
@@ -1159,22 +1169,100 @@ export class HomeComponent implements OnInit, OnDestroy {
     } catch { return name; }
   }
 
-  // HTML version with styling for the big shining orange D
+  // HTML version with styling for the big shining orange D and appending streak count when applicable
   formatTeamLabelHtml(teamName: string | null | undefined, leagueId?: number | null) {
     const name = (teamName || '').toString().trim();
     if (!name) return '';
     try {
-      const hasD = this.colorCache.hasDrawHeavyD(name, leagueId ?? undefined);
-      const hasFire = this.colorCache.isDoubleGreen(name, leagueId ?? undefined);
+      const lid = leagueId ?? undefined;
+      const hasD = this.colorCache.hasDrawHeavyD(name, lid);
+      const hasFire = this.colorCache.isDoubleGreen(name, lid);
+      const streak = this.colorCache.getTeamStreakCount(name, lid);
       const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const parts: string[] = [];
       if (hasD) {
         parts.push('<span style="font-weight:800;color:#ff7a00;text-shadow:0 0 6px rgba(255,122,0,0.85), 0 0 12px rgba(255,122,0,0.6);font-size:1.05em;letter-spacing:0.5px;">D</span>');
       }
       if (hasFire) parts.push('🔥');
-      parts.push(esc(name));
+      const label = streak && streak > 0 ? `${esc(name)} <span style='opacity:0.95;font-weight:700'>( ${streak} )</span>` : esc(name);
+      parts.push(label);
       return this.sanitizer.bypassSecurityTrustHtml(parts.join(' '));
     } catch { return name; }
+  }
+
+  // Kick off legacy backfill for visible teams: enrich colors with longest streak counts
+  private backfillVisibleTeams(): void {
+    try {
+      const collect: { name: string; leagueId?: number | null }[] = [];
+      const push = (name: any, leagueId?: number | null) => {
+        const n = (name || '').toString().trim();
+        if (!n) return;
+        const key = (leagueId != null ? `${n.toLowerCase()}#${leagueId}` : n.toLowerCase());
+        if (this._backfillSeen.has(key)) return;
+        const color = this.colorCache.getTeamColor(n, leagueId ?? undefined);
+        if (!color) return;
+        if (this.colorCache.isIndigoColor(color)) return; // skip fallback
+        const sc = this.colorCache.getTeamStreakCount(n, leagueId ?? undefined);
+        if (sc && sc > 0) { this._backfillSeen.add(key); return; }
+        collect.push({ name: n, leagueId });
+      };
+      // Today
+      for (const it of this.todayFlatData || []) {
+        push(it?.fixture?.homeTeam, it?.leagueId);
+        push(it?.fixture?.awayTeam, it?.leagueId);
+      }
+      // Yesterday
+      for (const it of this.yesterdayFlatData || []) {
+        push(it?.fixture?.homeTeam, it?.leagueId);
+        push(it?.fixture?.awayTeam, it?.leagueId);
+      }
+      // Past sections
+      for (const sec of this.pastSections || []) {
+        for (const it of sec?.flatData || []) {
+          push(it?.fixture?.homeTeam, it?.leagueId);
+          push(it?.fixture?.awayTeam, it?.leagueId);
+        }
+      }
+      // De-dupe and backfill sequentially to avoid bursts
+      const runNext = () => {
+        if (!collect.length) return;
+        const { name, leagueId } = collect.shift()!;
+        const key = (leagueId != null ? `${name.toLowerCase()}#${leagueId}` : name.toLowerCase());
+        if (!this.colorCache.markBackfillInFlight(name, leagueId ?? undefined)) { runNext(); return; }
+        this.matchApi.getResultsBreakdownByTeamName(name).subscribe({
+          next: (bd) => {
+            const cnt = (bd?.longestStreakCount ?? 0) as number;
+            const t = (bd?.longestStreakType || '').toString().toUpperCase();
+            if (cnt && cnt > 0) {
+              this.colorCache.setTeamStreakCount(name, cnt, leagueId ?? undefined);
+            } else {
+              this.colorCache.setTeamStreakCount(name, null, leagueId ?? undefined);
+            }
+            // Always set color based on streak type regardless of count threshold
+            if (t === 'W') {
+              this.colorCache.setTeamColor(name, '#16a34a', leagueId ?? undefined);
+            } else if (t === 'L') {
+              this.colorCache.setTeamColor(name, '#ef4444', leagueId ?? undefined);
+            } else if (t === 'D') {
+              this.colorCache.setTeamColor(name, '#f59e0b', leagueId ?? undefined);
+            } else {
+              // No streak type: clear any previous color to avoid stale/legacy colors
+              this.colorCache.removeTeamColor(name, leagueId ?? undefined);
+            }
+          },
+          error: _ => {},
+          complete: () => {
+            this._backfillSeen.add(key);
+            this.colorCache.clearBackfillInFlight(name, leagueId ?? undefined);
+            // schedule next with slight delay to yield UI
+            setTimeout(runNext, 100);
+          }
+        });
+      };
+      // Start a few in parallel but small
+      const par = Math.min(collect.length, 3);
+      for (let i = 0; i < par; i++) setTimeout(runNext, 0);
+    } catch {}
   }
 
   // React to color updates from Fixtures Analysis tab
@@ -1183,6 +1271,8 @@ export class HomeComponent implements OnInit, OnDestroy {
       this.zone.run(() => {
         // Resort based on updated analysis colors and refresh view
         this.resortTodayFlatData();
+        // Attempt legacy backfill for any colored teams missing streak counts
+        this.backfillVisibleTeams();
         try { this.cdr.detectChanges(); } catch {}
       });
     } catch { /* no-op */ }

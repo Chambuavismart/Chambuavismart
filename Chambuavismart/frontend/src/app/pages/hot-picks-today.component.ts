@@ -136,9 +136,10 @@ export class HotPicksTodayComponent implements OnInit {
   colorCategory(color: string | null): 'green'|'red'|'orange'|'none' {
     const c = (color || '').toLowerCase();
     if (!c) return 'none';
-    if (c.includes('16,160,16') || c.includes('#10a010') || c.includes('28a745')) return 'green';
-    if (c.includes('204, 43, 59') || c.includes('cc2b3b') || c.includes('ef4444')) return 'red';
-    if (c.includes('255, 165, 0') || c.includes('ffa500') || c.includes('f59e0b')) return 'orange';
+    // Recognize new canonical hexes and legacy strings
+    if (c.includes('#16a34a') || c.includes('16,160,16') || c.includes('#10a010') || c.includes('28a745') || c.includes('green')) return 'green';
+    if (c.includes('#ef4444') || c.includes('204, 43, 59') || c.includes('cc2b3b') || c.includes('red')) return 'red';
+    if (c.includes('#f59e0b') || c.includes('255, 165, 0') || c.includes('ffa500') || c.includes('orange')) return 'orange';
     return 'none';
   }
 

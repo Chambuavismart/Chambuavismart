@@ -25,12 +25,97 @@ public class FixtureService {
         this.fixtureRepository = fixtureRepository;
     }
 
+    /**
+     * Find the earliest upcoming/live fixture for a given team name using a resilient strategy.
+     * 1) Try exact (case-insensitive) name match on either home or away.
+     * 2) Fallback to prefix search (first 8 chars), then pick the first fixture where either side
+     *    contains the team name (case-insensitive) or vice versa.
+     */
+    public java.util.Optional<Fixture> findEarliestActiveByTeamNameFlexible(String teamName) {
+        if (teamName == null || teamName.isBlank()) return java.util.Optional.empty();
+        String raw = teamName.trim();
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+
+        // Helper to check if fixture is strictly in the future and UPCOMING
+        java.util.function.Predicate<Fixture> isUpcomingFuture = f -> {
+            try {
+                return f != null && f.getDateTime() != null && f.getDateTime().isAfter(now) && f.getStatus() == com.chambua.vismart.model.FixtureStatus.UPCOMING;
+            } catch (Exception e) {
+                return false;
+            }
+        };
+        // Helper to check if fixture is LIVE (active now)
+        java.util.function.Predicate<Fixture> isLive = f -> {
+            try {
+                return f != null && f.getStatus() == com.chambua.vismart.model.FixtureStatus.LIVE;
+            } catch (Exception e) {
+                return false;
+            }
+        };
+
+        try {
+            var exact = fixtureRepository.findEarliestActiveByTeamName(raw);
+            if (exact != null && !exact.isEmpty()) {
+                // 1) Prefer earliest UPCOMING strictly in the future
+                for (Fixture f : exact) {
+                    if (isUpcomingFuture.test(f)) return java.util.Optional.of(f);
+                }
+                // 2) Otherwise, fall back to earliest LIVE (align with Fixtures tab treating LIVE as active)
+                for (Fixture f : exact) {
+                    if (isLive.test(f)) return java.util.Optional.of(f);
+                }
+            }
+        } catch (Exception ignored) {}
+        try {
+            String prefix = raw.length() > 8 ? raw.substring(0, 8) : raw;
+            var list = fixtureRepository.searchActiveByTeamPrefix(prefix.toLowerCase());
+            if (list != null && !list.isEmpty()) {
+                // 1) Prefer strict-future UPCOMING with best name match
+                for (Fixture f : list) {
+                    if (!isUpcomingFuture.test(f)) continue;
+                    String h = f.getHomeTeam();
+                    String a = f.getAwayTeam();
+                    if (h != null && h.equalsIgnoreCase(raw)) return java.util.Optional.of(f);
+                    if (a != null && a.equalsIgnoreCase(raw)) return java.util.Optional.of(f);
+                    // contains either way (handle abbreviations)
+                    if (h != null && (h.toLowerCase().contains(raw.toLowerCase()) || raw.toLowerCase().contains(h.toLowerCase()))) return java.util.Optional.of(f);
+                    if (a != null && (a.toLowerCase().contains(raw.toLowerCase()) || raw.toLowerCase().contains(a.toLowerCase()))) return java.util.Optional.of(f);
+                }
+                // 2) Fallback within prefix list: first strictly-future UPCOMING fixture
+                for (Fixture f : list) {
+                    if (isUpcomingFuture.test(f)) return java.util.Optional.of(f);
+                }
+                // 3) Final fallback: earliest LIVE with best name match
+                for (Fixture f : list) {
+                    if (!isLive.test(f)) continue;
+                    String h = f.getHomeTeam();
+                    String a = f.getAwayTeam();
+                    if (h != null && h.equalsIgnoreCase(raw)) return java.util.Optional.of(f);
+                    if (a != null && a.equalsIgnoreCase(raw)) return java.util.Optional.of(f);
+                    if (h != null && (h.toLowerCase().contains(raw.toLowerCase()) || raw.toLowerCase().contains(h.toLowerCase()))) return java.util.Optional.of(f);
+                    if (a != null && (a.toLowerCase().contains(raw.toLowerCase()) || raw.toLowerCase().contains(a.toLowerCase()))) return java.util.Optional.of(f);
+                }
+                // 4) As a last resort, pick the first LIVE in the list
+                for (Fixture f : list) {
+                    if (isLive.test(f)) return java.util.Optional.of(f);
+                }
+            }
+        } catch (Exception ignored2) {}
+        return java.util.Optional.empty();
+    }
+
     public List<Fixture> getFixturesByLeague(Long leagueId) {
-        return fixtureRepository.findByLeague_IdOrderByDateTimeAsc(leagueId);
+        return fixtureRepository.findByLeague_IdOrderByDateTimeAsc(leagueId)
+                .stream()
+                .filter(f -> f.getHomeTeam() != null && !f.getHomeTeam().equalsIgnoreCase("Postp"))
+                .collect(Collectors.toList());
     }
 
     public List<Fixture> getUpcomingFixturesByLeague(Long leagueId) {
-        return fixtureRepository.findByLeague_IdAndStatusInOrderByDateTimeAsc(leagueId, Arrays.asList(FixtureStatus.UPCOMING, FixtureStatus.LIVE));
+        return fixtureRepository.findByLeague_IdAndStatusInOrderByDateTimeAsc(leagueId, Arrays.asList(FixtureStatus.UPCOMING, FixtureStatus.LIVE))
+                .stream()
+                .filter(f -> f.getHomeTeam() != null && !f.getHomeTeam().equalsIgnoreCase("Postp"))
+                .collect(Collectors.toList());
     }
 
     public List<Fixture> saveFixtures(List<Fixture> fixtures) {
@@ -54,8 +139,12 @@ public class FixtureService {
         if (active != null) for (Fixture f : active) map.put(f.getId(), f);
         if (pendingScores != null) for (Fixture f : pendingScores) map.putIfAbsent(f.getId(), f);
         List<Fixture> results = new java.util.ArrayList<>(map.values());
+        // Defensive filter: exclude any malformed postponed markers masquerading as team names
+        results = results.stream()
+                .filter(f -> f.getHomeTeam() != null && !f.getHomeTeam().equalsIgnoreCase("Postp"))
+                .collect(java.util.stream.Collectors.toList());
         if (log.isDebugEnabled()) {
-            log.debug("[FixtureService] getFixturesByDate (active+pending) date={} season={} -> {} fixtures", date, season, results != null ? results.size() : 0);
+            log.debug("[FixtureService] getFixturesByDate (active+pending) date={} season={} -> {} fixtures (after Postp filter)", date, season, results != null ? results.size() : 0);
         }
         return results;
     }

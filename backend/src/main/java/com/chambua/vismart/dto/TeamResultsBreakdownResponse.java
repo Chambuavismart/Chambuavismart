@@ -8,7 +8,10 @@ public class TeamResultsBreakdownResponse {
     private long btts;
     private long over25;
     private long over15;
-    // New: longest ever streak across all played matches (W/D/L only for clarity and minimalism)
+    // Active streak as of the most recent played match
+    private String currentStreakType; // one of "W", "D", "L"; null if team has no played matches
+    private int currentStreakCount;   // consecutive matches of the current type from most recent backwards
+    // Longest ever streak across all played matches (W/D/L only)
     private String longestStreakType; // one of "W", "D", "L"; null if not enough data
     private int longestStreakCount;   // length of the streak; 0 if none
 
@@ -39,8 +42,9 @@ public class TeamResultsBreakdownResponse {
         this.over15 = over15;
     }
 
-    // Convenience constructor including longest streak
+    // Convenience constructor including current and longest streaks
     public TeamResultsBreakdownResponse(long total, long wins, long draws, long losses, long btts, long over25, long over15,
+                                        String currentStreakType, int currentStreakCount,
                                         String longestStreakType, int longestStreakCount) {
         this.total = total;
         this.wins = wins;
@@ -49,8 +53,16 @@ public class TeamResultsBreakdownResponse {
         this.btts = btts;
         this.over25 = over25;
         this.over15 = over15;
+        this.currentStreakType = currentStreakType;
+        this.currentStreakCount = currentStreakCount;
         this.longestStreakType = longestStreakType;
         this.longestStreakCount = longestStreakCount;
+    }
+
+    // Backward-compat constructor (no current streak provided)
+    public TeamResultsBreakdownResponse(long total, long wins, long draws, long losses, long btts, long over25, long over15,
+                                        String longestStreakType, int longestStreakCount) {
+        this(total, wins, draws, losses, btts, over25, over15, null, 0, longestStreakType, longestStreakCount);
     }
 
     public long getTotal() { return total; }
@@ -73,6 +85,12 @@ public class TeamResultsBreakdownResponse {
 
     public long getOver15() { return over15; }
     public void setOver15(long over15) { this.over15 = over15; }
+
+    public String getCurrentStreakType() { return currentStreakType; }
+    public void setCurrentStreakType(String currentStreakType) { this.currentStreakType = currentStreakType; }
+
+    public int getCurrentStreakCount() { return currentStreakCount; }
+    public void setCurrentStreakCount(int currentStreakCount) { this.currentStreakCount = currentStreakCount; }
 
     public String getLongestStreakType() { return longestStreakType; }
     public void setLongestStreakType(String longestStreakType) { this.longestStreakType = longestStreakType; }

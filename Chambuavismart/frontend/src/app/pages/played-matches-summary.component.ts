@@ -68,7 +68,9 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
             <div>Over 2.5: {{ breakdown?.over25 ?? 0 }} <span class="pct">{{ pct(breakdown?.over25) }}%</span></div>
           </div>
           <div class="breakdown-row" [class.loading]="loadingBreakdown" *ngIf="!loadingBreakdown">
-            <div>Longest streak: {{ formatLongestStreak(breakdown?.longestStreakType, breakdown?.longestStreakCount) }}</div>
+            <div>Current streak: {{ formatStreak(breakdown?.currentStreakType, breakdown?.currentStreakCount) }}
+              <span class="muted" *ngIf="breakdown?.longestStreakCount && breakdown?.longestStreakType"> • Longest: {{ formatLongestStreak(breakdown?.longestStreakType, breakdown?.longestStreakCount) }}</span>
+            </div>
           </div>
           <ng-template #loadingTpl3>Loading…</ng-template>
         </div>
@@ -91,13 +93,21 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
       </div>
 
       <!-- Profiles side by side when H2H selected -->
+      <div class="hint" *ngIf="h2hSelected" style="margin: 8px 0; color:#9aa0a6;">
+        Color legend: Green = W longest-ever, Orange = D longest-ever, Red = L longest-ever. Current streaks are shown for reference only.
+      </div>
       <div class="profiles-grid" *ngIf="h2hSelected">
         <div class="profile-card" [ngStyle]="profileHighlightStyle(true)">
           <div class="profile-header">
-            <div class="team-name">{{ h2hHome }}</div>
+            <div class="team-name" [ngStyle]="teamPillStyle(true)">{{ h2hHome }}</div>
             <button class="clear" (click)="clearH2H()">Clear H2H</button>
           </div>
           <div class="section-desc">Summary of all played matches for {{ h2hHome }} across Chambuavismart (all seasons and leagues). These figures are not limited to this H2H pairing.</div>
+          <!-- Same/Different longest-ever streak banner for explicit confirmation -->
+          <div class="hint" *ngIf="hasBothLongestTypes()">
+            {{ isSameOverallLongest() ? 'Same type of longest-ever streak matchup' : 'Different type of longest-ever streak matchup' }}
+            <span class="muted"> — {{ (homeBreakdown?.longestStreakType || '?') | uppercase }} vs {{ (awayBreakdown?.longestStreakType || '?') | uppercase }}</span>
+          </div>
           <div class="stat-row">
             <div class="stat-label">Matches involved:</div>
             <div class="stat-value" [class.loading]="loadingHomeCount">
@@ -123,7 +133,9 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
               <div>Over 2.5: {{ homeBreakdown?.over25 ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.over25, homeBreakdown?.total) }}%</span></div>
             </div>
             <div class="breakdown-row" [class.loading]="loadingHomeBreakdown" *ngIf="!loadingHomeBreakdown">
-              <div>Longest streak: {{ formatLongestStreak(homeBreakdown?.longestStreakType, homeBreakdown?.longestStreakCount) }}</div>
+              <div>Current streak: {{ formatStreak(homeBreakdown?.currentStreakType, homeBreakdown?.currentStreakCount) }}
+                <span class="muted" *ngIf="homeBreakdown?.longestStreakCount && homeBreakdown?.longestStreakType"> • Longest: {{ formatLongestStreak(homeBreakdown?.longestStreakType, homeBreakdown?.longestStreakCount) }}</span>
+              </div>
             </div>
             <div class="breakdown-row" [class.loading]="loadingHomeBreakdown" *ngIf="!loadingHomeBreakdown">
               <div [ngClass]="h2hClass('btts')">BTTS: {{ homeBreakdown?.btts ?? 0 }} <span class="pct">{{ pct2(homeBreakdown?.btts, homeBreakdown?.total) }}%</span></div>
@@ -139,7 +151,7 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
         </div>
         <div class="profile-card" [ngStyle]="profileHighlightStyle(false)">
           <div class="profile-header">
-            <div class="team-name">{{ h2hAway }}</div>
+            <div class="team-name" [ngStyle]="teamPillStyle(false)">{{ h2hAway }}</div>
             <button class="clear" (click)="clearH2H()">Clear H2H</button>
           </div>
           <div class="stat-row">
@@ -167,7 +179,9 @@ import { AnalysisColorCacheService } from '../services/analysis-color-cache.serv
               <div [ngClass]="h2hClass('over25', false)">Over 2.5: {{ awayBreakdown?.over25 ?? 0 }} <span class="pct">{{ pct2(awayBreakdown?.over25, awayBreakdown?.total) }}%</span></div>
             </div>
             <div class="breakdown-row" [class.loading]="loadingAwayBreakdown" *ngIf="!loadingAwayBreakdown">
-              <div>Longest streak: {{ formatLongestStreak(awayBreakdown?.longestStreakType, awayBreakdown?.longestStreakCount) }}</div>
+              <div>Current streak: {{ formatStreak(awayBreakdown?.currentStreakType, awayBreakdown?.currentStreakCount) }}
+                <span class="muted" *ngIf="awayBreakdown?.longestStreakCount && awayBreakdown?.longestStreakType"> • Longest: {{ formatLongestStreak(awayBreakdown?.longestStreakType, awayBreakdown?.longestStreakCount) }}</span>
+              </div>
             </div>
             <ng-template #loadingAwayBdTpl>Loading…</ng-template>
           </div>
@@ -1303,6 +1317,20 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
     return `${label}: ${c}`;
   }
  
+  // Overloads: format current streak either as (type,count) => labeled, or as compact string like "3W"
+  formatStreak(type?: string | null, count?: number | null): string;
+  formatStreak(s: string | null | undefined): string;
+  formatStreak(a?: string | null, b?: number | null): string {
+    // If called with a compact string like "3W"
+    if (arguments.length === 1) {
+      const s = a as (string | null | undefined);
+      if (!s) return '—';
+      return s;
+    }
+    // Called with (type, count)
+    return this.formatLongestStreak(a, b);
+  }
+ 
    ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -1383,13 +1411,38 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
   // Compute a display color for team pill based on longest-ever streak from Fixtures Analysis
   private computeColorFromBreakdown(b?: TeamBreakdownDto | null): string | null {
     const t = (b?.longestStreakType || '').toUpperCase();
-    const c = b?.longestStreakCount || 0;
-    // Match Fixtures Analysis UI rule: highlight only for strong streaks (>5)
-    if (!t || !c || c <= 5) return null;
-    if (t === 'W') return 'rgba(16,160,16,0.85)';   // green
-    if (t === 'L') return 'rgba(204, 43, 59, 0.85)'; // red
-    if (t === 'D') return 'rgba(255, 165, 0, 0.85)'; // orange
+    // Always map to one of three colors based on streak type regardless of count
+    if (!t) return null;
+    if (t === 'W') return '#16a34a';   // Green
+    if (t === 'L') return '#ef4444';   // Red
+    if (t === 'D') return '#f59e0b';   // Orange
     return null;
+  }
+
+  teamPillStyle(isHome: boolean): { [k: string]: string } {
+    const b = isHome ? this.homeBreakdown : this.awayBreakdown;
+    const color = this.computeColorFromBreakdown(b);
+    if (!color) return {};
+    return {
+      background: color,
+      color: '#ffffff',
+      padding: '2px 6px',
+      borderRadius: '6px',
+      border: '1px solid rgba(255,255,255,0.15)'
+    };
+  }
+
+  // Explicit classification helpers: compare overall longest-ever streak types for both teams
+  hasBothLongestTypes(): boolean {
+    const ht = (this.homeBreakdown?.longestStreakType || '').toUpperCase();
+    const at = (this.awayBreakdown?.longestStreakType || '').toUpperCase();
+    return !!ht && !!at;
+  }
+  isSameOverallLongest(): boolean {
+    if (!this.hasBothLongestTypes()) return false;
+    const ht = (this.homeBreakdown?.longestStreakType || '').toUpperCase();
+    const at = (this.awayBreakdown?.longestStreakType || '').toUpperCase();
+    return ht === at;
   }
 
   // Persist H2H team colors into local cache so Home page can render colored pills for today's fixtures
@@ -1402,10 +1455,9 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       const computedAway = this.computeColorFromBreakdown(this.awayBreakdown);
       const lid = this.leagueId ?? undefined;
 
-      // Apply Indigo fallback only when neither team qualifies for a color
-      const INDIGO = 'rgba(75, 0, 130, 0.85)';
-      const homeColor = computedHome || (computedHome === null && computedAway === null ? INDIGO : null);
-      const awayColor = computedAway || (computedHome === null && computedAway === null ? INDIGO : null);
+      // No Indigo fallback; only three colors are allowed. Persist or clear accordingly.
+      const homeColor = computedHome;
+      const awayColor = computedAway;
 
       let changed = false;
       if (homeColor) { this.colorCache.setTeamColor(this.h2hHome, homeColor, lid); changed = true; }
@@ -1413,8 +1465,18 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       if (awayColor) { this.colorCache.setTeamColor(this.h2hAway, awayColor, lid); changed = true; }
       else { this.colorCache.removeTeamColor(this.h2hAway, lid); changed = true; }
 
+      // Persist longest streak count always (if available)
+      const sc = this.homeBreakdown?.longestStreakCount || null;
+      this.colorCache.setTeamStreakCount(this.h2hHome, sc, lid);
+      const sc2 = this.awayBreakdown?.longestStreakCount || null;
+      this.colorCache.setTeamStreakCount(this.h2hAway, sc2, lid);
+
       // New: compute double-green flag (Green + H2H wins > 70%) if H2H matches are available
-      const isGreen = (c: string | null): boolean => !!c && c.toLowerCase().includes('rgba(16,160,16');
+      const isGreen = (c: string | null): boolean => {
+        if (!c) return false;
+        const s = c.toLowerCase();
+        return s.includes('#16a34a') || s.includes('green');
+      };
       const calcWinPct = (team: string): number | null => {
         const list = Array.isArray(this.h2hMatchesAll) ? this.h2hMatchesAll : [];
         if (!list.length) return null;
@@ -1439,19 +1501,34 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       };
       if (isGreen(homeColor)) {
         const p = calcWinPct(this.h2hHome);
-        this.colorCache.setDoubleGreen(this.h2hHome, !!(p !== null && p > 0.7), lid);
+        this.colorCache.setDoubleGreen(this.h2hHome, !!(p !== null && p >= 0.7), lid);
       } else {
         this.colorCache.setDoubleGreen(this.h2hHome, false, lid);
       }
       if (isGreen(awayColor)) {
         const p = calcWinPct(this.h2hAway);
-        this.colorCache.setDoubleGreen(this.h2hAway, !!(p !== null && p > 0.7), lid);
+        this.colorCache.setDoubleGreen(this.h2hAway, !!(p !== null && p >= 0.7), lid);
       } else {
         this.colorCache.setDoubleGreen(this.h2hAway, false, lid);
       }
 
       // New: compute Draw-heavy D flag: if either team pill is Orange AND H2H draws >= 40% across any orientation, mark BOTH teams
-      const isOrange = (c: string | null): boolean => !!c && c.toLowerCase().includes('255, 165, 0');
+      const isOrange = (c: string | null): boolean => {
+        if (!c) return false;
+        const s = c.toLowerCase().trim();
+        // Accept common representations for our Orange pill
+        // - Hex: #f59e0b
+        // - Name: orange
+        // - RGB: 255,165,0 (allow optional spaces)
+        if (s.includes('#f59e0b') || s.includes('orange')) return true;
+        const m = s.match(/rgba?\((\d+)[ ,]+(\d+)[ ,]+(\d+)/);
+        if (m) {
+          const r = parseInt(m[1], 10), g = parseInt(m[2], 10), b = parseInt(m[3], 10);
+          // Close to (255,165,0) range
+          if (r >= 230 && g >= 130 && g <= 200 && b <= 40) return true;
+        }
+        return false;
+      };
       const calcDrawPct = (): number | null => {
         const list = Array.isArray(this.h2hMatchesAll) ? this.h2hMatchesAll : [];
         if (!list.length) return null;
@@ -1516,11 +1593,6 @@ export class PlayedMatchesSummaryComponent implements OnInit, OnDestroy {
       count++;
     }
     return `${count}${first}`;
-  }
-  formatStreak(s: string | null | undefined): string {
-    if (!s) return '—';
-    if (/^\d+[WDL]$/i.test(s)) return s;
-    return s;
   }
   barHeight(v: number | null | undefined): string {
     const val = typeof v === 'number' ? v : 0;

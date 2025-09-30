@@ -5,13 +5,13 @@ Date: 2025-09-13
 ## Changes Made
 
 1. Adaptive Grid for Correct Scores (Frontend)
-   - File: frontend/src/app/services/poisson.service.ts
+   - File: Chambuavismart/frontend/src/app/services/poisson.service.ts
    - Updated calculateCorrectScores to use an adaptive goal grid that starts at 10 and expands up to 20 until cumulative probability mass ≥ 99.9%. This improves accuracy for higher expected goals (λ) scenarios.
    - Added diagnostic log: [Poisson] Correct Scores: Adaptive maxGoals=...
    - Kept one-decimal precision in the service to avoid rounding inflation.
 
 2. UI Enhancements for Correct Scores
-   - File: frontend/src/app/pages/played-matches-summary.component.ts
+   - File: Chambuavismart/frontend/src/app/pages/played-matches-summary.component.ts
    - Added a new column with visual bars to represent relative probability magnitudes.
    - Adjusted rounding to one decimal (number:'1.1-1').
    - Implemented display scaling to cap the sum of the top three probabilities at 25% to avoid UI rounding inflation: displayProb = probability × min(1, 25/sum).
@@ -22,10 +22,10 @@ Date: 2025-09-13
    - File: backend/src/main/java/com/chambua/vismart/controller/MatchController.java
    - Added GET /api/matches/verify-correct-scores?homeTeamId={id}&awayTeamId={id}&leagueId={id}
    - Computes lambdas using H2H averages per team with fallbacks (leagueAvg=1.4, homeAdv=1.15, awayDis=0.95) and builds a 0..10 score grid to return the top three normalized probabilities (one decimal).
-   - Returns JSON array like: [{"score":"1-1","probability":11.2}, ...].
+   - Returns a JSON array containing the top three items like [{"score":"1-1","probability":11.2}, ...] followed by an extra object {"over35": <percent>} for diagnostics.
 
 4. Unit Tests (Frontend)
-   - File: frontend/src/app/services/poisson.service.spec.ts
+   - File: Chambuavismart/frontend/src/app/services/poisson.service.spec.ts
    - Test 1: λA=1.41, λB=1.11: verifies expected ordering (1-1, 1-0, 2-1) and that the sum of the top three is ~20–25%.
    - Test 2: λA=2.5, λB=1.5: checks adaptive grid logging and that higher scores rank higher.
    - Test 3: λA=0.5, λB=0.5: confirms low scores dominate (0-0, 1-0, 0-1 among top three).

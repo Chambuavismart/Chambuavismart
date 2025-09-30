@@ -238,6 +238,11 @@ public class FixtureUploadService {
 
                 String home = normalizeTeamName(home1.isEmpty() ? home2 : home1);
                 String away = normalizeTeamName(away1.isEmpty() ? away2 : away1);
+                if (home.equalsIgnoreCase("Postp")) {
+                    if (warnings != null) warnings.add("[Upload][Skip] Skipping fixture with home team 'Postp' at lines " + (blockStart+1) + "-" + (blockStart+6));
+                    i = blockStart + 6;
+                    continue;
+                }
                 if (home.isEmpty() || away.isEmpty()){
                     errors.add("Missing team name near line " + (blockStart+1));
                 }
@@ -334,6 +339,10 @@ public class FixtureUploadService {
             String away = normalizeTeamName(parts[4].trim());
             String hs = parts[5].trim();
             String as = parts[6].trim();
+            if (home.equalsIgnoreCase("Postp")) {
+                if (warnings != null) warnings.add("[Upload][Skip] CSV line " + (i+1) + ": skipping fixture with home team 'Postp'");
+                continue;
+            }
             if (home.isEmpty() || away.isEmpty()) {
                 errors.add("Line " + (i+1) + ": missing team name");
                 continue;

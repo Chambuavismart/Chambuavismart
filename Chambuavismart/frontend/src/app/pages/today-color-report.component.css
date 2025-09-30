@@ -13,9 +13,12 @@
 .print-btn { background:#0d8a46; border:1px solid #0a6e38; color:#fff; border-radius:10px; padding:8px 12px; font-weight:800; cursor:pointer; }
 .print-btn:disabled { opacity:.6; cursor: default; }
 .spacer { flex:1; }
+.sort { display:flex; gap:6px; align-items:center; color:#cdd; }
+.sort select { background:#15203a; color:#cdd; border:1px solid #2a365a; padding:6px 8px; border-radius:8px; }
 .bucket { margin: 18px 0 28px; background: #0f1320; border: 1px solid #1f2640; border-radius: 6px; }
 .bucket-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #1f2640; }
 .bucket-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.bucket-head h2 .pill { display:inline-block; background:#15203a; color:#cfe; border:1px solid #2a365a; padding:4px 10px; border-radius:999px; }
 .bucket-head .count { background: #223; color: #ccd; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
 .bucket-body { display: flex; flex-direction: column; }
 .row { display: grid; grid-template-columns: 32px 1.2fr 1fr; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #1b2138; }

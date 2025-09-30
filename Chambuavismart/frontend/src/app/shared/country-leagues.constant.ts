@@ -292,5 +292,26 @@ export const COUNTRY_LEAGUES: Readonly<Record<string, readonly string[]>> = Obje
     "Super League",
     "Jia League",
     "Yi League"
+  ],
+  "Austria": [
+    "Bundesliga",
+    "2. Liga"
+  ],
+  "Denmark": [
+    "Superliga",
+    "1st Division",
+    "2nd Division",
+    "3rd Division"
+  ],
+  "Slovakia": [
+    "Fortuna Liga",
+    "2. Liga"
+  ],
+  "Switzerland": [
+    "Super League",
+    "Challenge League"
+  ],
+  "Bahrain": [
+    "Premier League"
   ]
 });

@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { NgFor, NgIf, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, NavigationEnd, RouterLink, RouterLinkActive } from '@angular/router';
-import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO } from '../services/fixtures.service';
+import { FixturesService, LeagueWithUpcomingDTO, LeagueFixturesResponse, FixtureDTO, SearchFixtureItemDTO } from '../services/fixtures.service';
 import { LeagueService, GroupedLeagueDTO } from '../services/league.service';
 import { GlobalLeadersService, GlobalLeader } from '../services/global-leaders.service';
 import { forkJoin } from 'rxjs';
@@ -74,6 +74,17 @@ import { forkJoin } from 'rxjs';
 
     .loader { color:#6ea8fe; display:inline-flex; align-items:center; gap:8px; }
 
+    /* Dropdown visibility + pill styling */
+    .search-dropdown { padding: 8px; }
+    .search-dropdown .fixture-row { align-items: flex-start; flex-wrap: wrap; }
+    .search-dropdown .result-pill { position: relative; display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; border-radius:16px; border:1px solid #334155; background: linear-gradient(135deg, rgba(30, 64, 175, 0.45), rgba(6, 95, 70, 0.45)); box-shadow: 0 2px 6px rgba(0,0,0,0.35); transition: transform .05s ease, box-shadow .2s ease, background .2s ease; cursor:pointer; }
+    .search-dropdown .result-pill:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.45); background: linear-gradient(135deg, rgba(37, 99, 235, 0.55), rgba(5, 150, 105, 0.55)); }
+    .search-dropdown .result-pill:active { transform: translateY(1px); }
+    .search-dropdown .fixture-time { flex: 0 0 auto; font-size: 13px; white-space: nowrap; color:#d1e9ff; background: rgba(2, 132, 199, 0.25); border: 1px solid rgba(56, 189, 248, 0.35); padding:2px 6px; border-radius:999px; }
+    .search-dropdown .fixture-teams { flex: 1 1 100%; display: block; white-space: normal; overflow: visible; text-overflow: clip; font-weight: 800; color: #ffffff; margin-top: 4px; }
+    .search-dropdown .fixture-status { flex: 0 0 auto; margin-left: auto; }
+    .search-dropdown .team { display: inline; }
+
     /* Responsive */
     @media (max-width: 1024px){ .fs-sidebar { position:relative; height:auto; } .fs-main { width:100%; padding:12px; } .fs-layout { flex-direction:column; } }
     @media (max-width: 768px){ .fs-sidebar { order:2; width:100%; height:auto; } .fs-main { order:1; } .fixture-time { flex-basis:140px; } }
@@ -108,8 +119,26 @@ import { forkJoin } from 'rxjs';
                 <div class="title">Fixtures Calendar</div>
                 <div class="subtitle"><i class="fa fa-calendar"></i> View upcoming matches by league</div>
               </div>
-              <div style="flex:1; max-width:420px; min-width:240px;">
+              <div style="flex:1; max-width:420px; min-width:240px; position:relative;">
                 <input type="text" class="search-input" [(ngModel)]="leagueSearch" (ngModelChange)="onLeagueSearchChange()" placeholder="Search leagues by country or name..." aria-label="Search leagues"/>
+              </div>
+              <div style="flex:1; max-width:420px; min-width:240px; position:relative;">
+                <input type="text" class="search-input" [(ngModel)]="teamSearch" (ngModelChange)="onTeamSearchChange()" placeholder="Search fixture by team (type at least 3 letters)..." aria-label="Search fixture by team"/>
+                <div *ngIf="showTeamDropdown" class="search-dropdown" style="position:absolute; top:44px; left:0; right:0; background:#1a1a1a; border:1px solid #333; border-radius:8px; z-index:1000; max-height:320px; overflow:auto;">
+                  <div *ngIf="teamLoading" class="fixture-row"><span class="loader"><i class="fa fa-spinner fa-spin"></i> Searching...</span></div>
+                  <div *ngIf="!teamLoading && (!teamResults || teamResults.length===0)" class="fixture-row"><em class="muted">No matching upcoming fixtures</em></div>
+                  <div *ngFor="let it of teamResults" class="fixture-row result-pill" (click)="selectTeamResult(it)">
+                    <div class="fixture-time">{{ toSafeDate(it.fixture?.dateTime) | date:'d MMM yyyy, HH:mm':'Africa/Nairobi' }} EAT</div>
+                    <div class="fixture-teams" [attr.title]="(it.fixture?.homeTeam || '') + ' vs ' + (it.fixture?.awayTeam || '')">
+                      <span class="team">{{ it.fixture?.homeTeam }}</span>
+                      <span class="vs">vs</span>
+                      <span class="team">{{ it.fixture?.awayTeam }}</span>
+                    </div>
+                    <div class="fixture-status">
+                      <span class="status-chip">{{ it.leagueCountry || '' }} {{ it.leagueName ? '• ' + it.leagueName : '' }}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -164,6 +193,12 @@ import { forkJoin } from 'rxjs';
   `
 })
 export class FixturesComponent implements OnInit, OnDestroy {
+  // Team search state
+  teamSearch: string = '';
+  teamResults: SearchFixtureItemDTO[] = [];
+  teamLoading: boolean = false;
+  showTeamDropdown: boolean = false;
+  private teamDebounceHandle: any = null;
   // Safely convert input to Date or null to avoid NG02100 in DatePipe
   toSafeDate(input: any): Date | null {
     if (!input) return null;
@@ -426,6 +461,11 @@ export class FixturesComponent implements OnInit, OnDestroy {
       clearInterval(this.refreshIntervalId);
       this.refreshIntervalId = null;
     }
+    if (this.teamDebounceHandle) {
+      clearTimeout(this.teamDebounceHandle);
+      this.teamDebounceHandle = null;
+    }
+    this.showTeamDropdown = false;
   }
 
   // Derive display status using current time with 24h overdue rule
@@ -596,5 +636,56 @@ export class FixturesComponent implements OnInit, OnDestroy {
   onLeagueSearchChange(): void {
     // Trigger preloading for the current visible set when search changes
     this.preloadStatusCountsForVisibleLeagues();
+  }
+
+  // Team search: debounce and query backend for nearest upcoming fixtures by team prefix
+  onTeamSearchChange(): void {
+    const q = (this.teamSearch || '').trim();
+    if (this.teamDebounceHandle) {
+      clearTimeout(this.teamDebounceHandle);
+      this.teamDebounceHandle = null;
+    }
+
+    if (q.length < 3) {
+      // Hide dropdown and clear results when input is too short
+      this.teamResults = [];
+      this.teamLoading = false;
+      this.showTeamDropdown = false;
+      return;
+    }
+
+    // Show dropdown and indicate loading after a short debounce
+    this.showTeamDropdown = true;
+    this.teamLoading = true;
+    this.teamDebounceHandle = setTimeout(() => {
+      // Limit 12 for a bit more coverage while keeping UI compact
+      this.api.searchFixtures(q, 12).subscribe({
+        next: (items) => {
+          this.teamResults = items || [];
+          this.teamLoading = false;
+          this.showTeamDropdown = true;
+        },
+        error: _err => {
+          this.teamResults = [];
+          this.teamLoading = false;
+          this.showTeamDropdown = true; // still show container with "No matches"
+        }
+      });
+    }, 250);
+  }
+
+  // When a team+fixture is selected from dropdown, behave like clicking that fixture's Details
+  selectTeamResult(it: SearchFixtureItemDTO): void {
+    if (!it) return;
+    this.showTeamDropdown = false;
+    const f = it.fixture as any;
+    const leagueId = (it.leagueId != null) ? Number(it.leagueId) : (this.selectedLeagueId ?? null);
+    if (leagueId != null) {
+      this.selectedLeagueId = leagueId;
+      // Open analysis for the matched fixture
+      this.openAnalysisForLeague(leagueId, f);
+    } else {
+      this.openAnalysis(f);
+    }
   }
 }

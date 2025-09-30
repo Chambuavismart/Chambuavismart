@@ -38,5 +38,6 @@ export const routes: Routes = [
   { path: 'form-guide', canActivate: [authGuard], loadComponent: () => import('./pages/form-guide.component').then(m => m.FormGuideComponent), title: 'Form Guide' },
   { path: 'admin', canActivate: [authGuard], component: AdminUploadComponent, title: 'Admin Upload' },
   { path: 'today-color-report', canActivate: [authGuard], loadComponent: () => import('./pages/today-color-report.component').then(m => m.TodayColorReportComponent), title: "Today's Colours Report" },
+  { path: 'streak-insights', canActivate: [authGuard], loadComponent: () => import('./pages/streak-insights.component').then(m => m.StreakInsightsComponent), title: 'Streak Insights' },
   { path: '**', canActivate: [authGuard], component: NotFoundComponent, title: 'Not Found' }
 ];

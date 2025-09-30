@@ -12,6 +12,14 @@ import java.util.Collection;
 import java.util.List;
 
 public interface FixtureRepository extends JpaRepository<Fixture, Long> {
+    // Earliest active fixture for a given team name (exact case-insensitive), eager-loading league to avoid LAZY issues
+    @Query("select f from Fixture f join fetch f.league l where (lower(trim(f.homeTeam)) = lower(trim(:name)) or lower(trim(f.awayTeam)) = lower(trim(:name))) and f.status in ('UPCOMING','LIVE') order by f.dateTime asc")
+    java.util.List<Fixture> findEarliestActiveByTeamName(@Param("name") String name);
+    @Query("select f from Fixture f join fetch f.league l where (lower(f.homeTeam) like lower(concat(:q,'%')) or lower(f.awayTeam) like lower(concat(:q,'%'))) and f.status in ('UPCOMING','LIVE') order by f.dateTime asc")
+    List<Fixture> searchActiveByTeamPrefix(@Param("q") String q);
+
+    @Query("select f from Fixture f join fetch f.league l where (lower(f.homeTeam) like lower(concat(:q,'%')) or lower(f.awayTeam) like lower(concat(:q,'%'))) and f.status in ('UPCOMING','LIVE') and l.season = :season order by f.dateTime asc")
+    List<Fixture> searchActiveByTeamPrefixAndSeason(@Param("q") String q, @Param("season") String season);
     List<Fixture> findByLeague_IdOrderByDateTimeAsc(Long leagueId);
     List<Fixture> findByLeague_IdAndStatusInOrderByDateTimeAsc(Long leagueId, Collection<FixtureStatus> statuses);
 
@@ -34,27 +42,27 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
                                            @Param("season") String season);
 
     // Exact date match (date-only) without season filter (MySQL)
-    @Query(value = "select * from fixtures f where DATE(f.date_time) = :date order by f.league_id asc, f.date_time asc", nativeQuery = true)
+    @Query(value = "select * from fixtures f where DATE(f.date_time) = :date and f.home_team <> 'Postp' order by f.league_id asc, f.date_time asc", nativeQuery = true)
     List<Fixture> findByDateOnly(@Param("date") LocalDate date);
 
     // Exact date match with season filter (via league join)
-    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where DATE(f.date_time) = :date and l.season = :season order by l.name asc, f.date_time asc", nativeQuery = true)
+    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where DATE(f.date_time) = :date and l.season = :season and f.home_team <> 'Postp' order by l.name asc, f.date_time asc", nativeQuery = true)
     List<Fixture> findByDateOnlyAndSeason(@Param("date") LocalDate date, @Param("season") String season);
 
     // Active (no results yet) fixtures for exact date without season filter
-    @Query(value = "select * from fixtures f where DATE(f.date_time) = :date and f.status in ('UPCOMING','LIVE') order by f.league_id asc, f.date_time asc", nativeQuery = true)
+    @Query(value = "select * from fixtures f where DATE(f.date_time) = :date and f.status in ('UPCOMING','LIVE') and f.home_team <> 'Postp' order by f.league_id asc, f.date_time asc", nativeQuery = true)
     List<Fixture> findActiveByDateOnly(@Param("date") LocalDate date);
 
     // Active fixtures for exact date with season filter
-    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where DATE(f.date_time) = :date and l.season = :season and f.status in ('UPCOMING','LIVE') order by l.name asc, f.date_time asc", nativeQuery = true)
+    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where DATE(f.date_time) = :date and l.season = :season and f.status in ('UPCOMING','LIVE') and f.home_team <> 'Postp' order by l.name asc, f.date_time asc", nativeQuery = true)
     List<Fixture> findActiveByDateOnlyAndSeason(@Param("date") LocalDate date, @Param("season") String season);
 
     // Pending results (missing scores) for exact date without season filter
-    @Query(value = "select * from fixtures f where DATE(f.date_time) = :date and (f.home_score is null or f.away_score is null) order by f.league_id asc, f.date_time asc", nativeQuery = true)
+    @Query(value = "select * from fixtures f where DATE(f.date_time) = :date and (f.home_score is null or f.away_score is null) and f.home_team <> 'Postp' order by f.league_id asc, f.date_time asc", nativeQuery = true)
     List<Fixture> findPendingResultsByDateOnly(@Param("date") LocalDate date);
 
     // Pending results with season filter
-    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where DATE(f.date_time) = :date and l.season = :season and (f.home_score is null or f.away_score is null) order by l.name asc, f.date_time asc", nativeQuery = true)
+    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where DATE(f.date_time) = :date and l.season = :season and (f.home_score is null or f.away_score is null) and f.home_team <> 'Postp' order by l.name asc, f.date_time asc", nativeQuery = true)
     List<Fixture> findPendingResultsByDateOnlyAndSeason(@Param("date") LocalDate date, @Param("season") String season);
 
     // Distinct available dates between range (for calendar dots), without season filter

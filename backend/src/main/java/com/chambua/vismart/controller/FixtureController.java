@@ -140,6 +140,51 @@ public class FixtureController {
         return dates.stream().map(LocalDate::toString).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
+    @GetMapping("/search")
+    @Transactional(readOnly = true)
+    public List<com.chambua.vismart.dto.SearchFixtureItemDTO> searchFixtures(@RequestParam("q") String q,
+                                                                             @RequestParam(value = "limit", required = false, defaultValue = "10") int limit,
+                                                                             @RequestParam(value = "season", required = false) String season) {
+        String query = q == null ? "" : q.trim();
+        if (query.length() < 3) return java.util.Collections.emptyList();
+        int lim = Math.max(1, Math.min(limit, 50));
+        String qLower = query.toLowerCase();
+
+        List<Fixture> matches = (season != null && !season.isBlank())
+                ? fixtureRepository.searchActiveByTeamPrefixAndSeason(qLower, season.trim())
+                : fixtureRepository.searchActiveByTeamPrefix(qLower);
+
+        java.util.LinkedHashMap<String, Fixture> chosen = new java.util.LinkedHashMap<>();
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        for (Fixture f : matches) {
+            if (f.getDateTime() == null) continue;
+            if (f.getDateTime().isBefore(now)) continue; // nearest upcoming only
+            String home = f.getHomeTeam() == null ? "" : f.getHomeTeam();
+            String away = f.getAwayTeam() == null ? "" : f.getAwayTeam();
+            String key = null;
+            if (home.toLowerCase().startsWith(qLower)) key = home.toLowerCase();
+            else if (away.toLowerCase().startsWith(qLower)) key = away.toLowerCase();
+            if (key == null) continue;
+            if (!chosen.containsKey(key)) {
+                chosen.put(key, f); // matches are already ordered by dateTime asc
+            }
+            if (chosen.size() >= lim) break;
+        }
+
+        List<com.chambua.vismart.dto.SearchFixtureItemDTO> out = new java.util.ArrayList<>();
+        for (Fixture f : chosen.values()) {
+            var league = f.getLeague();
+            out.add(new com.chambua.vismart.dto.SearchFixtureItemDTO(
+                    league != null ? league.getId() : null,
+                    league != null ? league.getName() : null,
+                    league != null ? league.getCountry() : null,
+                    com.chambua.vismart.dto.FixtureDTO.from(f)
+            ));
+            if (out.size() >= lim) break;
+        }
+        return out;
+    }
+
     @PostMapping("/upload")
     public UploadResultDTO uploadFixtures(@RequestBody FixturesUploadRequest request){
         return fixtureUploadService.upload(request);
