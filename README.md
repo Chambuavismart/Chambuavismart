@@ -46,6 +46,15 @@ Deployment (GitHub Pages)
 - Base href: The workflow auto-sets base-href to "/<repo-name>/" for project pages and "/" for user/org pages.
 - SPA routing: The workflow copies index.html to 404.html and adds .nojekyll so deep links work on Pages.
 
+Alternative: Deploy from branch (gh-pages)
+- If you prefer Pages "Deploy from branch" mode (instead of GitHub Actions Pages environment), a second workflow is provided: .github/workflows/publish-gh-pages.yml.
+- What it does: Builds the Angular app and publishes the compiled static files to the gh-pages branch (root), including 404.html and .nojekyll for SPA routing.
+- Enable it:
+  1) Trigger a push to main (or run the workflow manually from the Actions tab) so the gh-pages branch is created/updated.
+  2) In GitHub → Settings → Pages → Build and deployment → Source: Deploy from branch.
+  3) Branch: gh-pages. Folder: /. Click Save.
+- Tip: If GitHub Pages shows only "Verify domains" and no branch picker, wait for the workflow to publish gh-pages so that index.html exists on that branch.
+
 Verification checklist
 - Backend builds: mvn -f backend/pom.xml clean package
 - Backend starts on :8082 with profile=dev and connects to MySQL

@@ -1,21 +1,15 @@
-name: Deploy Frontend to GitHub Pages
+name: Publish frontend to gh-pages (branch-based Pages)
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write
 
 jobs:
-  build:
+  build-and-publish:
     runs-on: ubuntu-latest
     env:
       # For project pages: https://<user>.github.io/<repo>/ -> "/<repo>/"
@@ -42,24 +36,17 @@ jobs:
           echo "Using base href: $BASE_HREF"
           npx ng build --configuration production --base-href "$BASE_HREF"
 
-      - name: Prepare Pages artifact (SPA routing)
+      - name: Prepare SPA routing files
         working-directory: Chambuavismart/Chambuavismart/frontend/dist/app
         run: |
           cp index.html 404.html
           touch .nojekyll
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Publish to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          path: Chambuavismart/Chambuavismart/frontend/dist/app
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: Chambuavismart/Chambuavismart/frontend/dist/app
+          force_orphan: true
+          commit_message: "chore(pages): publish static site from CI (${GITHUB_SHA})"
