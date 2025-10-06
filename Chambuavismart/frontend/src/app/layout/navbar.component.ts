@@ -66,6 +66,8 @@ import { FixturesService } from '../services/fixtures.service';
           <a routerLink="/played-matches-summary" routerLinkActive="active">Fixtures Analysis</a>
           <a routerLink="/analysis-pdfs" routerLinkActive="active">Fixture Analysis History</a>
           <a routerLink="/streak-insights" routerLinkActive="active">Streak Insights</a>
+          <a routerLink="/over-1-5" routerLinkActive="active">Over 1.5</a>
+          <a routerLink="/team-outcome-distribution" routerLinkActive="active">Team Outcome distribution</a>
           <a routerLink="/admin" routerLinkActive="active">Admin</a>
         </div>
       </div>

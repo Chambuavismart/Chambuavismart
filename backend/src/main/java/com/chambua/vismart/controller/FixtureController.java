@@ -140,39 +140,103 @@ public class FixtureController {
         return dates.stream().map(LocalDate::toString).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
+    @GetMapping("/next-for-team")
+    @Transactional(readOnly = true)
+    public FixtureDTO getNextForTeam(@RequestParam(value = "teamName", required = true) String teamName) {
+        String tn = teamName == null ? null : teamName.trim();
+        if (tn == null || tn.length() < 2) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "teamName is required");
+        }
+        var opt = fixtureService.findEarliestActiveByTeamNameFlexible(tn);
+        var fx = opt.orElse(null);
+        if (fx == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No upcoming or live fixture found for team");
+        }
+        return FixtureDTO.from(fx);
+    }
+
     @GetMapping("/search")
     @Transactional(readOnly = true)
     public List<com.chambua.vismart.dto.SearchFixtureItemDTO> searchFixtures(@RequestParam("q") String q,
                                                                              @RequestParam(value = "limit", required = false, defaultValue = "10") int limit,
-                                                                             @RequestParam(value = "season", required = false) String season) {
+                                                                             @RequestParam(value = "season", required = false) String season,
+                                                                             @RequestParam(value = "includePendingPast", required = false, defaultValue = "false") boolean includePendingPast) {
         String query = q == null ? "" : q.trim();
         if (query.length() < 3) return java.util.Collections.emptyList();
-        int lim = Math.max(1, Math.min(limit, 50));
+        int lim = Math.max(2, Math.min(limit, 50)); // ensure capacity for at least two suggestions
         String qLower = query.toLowerCase();
 
-        List<Fixture> matches = (season != null && !season.isBlank())
-                ? fixtureRepository.searchActiveByTeamPrefixAndSeason(qLower, season.trim())
-                : fixtureRepository.searchActiveByTeamPrefix(qLower);
+        List<Fixture> matches;
+        if (includePendingPast) {
+            matches = (season != null && !season.isBlank())
+                    ? fixtureRepository.searchActiveOrPendingByTeamPrefixAndSeason(qLower, season.trim())
+                    : fixtureRepository.searchActiveOrPendingByTeamPrefix(qLower);
+        } else {
+            matches = (season != null && !season.isBlank())
+                    ? fixtureRepository.searchActiveByTeamPrefixAndSeason(qLower, season.trim())
+                    : fixtureRepository.searchActiveByTeamPrefix(qLower);
+        }
 
-        java.util.LinkedHashMap<String, Fixture> chosen = new java.util.LinkedHashMap<>();
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
+
+        // Per-team aggregation: nearest future (UPCOMING/LIVE strictly in future) and nearest pending past (date < now and missing scores)
+        class Pair { Fixture future; Fixture future2; Fixture past; Fixture past2; }
+        java.util.LinkedHashMap<String, Pair> map = new java.util.LinkedHashMap<>();
+
         for (Fixture f : matches) {
-            if (f.getDateTime() == null) continue;
-            if (f.getDateTime().isBefore(now)) continue; // nearest upcoming only
+            if (f == null || f.getDateTime() == null) continue;
             String home = f.getHomeTeam() == null ? "" : f.getHomeTeam();
             String away = f.getAwayTeam() == null ? "" : f.getAwayTeam();
             String key = null;
             if (home.toLowerCase().startsWith(qLower)) key = home.toLowerCase();
             else if (away.toLowerCase().startsWith(qLower)) key = away.toLowerCase();
             if (key == null) continue;
-            if (!chosen.containsKey(key)) {
-                chosen.put(key, f); // matches are already ordered by dateTime asc
+            Pair p = map.computeIfAbsent(key, k -> new Pair());
+
+            boolean isFutureActive = f.getDateTime().isAfter(now) && (f.getStatus() == com.chambua.vismart.model.FixtureStatus.UPCOMING || f.getStatus() == com.chambua.vismart.model.FixtureStatus.LIVE);
+            boolean isPendingPast = f.getDateTime().isBefore(now) && includePendingPast && (f.getHomeScore() == null || f.getAwayScore() == null);
+
+            if (isFutureActive) {
+                if (p.future == null || (f.getDateTime().isBefore(p.future.getDateTime()))) {
+                    // shift current future to future2 if present and newer than candidate
+                    if (p.future != null) {
+                        if (p.future2 == null || p.future.getDateTime().isBefore(p.future2.getDateTime())) {
+                            p.future2 = p.future;
+                        }
+                    }
+                    p.future = f;
+                } else if (p.future2 == null || f.getDateTime().isBefore(p.future2.getDateTime())) {
+                    p.future2 = f;
+                }
+            } else if (isPendingPast) {
+                if (p.past == null || f.getDateTime().isAfter(p.past.getDateTime())) {
+                    // shift current past to past2 if present and older than candidate
+                    if (p.past != null) {
+                        if (p.past2 == null || p.past.getDateTime().isAfter(p.past2.getDateTime())) {
+                            p.past2 = p.past;
+                        }
+                    }
+                    p.past = f; // choose the closest past (latest before now)
+                } else if (p.past2 == null || f.getDateTime().isAfter(p.past2.getDateTime())) {
+                    p.past2 = f;
+                }
+            } else {
+                // When includePendingPast is false, we already filtered repository; nothing else to do
             }
-            if (chosen.size() >= lim) break;
         }
 
-        List<com.chambua.vismart.dto.SearchFixtureItemDTO> out = new java.util.ArrayList<>();
-        for (Fixture f : chosen.values()) {
+        // Determine primary key: exact name match preferred
+        String primaryKey = null;
+        if (map.containsKey(qLower)) {
+            primaryKey = qLower;
+        } else if (!map.isEmpty()) {
+            // fallback: first encountered (preserves chronological relevance)
+            primaryKey = map.keySet().iterator().next();
+        }
+
+        java.util.List<com.chambua.vismart.dto.SearchFixtureItemDTO> out = new java.util.ArrayList<>();
+        java.util.function.Consumer<Fixture> addDto = (Fixture f) -> {
+            if (f == null) return;
             var league = f.getLeague();
             out.add(new com.chambua.vismart.dto.SearchFixtureItemDTO(
                     league != null ? league.getId() : null,
@@ -180,7 +244,54 @@ public class FixtureController {
                     league != null ? league.getCountry() : null,
                     com.chambua.vismart.dto.FixtureDTO.from(f)
             ));
+        };
+
+        java.util.HashSet<Long> usedIds = new java.util.HashSet<>();
+
+        // 1) Add primary team's suggestions first: future then past; ensure up to two items for the primary
+        if (primaryKey != null) {
+            Pair p = map.get(primaryKey);
+            if (p != null) {
+                if (p.future != null) { addDto.accept(p.future); usedIds.add(p.future.getId()); }
+                if (p.past != null) { addDto.accept(p.past); usedIds.add(p.past.getId()); }
+                // Fallbacks to ensure two entries for primary when possible
+                if (out.size() < 2) {
+                    if (p.future2 != null && !usedIds.contains(p.future2.getId())) { addDto.accept(p.future2); usedIds.add(p.future2.getId()); }
+                }
+                if (out.size() < 2) {
+                    if (p.past2 != null && !usedIds.contains(p.past2.getId())) { addDto.accept(p.past2); usedIds.add(p.past2.getId()); }
+                }
+                // As a last resort, scan matches to find another fixture for the same key not yet used
+                if (out.size() < 2) {
+                    for (Fixture f : matches) {
+                        if (f == null || f.getId() == null || usedIds.contains(f.getId())) continue;
+                        String home = f.getHomeTeam() == null ? "" : f.getHomeTeam();
+                        String away = f.getAwayTeam() == null ? "" : f.getAwayTeam();
+                        String k = null;
+                        if (home.toLowerCase().startsWith(qLower)) k = home.toLowerCase();
+                        else if (away.toLowerCase().startsWith(qLower)) k = away.toLowerCase();
+                        if (!primaryKey.equals(k)) continue;
+                        // respect includePendingPast filtering: skip past when not allowed
+                        if (!includePendingPast && f.getDateTime() != null && f.getDateTime().isBefore(now)) continue;
+                        addDto.accept(f); usedIds.add(f.getId());
+                        if (out.size() >= 2) break;
+                    }
+                }
+            }
+        }
+
+        // 2) Add other teams' entries (future then past) until limit is reached
+        for (java.util.Map.Entry<String, Pair> e : map.entrySet()) {
             if (out.size() >= lim) break;
+            if (primaryKey != null && primaryKey.equals(e.getKey())) continue;
+            Pair p = e.getValue();
+            if (p.future != null && out.size() < lim) { addDto.accept(p.future); }
+            if (p.past != null && out.size() < lim) { addDto.accept(p.past); }
+        }
+
+        // Trim to limit just in case
+        if (out.size() > lim) {
+            return out.subList(0, lim);
         }
         return out;
     }

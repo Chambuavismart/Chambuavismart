@@ -20,6 +20,13 @@ public interface FixtureRepository extends JpaRepository<Fixture, Long> {
 
     @Query("select f from Fixture f join fetch f.league l where (lower(f.homeTeam) like lower(concat(:q,'%')) or lower(f.awayTeam) like lower(concat(:q,'%'))) and f.status in ('UPCOMING','LIVE') and l.season = :season order by f.dateTime asc")
     List<Fixture> searchActiveByTeamPrefixAndSeason(@Param("q") String q, @Param("season") String season);
+
+    // Include fixtures that are missing scores (pending results) regardless of status, plus active UPCOMING/LIVE
+    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where (lower(f.home_team) like lower(concat(:q,'%')) or lower(f.away_team) like lower(concat(:q,'%'))) and (f.status in ('UPCOMING','LIVE') or f.home_score is null or f.away_score is null) order by f.date_time asc", nativeQuery = true)
+    List<Fixture> searchActiveOrPendingByTeamPrefix(@Param("q") String q);
+
+    @Query(value = "select f.* from fixtures f join leagues l on l.id = f.league_id where (lower(f.home_team) like lower(concat(:q,'%')) or lower(f.away_team) like lower(concat(:q,'%'))) and l.season = :season and (f.status in ('UPCOMING','LIVE') or f.home_score is null or f.away_score is null) order by f.date_time asc", nativeQuery = true)
+    List<Fixture> searchActiveOrPendingByTeamPrefixAndSeason(@Param("q") String q, @Param("season") String season);
     List<Fixture> findByLeague_IdOrderByDateTimeAsc(Long leagueId);
     List<Fixture> findByLeague_IdAndStatusInOrderByDateTimeAsc(Long leagueId, Collection<FixtureStatus> statuses);
 

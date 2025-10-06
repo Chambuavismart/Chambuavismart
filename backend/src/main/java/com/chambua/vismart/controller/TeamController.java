@@ -44,9 +44,99 @@ public class TeamController {
             "Eredivisie", "Primeira Liga", "Scottish Premiership", "LaLiga", "Liga NOS"
     );
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.chambua.vismart.service.TeamOutcomeService teamOutcomeService;
+
     public TeamController(TeamRepository teamRepository, TeamService teamService) {
         this.teamRepository = teamRepository;
         this.teamService = teamService;
+    }
+
+    // New: last-N played matches (most recent first) for a team by name, summarized as briefs
+    @GetMapping("/{teamName}/last-played-list")
+    public org.springframework.http.ResponseEntity<java.util.List<com.chambua.vismart.dto.LastMatchBriefDTO>> getLastPlayedList(
+            @PathVariable("teamName") String teamName,
+            @RequestParam(value = "limit", required = false, defaultValue = "2") int limit
+    ) {
+        String tn = teamName == null ? null : teamName.trim();
+        if (tn == null || tn.length() < 2) {
+            return org.springframework.http.ResponseEntity.badRequest().body(java.util.Collections.emptyList());
+        }
+        int lim = Math.max(1, Math.min(limit, 20));
+        java.util.List<com.chambua.vismart.model.Match> recent;
+        try {
+            recent = matchRepository.findRecentPlayedByTeamName(tn);
+        } catch (Exception e) {
+            recent = java.util.Collections.emptyList();
+        }
+        java.util.ArrayList<com.chambua.vismart.dto.LastMatchBriefDTO> out = new java.util.ArrayList<>();
+        if (recent != null) {
+            for (com.chambua.vismart.model.Match m : recent) {
+                if (out.size() >= lim) break;
+                try {
+                    Integer hg = m.getHomeGoals();
+                    Integer ag = m.getAwayGoals();
+                    if (hg == null || ag == null) continue;
+                    String home = m.getHomeTeam() != null ? m.getHomeTeam().getName() : null;
+                    String away = m.getAwayTeam() != null ? m.getAwayTeam().getName() : null;
+                    boolean isHome = home != null && home.equalsIgnoreCase(tn);
+                    boolean isAway = !isHome && away != null && away.equalsIgnoreCase(tn);
+                    if (!isHome && !isAway) {
+                        // as a soft match, accept contains
+                        isHome = home != null && tn != null && home.toLowerCase().contains(tn.toLowerCase());
+                        isAway = !isHome && away != null && tn != null && away.toLowerCase().contains(tn.toLowerCase());
+                    }
+                    String opponent = isHome ? (away != null ? away : "?") : (home != null ? home : "?");
+                    int my = isHome ? hg : (isAway ? ag : hg);
+                    int opp = isHome ? ag : (isAway ? hg : ag);
+                    String res = (my > opp) ? "W" : (my == opp ? "D" : "L");
+                    String score = (isHome ? hg : ag) + "-" + (isHome ? ag : hg);
+                    java.time.LocalDate date = m.getDate();
+                    String seasonLabel = null;
+                    try {
+                        com.chambua.vismart.model.Season s = m.getSeason();
+                        if (s != null) {
+                            try {
+                                java.lang.reflect.Method getName = s.getClass().getMethod("getName");
+                                Object nameVal = getName.invoke(s);
+                                if (nameVal != null) seasonLabel = String.valueOf(nameVal);
+                            } catch (Exception ignored) {}
+                            if (seasonLabel == null) {
+                                try {
+                                    java.lang.reflect.Method getSeason = s.getClass().getMethod("getSeason");
+                                    Object sv = getSeason.invoke(s);
+                                    if (sv != null) seasonLabel = String.valueOf(sv);
+                                } catch (Exception ignored2) {}
+                            }
+                            if (seasonLabel == null) {
+                                try {
+                                    java.lang.reflect.Method getStart = s.getClass().getMethod("getStartDate");
+                                    java.lang.reflect.Method getEnd = s.getClass().getMethod("getEndDate");
+                                    Object st = getStart.invoke(s);
+                                    Object en = getEnd.invoke(s);
+                                    if (st instanceof java.time.LocalDate) {
+                                        int y1 = ((java.time.LocalDate) st).getYear();
+                                        Integer y2 = null;
+                                        if (en instanceof java.time.LocalDate) y2 = ((java.time.LocalDate) en).getYear();
+                                        seasonLabel = y1 + (y2 != null ? "/" + y2 : "");
+                                    }
+                                } catch (Exception ignored3) {}
+                            }
+                        }
+                        if (seasonLabel == null && m.getLeague() != null) {
+                            try {
+                                java.lang.reflect.Method getSeasonStr = m.getLeague().getClass().getMethod("getSeason");
+                                Object sv = getSeasonStr.invoke(m.getLeague());
+                                if (sv != null) seasonLabel = String.valueOf(sv);
+                            } catch (Exception ignored4) {}
+                        }
+                    } catch (Exception ignored5) {}
+                    com.chambua.vismart.dto.LastMatchBriefDTO dto = new com.chambua.vismart.dto.LastMatchBriefDTO(date, seasonLabel, opponent, res, score);
+                    out.add(dto);
+                } catch (Exception ignored) {}
+            }
+        }
+        return org.springframework.http.ResponseEntity.ok(out);
     }
 
     private TeamDto toDto(Team team) {
@@ -205,6 +295,108 @@ public class TeamController {
         }
         return ResponseEntity.ok(toDto(chosen));
     }
+
+    // New feature: Prior Match Outcome → Next Match Outcome Distribution
+    @GetMapping("/{teamName}/prior-outcomes")
+    public ResponseEntity<?> getPriorOutcomeDistribution(@PathVariable("teamName") String teamName,
+                                                         @RequestParam(name = "leagueId", required = false) Long leagueId) {
+        if (teamName == null || teamName.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing teamName"));
+        }
+        try {
+            List<Team> candidates = teamService.findTeamsByName(teamName, leagueId);
+            if (candidates == null || candidates.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Team not found", "name", teamName));
+            }
+            Team team;
+            if (candidates.size() == 1) {
+                team = candidates.get(0);
+            } else {
+                // Prefer within leagueId if provided
+                if (leagueId != null) {
+                    var scoped = candidates.stream().filter(t -> t.getLeague() != null && Objects.equals(t.getLeague().getId(), leagueId)).toList();
+                    team = scoped != null && !scoped.isEmpty() ? scoped.get(0) : candidates.get(0);
+                } else {
+                    // Fallback to team with most played matches
+                    if (matchRepository != null) {
+                        team = candidates.stream().max((a,b) -> {
+                            long ca = 0L, cb = 0L;
+                            try { ca = (a.getId() != null) ? matchRepository.countPlayedByTeam(a.getId()) : 0L; } catch (Exception ignored) {}
+                            try { cb = (b.getId() != null) ? matchRepository.countPlayedByTeam(b.getId()) : 0L; } catch (Exception ignored2) {}
+                            return Long.compare(ca, cb);
+                        }).orElse(candidates.get(0));
+                    } else {
+                        team = candidates.get(0);
+                    }
+                }
+            }
+            if (teamOutcomeService == null) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Service unavailable"));
+            }
+            var resp = teamOutcomeService.computePriorOutcomeDistribution(team.getId());
+            return ResponseEntity.ok(resp);
+        } catch (Exception ex) {
+            log.error("[Team][PriorOutcomes] error", ex);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Internal error"));
+        }
+    }
+
+        // Last played match summary for a given team name (case-insensitive across leagues)
+        @GetMapping("/{teamName}/last-played")
+        public ResponseEntity<?> getLastPlayedByName(@PathVariable("teamName") String teamName) {
+            if (teamName == null || teamName.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(java.util.Map.of("error", "Missing teamName"));
+            }
+            String name = teamName.trim();
+            if (matchRepository == null) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(java.util.Map.of("error", "MatchRepository unavailable"));
+            }
+            java.util.List<com.chambua.vismart.model.Match> list;
+            try {
+                var slice = matchRepository.findRecentPlayedByTeamName(name, org.springframework.data.domain.PageRequest.of(0, 1));
+                list = (slice != null ? slice.getContent() : java.util.List.of());
+            } catch (Exception e) {
+                list = matchRepository.findRecentPlayedByTeamName(name);
+            }
+            if (list == null || list.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", "No played matches found for team", "team", name));
+            }
+            var m = list.get(0);
+            boolean home = (m.getHomeTeam() != null && m.getHomeTeam().getName() != null && m.getHomeTeam().getName().trim().equalsIgnoreCase(name));
+            Integer gf = home ? m.getHomeGoals() : m.getAwayGoals();
+            Integer ga = home ? m.getAwayGoals() : m.getHomeGoals();
+            int gfi = gf == null ? 0 : gf;
+            int gai = ga == null ? 0 : ga;
+            String score = gfi + "-" + gai;
+            Integer hg = m.getHomeGoals();
+            Integer ag = m.getAwayGoals();
+            String result;
+            if (hg == null || ag == null) result = "Draw"; else {
+                int cmp = Integer.compare(home ? hg : ag, home ? ag : hg);
+                result = cmp > 0 ? "Win" : (cmp == 0 ? "Draw" : "Loss");
+            }
+            String opp = home ? (m.getAwayTeam() != null ? m.getAwayTeam().getName() : "") : (m.getHomeTeam() != null ? m.getHomeTeam().getName() : "");
+            var dto = new com.chambua.vismart.dto.LastPlayedSummary(name, result, score, opp, m.getDate());
+            return ResponseEntity.ok(dto);
+        }
+
+        // Top-2 longest outcome streaks over last 40 played matches by team name
+        @GetMapping("/{teamName}/last40-top-streaks")
+        public ResponseEntity<?> getTopStreaksLast40(@PathVariable("teamName") String teamName) {
+            if (teamName == null || teamName.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(java.util.Map.of("error", "Missing teamName"));
+            }
+            if (teamOutcomeService == null) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(java.util.Map.of("error", "Service unavailable"));
+            }
+            try {
+                var resp = teamOutcomeService.computeTopStreaksLast40ByTeamName(teamName.trim());
+                return ResponseEntity.ok(resp);
+            } catch (Exception ex) {
+                log.error("[Team][TopStreaksLast40] error", ex);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(java.util.Map.of("error", "Internal error"));
+            }
+        }
 
     public record TeamSuggestion(Long id, String name, String country, Long leagueId) {}
 

@@ -76,6 +76,7 @@ import { map, catchError } from 'rxjs/operators';
         </div>
         <a class="nav-item" routerLink="/" aria-label="Home Navigation"><span class="icon">🏠</span><span>Home</span></a>
         <a class="nav-item" routerLink="/fixtures" aria-label="Fixtures Navigation"><span class="icon">📅</span><span>Fixtures</span></a>
+        <a class="nav-item" routerLink="/analysis" aria-label="Analysis Hub Navigation"><span class="icon">🧠</span><span>Analysis (Auto)</span></a>
         <a class="nav-item" routerLink="/form-guide" aria-label="Form Guide Navigation"><span class="icon">🧭</span><span>Form Guide</span></a>
         <a class="nav-item" routerLink="/quick-insights" aria-label="Quick Insights Navigation"><span class="icon">⚡</span><span>Quick Insights</span></a>
         <a class="nav-item" routerLink="/league-table" aria-label="League Table Navigation"><span class="icon">🏆</span><span>League Table</span></a>

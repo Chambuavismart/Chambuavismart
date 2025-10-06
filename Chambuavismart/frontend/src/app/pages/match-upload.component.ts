@@ -48,9 +48,12 @@ import { LeagueContextService } from '../services/league-context.service';
           <ng-container *ngIf="requiresExistingLeague; else newLeagueBlock">
             <label>
               League
+              <div class="country-select" *ngIf="requiresExistingLeague" style="margin-bottom:6px;">
+                <input type="text" class="country-filter" [(ngModel)]="existingLeagueCountryFilter" placeholder="Type at least 3 letters of country or league to prioritize..." />
+              </div>
               <select [(ngModel)]="selectedLeague" (ngModelChange)="onLeagueSelected()">
                 <option [ngValue]="null">Select league...</option>
-                <optgroup *ngFor="let g of groupedFixturesLeagues" [label]="g.groupLabel">
+                <optgroup *ngFor="let g of filteredExistingLeagueGroups" [label]="g.groupLabel">
                   <option *ngFor="let opt of g.options" [ngValue]="opt.leagueId">{{ opt.label }}</option>
                 </optgroup>
               </select>
@@ -385,6 +388,39 @@ export class MatchUploadComponent {
     const q = (this.fixturesCountryFilter || '').trim().toLowerCase();
     if (q.length < 3) return this.groupedFixturesLeagues;
     return this.groupedFixturesLeagues.filter(g => (g.country || '').toLowerCase().includes(q));
+  }
+  // Incremental update: prioritize leagues by country typed (>= 3 chars)
+  existingLeagueCountryFilter: string = ''; 
+  get filteredExistingLeagueGroups(): GroupedLeagueDTO[] {
+    const q = (this.existingLeagueCountryFilter || '').trim().toLowerCase();
+    if (q.length < 3) return this.groupedFixturesLeagues;
+
+    // Clone groups and sort options within each group to bring league-name matches to the top
+    const groups = this.groupedFixturesLeagues.map(g => {
+      const options = [...(g.options || [])].sort((a: any, b: any) => {
+        const aMatch = ((a?.label || '').toLowerCase().includes(q)) ? 0 : 1;
+        const bMatch = ((b?.label || '').toLowerCase().includes(q)) ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+        return ((a?.label || '') as string).localeCompare((b?.label || '') as string);
+      });
+      return { ...g, options } as GroupedLeagueDTO;
+    });
+
+    // Sort groups by whether country, leagueName, or any option label matches the query
+    return groups.sort((a: any, b: any) => {
+      const aGroupMatch =
+        ((a?.country || '').toLowerCase().includes(q) ||
+         (a?.leagueName || '').toLowerCase().includes(q) ||
+         (a?.options || []).some((o: any) => (o?.label || '').toLowerCase().includes(q))) ? 0 : 1;
+      const bGroupMatch =
+        ((b?.country || '').toLowerCase().includes(q) ||
+         (b?.leagueName || '').toLowerCase().includes(q) ||
+         (b?.options || []).some((o: any) => (o?.label || '').toLowerCase().includes(q))) ? 0 : 1;
+
+      if (aGroupMatch !== bGroupMatch) return aGroupMatch - bGroupMatch;
+      // Keep stable order by group label if same priority
+      return (a.groupLabel || '').localeCompare(b.groupLabel || '');
+    });
   }
   private fixturesOptionById: Record<number, { season: string; country: string; leagueName: string }> = {};
 

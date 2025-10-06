@@ -14,6 +14,27 @@ export interface TeamByNameResult {
   status?: number;
 }
 
+export interface LastMatchBrief {
+  date: string; // ISO date (YYYY-MM-DD)
+  season?: string | null;
+  opponent: string;
+  result: 'W' | 'D' | 'L';
+  scoreLine: string; // e.g. 2-1
+}
+
+export interface OutcomeStreakDTO {
+  outcome: 'W' | 'D' | 'L';
+  length: number;
+  startDate: string; // ISO date
+  endDate: string;   // ISO date
+}
+
+export interface TopOutcomeStreaksResponse {
+  teamName: string;
+  consideredMatches: number;
+  topStreaks: OutcomeStreakDTO[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class TeamService {
   private http = inject(HttpClient);
@@ -93,6 +114,48 @@ export class TeamService {
         }
       });
     });
+  }
+
+  getPriorOutcomes(teamName: string, leagueId?: number): Observable<any> {
+    const tn = (teamName || '').trim();
+    if (!tn) {
+      return new Observable<any>((sub) => { sub.next(null); sub.complete(); });
+    }
+    const lid = typeof leagueId === 'number' ? leagueId : (this.leagueContext.getCurrentLeagueId() ?? undefined);
+    const url = typeof lid === 'number'
+      ? `${this.baseUrl}/${encodeURIComponent(tn)}/prior-outcomes?leagueId=${lid}`
+      : `${this.baseUrl}/${encodeURIComponent(tn)}/prior-outcomes`;
+    return this.http.get<any>(url);
+  }
+
+  // Last played match summary by team name
+  getLastPlayedByName(teamName: string): Observable<{ team: string; priorResult: string; priorScoreLine: string; opponent: string; date: string } | null> {
+    const tn = (teamName || '').trim();
+    if (!tn) {
+      return new Observable(sub => { sub.next(null); sub.complete(); });
+    }
+    const url = `${this.baseUrl}/${encodeURIComponent(tn)}/last-played`;
+    return this.http.get<any>(url);
+  }
+
+  // New: last-N played matches (most recent first)
+  getLastPlayedListByName(teamName: string, limit = 2): Observable<LastMatchBrief[]> {
+    const tn = (teamName || '').trim();
+    if (!tn) {
+      return new Observable<LastMatchBrief[]>(sub => { sub.next([]); sub.complete(); });
+    }
+    const url = `${this.baseUrl}/${encodeURIComponent(tn)}/last-played-list?limit=${Math.max(1, Math.min(limit, 20))}`;
+    return this.http.get<LastMatchBrief[]>(url);
+  }
+
+  // Top-2 longest W/D/L streaks over most recent 40 played matches for a team name
+  getLast40TopStreaksByName(teamName: string): Observable<TopOutcomeStreaksResponse | null> {
+    const tn = (teamName || '').trim();
+    if (!tn) {
+      return new Observable<TopOutcomeStreaksResponse | null>(sub => { sub.next(null); sub.complete(); });
+    }
+    const url = `${this.baseUrl}/${encodeURIComponent(tn)}/last40-top-streaks`;
+    return this.http.get<TopOutcomeStreaksResponse>(url);
   }
 
   // Convenience: get a teamId scoped to a league, with fallback to search

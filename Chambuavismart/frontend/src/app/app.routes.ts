@@ -39,5 +39,9 @@ export const routes: Routes = [
   { path: 'admin', canActivate: [authGuard], component: AdminUploadComponent, title: 'Admin Upload' },
   { path: 'today-color-report', canActivate: [authGuard], loadComponent: () => import('./pages/today-color-report.component').then(m => m.TodayColorReportComponent), title: "Today's Colours Report" },
   { path: 'streak-insights', canActivate: [authGuard], loadComponent: () => import('./pages/streak-insights.component').then(m => m.StreakInsightsComponent), title: 'Streak Insights' },
+  { path: 'team-outcome-distribution', canActivate: [authGuard], loadComponent: () => import('./pages/team-outcome-distribution.component').then(m => m.TeamOutcomeDistributionComponent), title: 'Team Outcome distribution' },
+  { path: 'analysis', canActivate: [authGuard], loadComponent: () => import('./pages/analysis-hub.component').then(m => m.AnalysisHubComponent), title: 'Analysis' },
+  { path: 'over-1-5', canActivate: [authGuard], loadComponent: () => import('./pages/over-one-five.component').then(m => m.OverOneFiveComponent), title: 'Over 1.5' },
+  { path: 'print-today', canActivate: [authGuard], loadComponent: () => import('./pages/print-today.component').then(m => m.PrintTodayComponent), title: 'Print Today' },
   { path: '**', canActivate: [authGuard], component: NotFoundComponent, title: 'Not Found' }
 ];

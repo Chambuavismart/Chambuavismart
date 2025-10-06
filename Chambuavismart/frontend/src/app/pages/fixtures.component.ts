@@ -98,6 +98,7 @@ import { forkJoin } from 'rxjs';
           <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/']"><i class="fa fa-home"></i> <span>Home</span></a></li>
           <li class="nav-item active" aria-current="page"><i class="fa fa-calendar"></i> <span>Fixtures</span></li>
           <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/match-analysis']"><i class="fa fa-chart-line"></i> <span>Match Analysis</span></a></li>
+          <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/analysis']"><i class="fa fa-wand-magic-sparkles"></i> <span>Analysis (Auto)</span></a></li>
           <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/form-guide']"><i class="fa fa-list"></i> <span>Form Guide</span></a></li>
           <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/quick-insights']"><i class="fa fa-bolt"></i> <span>Quick Insights</span></a></li>
           <li class="nav-item" routerLinkActive="active"><a [routerLink]="['/league']"><i class="fa fa-table"></i> <span>League Table</span></a></li>
@@ -166,7 +167,7 @@ import { forkJoin } from 'rxjs';
                 <div class="fixture-row" *ngIf="(leagueFixturesMap.get(l.leagueId)?.length || 0) === 0">
                   <em class="muted">No upcoming fixtures for this league</em>
                 </div>
-                <div class="fixture-row" *ngFor="let f of leagueFixturesMap.get(l.leagueId)">
+                <div class="fixture-row" *ngFor="let f of leagueFixturesMap.get(l.leagueId)" (click)="openAnalysisForLeague(l.leagueId, f)">
                   <div class="fixture-time">{{ toSafeDate(f.dateTime) | date:'d MMM yyyy, HH:mm':'Africa/Nairobi' }} EAT</div>
                   <div class="fixture-teams">
                     <span class="team">{{ f.homeTeam }}</span>
@@ -245,16 +246,15 @@ export class FixturesComponent implements OnInit, OnDestroy {
   trackLeague(index: number, l: LeagueWithUpcomingDTO): number { return l?.leagueId ?? index; }
 
   openAnalysis(f: FixtureDTO) {
-    // Navigate to Played Matches tab with pre-filled H2H teams, preserving orientation
-    // Include leagueId so the Fixture Analysis tab can scope lookups correctly
+    // Automation: Navigate to unified Analysis view (Recommendation Card + tabs via links)
     const leagueId = this.selectedLeagueId ?? null;
-    this.router.navigate(['/played-matches-summary'], {
-      queryParams: {
-        h2hHome: f?.homeTeam ?? '',
-        h2hAway: f?.awayTeam ?? '',
-        ...(leagueId ? { leagueId } : {})
-      }
-    });
+    const qp: any = {
+      homeTeamName: f?.homeTeam ?? '',
+      awayTeamName: f?.awayTeam ?? ''
+    };
+    if (leagueId) qp.leagueId = leagueId;
+    if (f?.id != null) qp.fixtureId = f.id;
+    this.router.navigate(['/analysis'], { queryParams: qp });
   }
 
   openAnalysisForLeague(leagueId: number, f: FixtureDTO) {

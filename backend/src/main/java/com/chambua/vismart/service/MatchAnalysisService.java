@@ -941,10 +941,12 @@ public class MatchAnalysisService {
     private com.chambua.vismart.dto.StreakInsight computeStreakInsight(Long teamId, String teamName, String targetPattern) {
         com.chambua.vismart.dto.StreakInsight out = new com.chambua.vismart.dto.StreakInsight();
         out.setTeamName(teamName);
-        out.setPattern(targetPattern != null ? targetPattern : "0");
-        if (targetPattern == null || targetPattern.equals("0") || targetPattern.isBlank()) {
-            out.setSummaryText(teamName + ": no active streak detected.");
-            return out;
+        boolean unconditional = false;
+        if (targetPattern == null || targetPattern.isBlank() || "0".equals(targetPattern)) {
+            out.setPattern("ANY"); // Unconditional base rates when no active streak exists
+            unconditional = true;
+        } else {
+            out.setPattern(targetPattern);
         }
         // Fetch full history (played) most-recent-first
         java.util.List<com.chambua.vismart.model.Match> list;
@@ -980,7 +982,14 @@ public class MatchAnalysisService {
             String res = (my > opp) ? "W" : (my == opp ? "D" : "L");
             // Before processing this match, check if current pre-match streak equals target
             String pre = (prevType == null) ? "0" : (prevCount + prevType);
-            if (!"0".equals(pre) && pre.equalsIgnoreCase(targetPattern)) {
+            boolean countThis = false;
+            if (unconditional) {
+                // Count every match that had a non-zero pre-match streak (i.e., there is at least one prior result)
+                countThis = !"0".equals(pre);
+            } else {
+                countThis = (!"0".equals(pre) && pre.equalsIgnoreCase(targetPattern));
+            }
+            if (countThis) {
                 totalInstances++;
                 // Count next outcome and totals for this match
                 if ("W".equals(res)) nextW++; else if ("D".equals(res)) nextD++; else nextL++;
@@ -1011,13 +1020,24 @@ public class MatchAnalysisService {
             out.setOver25Pct(o25Pct);
             out.setOver35Pct(o35Pct);
             // Compose readable summary
-            String readable = (teamName != null ? teamName : "This team") + " has had " + totalInstances +
-                    " instances of a " + targetPattern + " streak. Of the matches that followed: " +
-                    wPct + "% were wins, " + dPct + "% were draws, " + lPct + "% were losses. " +
-                    o35Pct + "% were Over 3.5, " + o25Pct + "% were Over 2.5, " + o15Pct + "% were Over 1.5, and " + bttsPct + "% were BTTS.";
+            String baseName = (teamName != null ? teamName : "This team");
+            String readable;
+            if (unconditional) {
+                readable = baseName + " base rates (no active streak): " + totalInstances + " qualifying matches. Next-match results: " +
+                        wPct + "% Wins, " + dPct + "% Draws, " + lPct + "% Losses. Goals: Over 3.5 " + o35Pct + "%, Over 2.5 " + o25Pct + "%, Over 1.5 " + o15Pct + "%, BTTS " + bttsPct + "%.";
+            } else {
+                readable = baseName + " has had " + totalInstances +
+                        " instances of a " + targetPattern + " streak. Of the matches that followed: " +
+                        wPct + "% were wins, " + dPct + "% were draws, " + lPct + "% were losses. " +
+                        o35Pct + "% were Over 3.5, " + o25Pct + "% were Over 2.5, " + o15Pct + "% were Over 1.5, and " + bttsPct + "% were BTTS.";
+            }
             out.setSummaryText(readable);
         } else {
-            out.setSummaryText((teamName != null ? teamName : "This team") + " has had 0 prior instances of a " + targetPattern + " streak across recorded matches.");
+            if (unconditional) {
+                out.setSummaryText((teamName != null ? teamName : "This team") + ": no qualifying history to compute base rates.");
+            } else {
+                out.setSummaryText((teamName != null ? teamName : "This team") + " has had 0 prior instances of a " + targetPattern + " streak across recorded matches.");
+            }
         }
         return out;
     }
@@ -1128,5 +1148,169 @@ public class MatchAnalysisService {
                 }
                 fs.setPpgSeries(ppg);
                 return fs;
+    }
+
+    /**
+     * Build historical streak insight for a team based on its current pre-match streak (last-5 window, default rules).
+     * Public facade used by lightweight Streaks API endpoints.
+     *
+     * If both teamId and teamName are provided, teamId takes precedence for lookup.
+     * Returns a populated StreakInsight with summary text even when no history is found.
+     */
+    public com.chambua.vismart.dto.StreakInsight buildCurrentStreakInsight(Long teamId, String teamName) {
+        String resolvedName = teamName;
+        try {
+            if ((resolvedName == null || resolvedName.isBlank()) && teamId != null) {
+                // best-effort name resolution
+                com.chambua.vismart.model.Team t = teamRepository.findById(teamId).orElse(null);
+                if (t != null && t.getName() != null) resolvedName = t.getName();
+            }
+        } catch (Exception ignored) {}
+
+        com.chambua.vismart.dto.FormSummary fs = computeFormLastFive(teamId, resolvedName);
+        String pattern = (fs != null && fs.getCurrentStreak() != null && !fs.getCurrentStreak().isBlank()) ? fs.getCurrentStreak() : "0";
+        return computeStreakInsight(teamId, resolvedName, pattern);
+    }
+
+    /**
+     * Compute Over 1.5 goals streak profile for a team across entire history.
+     * If both teamId and teamName provided, teamId takes precedence. teamName is used for name-based lookup or label.
+     */
+    public com.chambua.vismart.dto.Over15StreakProfile buildOver15StreakProfile(Long teamId, String teamName) {
+        String resolvedName = teamName;
+        try {
+            if ((resolvedName == null || resolvedName.isBlank()) && teamId != null && teamRepository != null) {
+                com.chambua.vismart.model.Team t = teamRepository.findById(teamId).orElse(null);
+                if (t != null && t.getName() != null) resolvedName = t.getName();
+            }
+        } catch (Exception ignored) {}
+
+        java.util.List<com.chambua.vismart.model.Match> recent;
+        try {
+            String qName = (resolvedName != null && !resolvedName.isBlank()) ? resolvedName.trim() : null;
+            if (qName == null && teamId != null) {
+                try {
+                    com.chambua.vismart.model.Team t = teamRepository.findById(teamId).orElse(null);
+                    if (t != null && t.getName() != null) qName = t.getName().trim();
+                } catch (Exception ignored2) {}
+            }
+            if (qName != null) {
+                // Use team-name based retrieval to aggregate across all leagues/seasons (aligns with Fixtures Analysis)
+                recent = matchRepository.findRecentPlayedByTeamName(qName);
+            } else if (teamId != null) {
+                // Fallback to ID if name unavailable
+                recent = matchRepository.findRecentPlayedByTeamId(teamId);
+            } else {
+                recent = java.util.Collections.emptyList();
+            }
+        } catch (Exception ex) {
+            recent = java.util.Collections.emptyList();
+        }
+        com.chambua.vismart.dto.Over15StreakProfile out = new com.chambua.vismart.dto.Over15StreakProfile();
+        out.setTeamId(teamId);
+        out.setTeamName(resolvedName);
+        if (recent == null || recent.isEmpty()) return out;
+
+        // Chronological (oldest -> newest)
+        java.util.List<com.chambua.vismart.model.Match> chron = new java.util.ArrayList<>(recent);
+        java.util.Collections.reverse(chron);
+        out.setTotalMatchesConsidered(chron.size());
+
+        int currLen = 0;
+        java.time.LocalDate currStart = null;
+        java.time.LocalDate currEnd = null;
+
+        int bestLen = 0;
+        java.time.LocalDate bestStart = null;
+        java.time.LocalDate bestEnd = null;
+
+        java.time.LocalDate mostRecentBestStart = null;
+        java.time.LocalDate mostRecentBestEnd = null;
+
+        int runLen = 0;
+        java.time.LocalDate runStart = null;
+        for (int i = 0; i < chron.size(); i++) {
+            com.chambua.vismart.model.Match m = chron.get(i);
+            Integer hg = m.getHomeGoals();
+            Integer ag = m.getAwayGoals();
+            if (hg == null || ag == null) continue;
+            int total = hg + ag;
+            boolean ok = total >= 2;
+            java.time.LocalDate d = m.getDate();
+            if (ok) {
+                if (runLen == 0) runStart = d;
+                runLen++;
+            } else {
+                if (runLen > 0) {
+                    // finalize previous run ending at previous match date
+                    java.time.LocalDate runEnd = chron.get(i - 1).getDate();
+                    if (runLen > bestLen) {
+                        bestLen = runLen; bestStart = runStart; bestEnd = runEnd; mostRecentBestStart = runStart; mostRecentBestEnd = runEnd;
+                    } else if (runLen == bestLen && runLen > 0) {
+                        // equal best -> prefer the most recent occurrence; since we loop oldest->newest, just overwrite
+                        mostRecentBestStart = runStart; mostRecentBestEnd = runEnd;
+                    }
+                    runLen = 0; runStart = null;
+                }
+            }
+        }
+        // tail run at end of chron
+        if (runLen > 0) {
+            java.time.LocalDate runEnd = chron.get(chron.size() - 1).getDate();
+            if (runLen > bestLen) {
+                bestLen = runLen; bestStart = runStart; bestEnd = runEnd; mostRecentBestStart = runStart; mostRecentBestEnd = runEnd;
+            } else if (runLen == bestLen) {
+                mostRecentBestStart = runStart; mostRecentBestEnd = runEnd;
+            }
+        }
+
+        // Compute current streak from most recent backwards
+        for (int i = recent.size() - 1; i >= 0; i--) {
+            com.chambua.vismart.model.Match m = recent.get(recent.size() - 1 - (recent.size() - 1 - i)); // identity; keep variable names similar
+            m = recent.get(recent.size() - 1 - (recent.size() - 1 - i));
+        }
+        // Simpler: iterate from most recent to older until break
+        currLen = 0; currStart = null; currEnd = null;
+        for (int i = 0; i < recent.size(); i++) {
+            com.chambua.vismart.model.Match m = recent.get(i); // recent is newest first
+            Integer hg = m.getHomeGoals(); Integer ag = m.getAwayGoals(); if (hg == null || ag == null) break;
+            int total = hg + ag; if (total >= 2) {
+                currLen++;
+                if (currEnd == null) currEnd = m.getDate();
+                currStart = m.getDate();
+            } else {
+                break;
+            }
+        }
+
+        out.setCurrentStreakLength(currLen);
+        out.setCurrentStreakStartDate(currStart);
+        out.setCurrentStreakEndDate(currEnd);
+        out.setLongestStreakLength(bestLen);
+        out.setLongestStreakStartDate(bestStart);
+        out.setLongestStreakEndDate(bestEnd);
+        out.setMostRecentLongestStartDate(mostRecentBestStart);
+        out.setMostRecentLongestEndDate(mostRecentBestEnd);
+
+        // Compute last-20 Over 1.5 stats (most recent by date)
+        int window = Math.min(20, recent.size());
+        int considered = 0;
+        int over15 = 0;
+        for (int i = 0; i < window; i++) {
+            com.chambua.vismart.model.Match m = recent.get(i);
+            Integer hg = m.getHomeGoals();
+            Integer ag = m.getAwayGoals();
+            if (hg == null || ag == null) continue;
+            considered++;
+            if ((hg + ag) >= 2) over15++;
+        }
+        int pct = (considered > 0) ? (int) Math.round(over15 * 100.0 / considered) : 0;
+        try { // safe setters if DTO has these fields
+            out.getClass().getMethod("setLast20Over15Count", int.class).invoke(out, over15);
+            out.getClass().getMethod("setLast20Over15Pct", int.class).invoke(out, pct);
+            out.getClass().getMethod("setLast20Considered", int.class).invoke(out, considered);
+        } catch (Exception ignored) {}
+
+        return out;
     }
 }

@@ -482,6 +482,8 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.yesterdayCollapsed = !this.yesterdayCollapsed;
     if (!this.yesterdayCollapsed) {
       this.todayClosed = true;
+      // When opening yesterday section, consider yesterday as the selected date for printing
+      this.selectedDate = this.yesterdayIso;
     }
   }
 
@@ -490,6 +492,8 @@ export class HomeComponent implements OnInit, OnDestroy {
     section.collapsed = !section.collapsed;
     if (!section.collapsed) {
       this.todayClosed = true;
+      // When opening a past section, use its date for printing
+      this.selectedDate = section.iso;
     }
   }
 
@@ -502,6 +506,8 @@ export class HomeComponent implements OnInit, OnDestroy {
         sec.collapsed = true;
       }
     }
+    // Reset selection so Print uses today's date by default
+    this.selectedDate = null;
   }
 
   private msUntilNextAnchorMinute(anchorMinute: number): number {

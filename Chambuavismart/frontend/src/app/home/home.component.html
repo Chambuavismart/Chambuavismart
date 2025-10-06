@@ -19,6 +19,7 @@
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Fixtures Analysis'" routerLink="/fixtures-analysis" (click)="setActive('Fixtures Analysis')" title="Fixtures Analysis"><i class="fa fa-chart-bar"></i> Fixtures Analysis</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Fixture Analysis History'" routerLink="/fixture-analysis-history" (click)="setActive('Fixture Analysis History')" title="Fixture Analysis History"><i class="fa fa-history"></i> Fixture Analysis History</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Today Colors Report'" routerLink="/today-color-report" (click)="setActive('Today Colors Report')" title="Today's fixture analysis colours report"><i class="fa fa-palette"></i> Today's fixture analysis colours report</li>
+      <li class="nav-item" role="menuitem" [class.active]="activeNav==='Print Today'" [routerLink]="['/print-today']" [queryParams]="{ date: (selectedDate || todayIso) }" (click)="setActive('Print Today')" title="Print Today"><i class="fa fa-print"></i> Print Today</li>
       <li class="nav-item" role="menuitem" [class.active]="activeNav==='Admin'" routerLink="/admin" (click)="setActive('Admin')" title="Admin"><i class="fa fa-user-shield"></i> Admin</li>
     </ul>
   </aside>
