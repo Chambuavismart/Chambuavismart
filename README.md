@@ -34,6 +34,18 @@ Local development (without Docker)
    - npm start (http://localhost:4200)
    - Dev proxy: /api -> http://localhost:8082 (see frontend/proxy.conf.json)
 
+Deployment (GitHub Pages)
+- This repository includes a GitHub Actions workflow that builds the Angular frontend and deploys it to GitHub Pages.
+- On every push to the main branch, the site is built from Chambuavismart/Chambuavismart/frontend and published automatically.
+- First-time setup (one-time in GitHub UI):
+  1) Settings → Pages → Build and deployment → Source: GitHub Actions.
+  2) Optional: Set a custom domain and add a CNAME if you have one.
+- URL:
+  - Project pages: https://<your-username>.github.io/<repo-name>/
+  - User/Org pages (repo named <your-username>.github.io): https://<your-username>.github.io/
+- Base href: The workflow auto-sets base-href to "/<repo-name>/" for project pages and "/" for user/org pages.
+- SPA routing: The workflow copies index.html to 404.html and adds .nojekyll so deep links work on Pages.
+
 Verification checklist
 - Backend builds: mvn -f backend/pom.xml clean package
 - Backend starts on :8082 with profile=dev and connects to MySQL
